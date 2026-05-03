@@ -1,0 +1,86 @@
+{
+  "template_name": "General Document Extraction Template",
+  "template_version": "1.0.0",
+  "document_type": "General Document",
+  "description": "Reusable starter template for legal, medical, accounting, finance, HR, and operations document extraction workflows.",
+  "llm_provider_settings": {
+    "mode": "local",
+    "provider_type": "mock",
+    "model": "mock-extractor",
+    "temperature": 0.1,
+    "supports_json_mode": true,
+    "allow_external_processing": false
+  },
+  "extracted_fields": [
+    {
+      "name": "primary_subject",
+      "label": "Primary Subject",
+      "description": "The main subject, entity, patient, client, account, contract, or matter described by the document.",
+      "type": "text",
+      "required": true,
+      "instructions": "Extract the primary named subject exactly as stated in the document.",
+      "citation_required": true,
+      "usable_in_formulas": true,
+      "validation": {
+        "allow_null": false,
+        "max_length": 250
+      }
+    },
+    {
+      "name": "effective_date",
+      "label": "Effective Date",
+      "description": "The date the document, service, agreement, or record takes effect.",
+      "type": "date",
+      "required": false,
+      "instructions": "Extract the most relevant effective, service, filing, or issue date and normalize it when possible.",
+      "citation_required": true,
+      "usable_in_formulas": true,
+      "validation": {
+        "allow_null": true,
+        "format": "YYYY-MM-DD"
+      }
+    },
+    {
+      "name": "total_amount",
+      "label": "Total Amount",
+      "description": "The primary total monetary amount stated in the document, if applicable.",
+      "type": "currency",
+      "required": false,
+      "instructions": "Extract the main total amount only when the document clearly states one.",
+      "citation_required": true,
+      "usable_in_formulas": true,
+      "validation": {
+        "allow_null": true,
+        "min": 0,
+        "currency": "USD"
+      }
+    }
+  ],
+  "calculated_fields": [
+    {
+      "name": "amount_with_buffer",
+      "label": "Amount With Buffer",
+      "description": "Example calculated field that applies a 10 percent buffer to the extracted total amount.",
+      "type": "calculated",
+      "output_type": "currency",
+      "formula": "coalesce(total_amount.amount, 0) * 1.10",
+      "depends_on": ["total_amount"],
+      "format": {
+        "currency": "USD",
+        "decimal_places": 2
+      },
+      "validation": {
+        "allow_null": false,
+        "min": 0
+      }
+    }
+  ],
+  "output_settings": {
+    "include_source_citations": true,
+    "include_confidence_scores": true,
+    "include_calculated_fields": true,
+    "include_formula_definitions": true,
+    "export_formats": ["json", "csv", "excel"]
+  }
+}
+

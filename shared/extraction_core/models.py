@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class DataType(str, Enum):
+    TEXT = "text"
+    PARAGRAPH = "paragraph"
+    NUMBER = "number"
+    CURRENCY = "currency"
+    PERCENTAGE = "percentage"
+    DATE = "date"
+    BOOLEAN = "boolean"
+    CATEGORY = "category"
+    MULTI_SELECT = "multi_select"
+    UNIT_VALUE = "unit_value"
+    STRUCTURED_OBJECT = "structured_object"
+    TABLE = "table"
+    LIST = "list"
+    JSON_OBJECT = "json_object"
+    CITATION_BACKED = "citation_backed_answer"
+    CALCULATED = "calculated"
+
+
+class ValidationRule(BaseModel):
+    allow_null: bool = True
+    min: float | None = None
+    max: float | None = None
+    regex: str | None = None
+    currency: str | None = None
+    format: str | None = None
+    max_length: int | None = None
+    allowed_values: list[str] = Field(default_factory=list)
+
+
+class FormatRule(BaseModel):
+    currency: str | None = None
+    decimal_places: int | None = None
+    date_format: str | None = None
+    unit: str | None = None
+
+
+class ErrorHandlingRule(BaseModel):
+    on_divide_by_zero: str = "return_null_and_flag_review"
+    on_missing_input: str = "return_null_and_flag_review"
+
+
+class ExtractionFieldDefinition(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    label: str
+    description: str
+    type: DataType
+    required: bool = False
+    instructions: str = ""
+    citation_required: bool = True
+    usable_in_formulas: bool = True
+    extract_mode: Literal["exact", "summary"] = "exact"
+    allow_null: bool = True
+    example_values: list[str] = Field(default_factory=list)
+    allowed_values: list[str] = Field(default_factory=list)
+    output_format: FormatRule | None = None
+    validation: ValidationRule = Field(default_factory=ValidationRule)
+    field_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
+
+
+class CalculatedFieldDefinition(BaseModel):
+    name: str
+    label: str
+    description: str
+    type: Literal["calculated"] = "calculated"
+    output_type: DataType
+    formula: str
+    depends_on: list[str] = Field(default_factory=list)
+    format: FormatRule | None = None
+    validation: ValidationRule = Field(default_factory=ValidationRule)
+    error_handling: ErrorHandlingRule = Field(default_factory=ErrorHandlingRule)
+    requires_review: bool = False
+
+
+class OutputSettings(BaseModel):
+    include_source_citations: bool = True
+    include_confidence_scores: bool = True
+    include_calculated_fields: bool = True
+    include_formula_definitions: bool = True
+    export_formats: list[str] = Field(default_factory=lambda: ["json", "csv", "excel"])
+
+
+class LLMProviderSettings(BaseModel):
+    mode: Literal["local", "cloud"] = "local"
+    provider_type: str = "mock"
+    provider_label: str | None = None
+    api_style: Literal["mock", "openai_compatible", "azure_openai"] = "mock"
+    base_url: str | None = None
+    api_key_env_var: str | None = None
+    api_key_required: bool = False
+    deployment: str | None = None
+    api_version: str | None = None
+    model: str = "mock-extractor"
+    temperature: float = 0.1
+    max_tokens: int = 4000
+    supports_json_mode: bool = True
+    allow_external_processing: bool = False
+    timeout_seconds: int = 120
+    retry_count: int = 2
+    chunk_size: int = 16000
+
+
+class LLMProviderCapabilities(BaseModel):
+    supports_chat_completions: bool = True
+    supports_json_mode: bool = True
+    supports_streaming: bool = False
+    supports_remote_processing: bool = False
+    requires_api_key: bool = False
+    supports_local_runtime: bool = False
+
+
+class LLMProviderCatalogEntry(BaseModel):
+    key: str
+    label: str
+    description: str
+    mode: Literal["local", "cloud"]
+    provider_type: str
+    api_style: Literal["mock", "openai_compatible", "azure_openai"] = "openai_compatible"
+    base_url: str | None = None
+    model: str
+    enabled: bool = True
+    recommended: bool = False
+    api_key_env_var: str | None = None
+    deployment: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    capabilities: LLMProviderCapabilities = Field(default_factory=LLMProviderCapabilities)
+    settings: LLMProviderSettings
+
+
+class ExtractionTemplate(BaseModel):
+    template_name: str
+    template_version: str = "1.0.0"
+    document_type: str
+    description: str = ""
+    llm_provider_settings: LLMProviderSettings = Field(default_factory=LLMProviderSettings)
+    extracted_fields: list[ExtractionFieldDefinition] = Field(default_factory=list)
+    calculated_fields: list[CalculatedFieldDefinition] = Field(default_factory=list)
+    output_settings: OutputSettings = Field(default_factory=OutputSettings)
+    review_required_on_low_confidence: bool = True
+    minimum_confidence_threshold: float = 0.75
+    local_only_mode: bool = True
+
+    @model_validator(mode="after")
+    def validate_unique_names(self) -> "ExtractionTemplate":
+        names = [field.name for field in self.extracted_fields] + [
+            field.name for field in self.calculated_fields
+        ]
+        if len(names) != len(set(names)):
+            raise ValueError("Field names must be unique across extracted and calculated fields.")
+        return self
+
+
+class ExtractionFieldResult(BaseModel):
+    field_name: str
+    label: str
+    field_kind: Literal["extracted"] = "extracted"
+    data_type: DataType
+    extracted_value: Any = None
+    normalized_value: Any = None
+    confidence_score: float = 0.0
+    source_text: str = ""
+    page_number: int | None = None
+    location_reference: str = ""
+    validation_status: str = "pending"
+    validation_errors: list[str] = Field(default_factory=list)
+    extraction_notes: str = ""
+    requires_review: bool = False
+
+
+class CalculatedFieldResult(BaseModel):
+    field_name: str
+    label: str
+    field_kind: Literal["calculated"] = "calculated"
+    output_type: DataType
+    formula: str
+    depends_on: list[str]
+    calculated_value: Any = None
+    display_value: str = ""
+    validation_status: str = "pending"
+    validation_errors: list[str] = Field(default_factory=list)
+    calculation_notes: str = ""
+    requires_review: bool = False
+
+
+class ExtractionValidationSummary(BaseModel):
+    document_id: str
+    document_type: str
+    template_name: str
+    template_version: str
+    llm_provider: dict[str, Any]
+    extraction_status: str
+    extracted_fields: list[ExtractionFieldResult]
+    calculated_fields: list[CalculatedFieldResult] = Field(default_factory=list)
+    document_level_notes: list[str] = Field(default_factory=list)
+    fields_requiring_review: list[str] = Field(default_factory=list)
+    reviewed_at: datetime | None = None
+
+
+class JobRequest(BaseModel):
+    document_id: int
+    template_version_id: int
+    provider_override: LLMProviderSettings | None = None
+
+
+class ReviewFieldEdit(BaseModel):
+    field_name: str
+    normalized_value: Any
+    extracted_value: Any = None
+    reason: str = ""
+
+
+class ReviewEditPayload(BaseModel):
+    reviewer: str = "local-user"
+    edits: list[ReviewFieldEdit] = Field(default_factory=list)
+    recalculate: bool = True
+
+    @field_validator("edits")
+    @classmethod
+    def require_edits(cls, value: list[ReviewFieldEdit]) -> list[ReviewFieldEdit]:
+        if not value:
+            raise ValueError("At least one field edit is required.")
+        return value

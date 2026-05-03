@@ -1,0 +1,72 @@
+{
+  "template_name": "Lease Extraction and Calculation Template",
+  "template_version": "1.0.0",
+  "document_type": "Residential Lease",
+  "description": "Extracts key lease terms and calculates useful lease-related values.",
+  "llm_provider_settings": {
+    "mode": "local",
+    "provider_type": "mock",
+    "model": "mock-extractor",
+    "temperature": 0.1,
+    "supports_json_mode": true,
+    "allow_external_processing": false
+  },
+  "extracted_fields": [
+    {
+      "name": "rent_amount",
+      "label": "Rent Amount",
+      "description": "The recurring base rent amount due under the lease.",
+      "type": "currency",
+      "required": true,
+      "instructions": "Extract the base rent amount only.",
+      "citation_required": true,
+      "usable_in_formulas": true,
+      "validation": {
+        "allow_null": false,
+        "min": 0,
+        "currency": "USD"
+      }
+    },
+    {
+      "name": "lease_start_date",
+      "label": "Lease Start Date",
+      "description": "The date the lease term begins.",
+      "type": "date",
+      "required": false,
+      "instructions": "Extract the lease start date.",
+      "citation_required": true,
+      "usable_in_formulas": true,
+      "validation": {
+        "allow_null": true,
+        "format": "YYYY-MM-DD"
+      }
+    }
+  ],
+  "calculated_fields": [
+    {
+      "name": "annual_rent",
+      "label": "Annual Rent",
+      "description": "Annualized rent based on monthly base rent.",
+      "type": "calculated",
+      "output_type": "currency",
+      "formula": "rent_amount.amount * 12",
+      "depends_on": ["rent_amount"],
+      "format": {
+        "currency": "USD",
+        "decimal_places": 2
+      },
+      "validation": {
+        "allow_null": false,
+        "min": 0
+      }
+    }
+  ],
+  "output_settings": {
+    "include_source_citations": true,
+    "include_confidence_scores": true,
+    "include_calculated_fields": true,
+    "include_formula_definitions": true,
+    "export_formats": ["json", "csv", "excel"]
+  }
+}
+

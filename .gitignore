@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+data/
+.extractflow-desktop-data/
+*.pyc
+*.pyo
+*.DS_Store
+.env
+src-tauri/resources/desktop-runtime/*
+!src-tauri/resources/desktop-runtime/.gitkeep

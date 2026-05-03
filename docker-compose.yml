@@ -1,0 +1,61 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    env_file:
+      - frontend/.env.example
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:${API_PORT:-8000}/api}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      DATA_DIR: /data
+      UPLOADS_DIR: /data/uploads
+      EXPORTS_DIR: /data/exports
+      PARSED_DIR: /data/parsed
+      SEED_SAMPLES_ON_STARTUP: ${SEED_SAMPLES_ON_STARTUP:-true}
+      CORS_ORIGINS: '["http://localhost:${WEB_PORT:-3000}","http://frontend:3000"]'
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - app_data:/data
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      PARSED_DIR: /data/parsed
+      WORKER_POLL_SECONDS: 5
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - app_data:/data
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  app_data:
+  ollama_data:

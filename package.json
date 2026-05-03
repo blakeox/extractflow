@@ -1,0 +1,23 @@
+{
+  "name": "extractflow",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "./scripts/dev-up.sh",
+    "doctor": "./scripts/dev-doctor.sh",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f --tail=150",
+    "build:ui": "npm --prefix frontend run build",
+    "dev:ui": "npm --prefix frontend run dev",
+    "test": "make test",
+    "test:python": "make test-python",
+    "test:ui": "make test-ui",
+    "test:e2e": "make test-e2e",
+    "tauri:dev": "./scripts/tauri-dev.sh",
+    "tauri:build": "./scripts/tauri-build.sh",
+    "tauri:check-dist": "./scripts/macos-distribution-check.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}
