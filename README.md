@@ -113,7 +113,7 @@ npm run verify:pre-push
 ```
 
 - `npm install` at the repo root installs Lefthook and activates the repository's `pre-commit` and `pre-push` hooks.
-- `./scripts/resolve-python.sh` prefers Python 3.13, 3.12, then 3.11 so local verification does not accidentally bind itself to an unsupported 3.14 interpreter.
+- `./scripts/resolve-python.sh` prefers the repo's `.venv/bin/python` when available, then falls back to Python 3.13, 3.12, and 3.11 so local verification does not accidentally bind itself to an unsupported or unprepared interpreter.
 - `pre-commit` runs a staged secret scan, Prettier check, a Python syntax smoke check, plus frontend lint/tests/build.
 - `pre-push` runs a full tracked-file secret scan plus Ruff, Prettier, frontend lint, Python tests, and frontend tests/build before the push leaves your machine.
 
