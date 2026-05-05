@@ -1,0 +1,13 @@
+* @blakeox
+
+/.github/ @blakeox
+/backend/ @blakeox
+/worker/ @blakeox
+/shared/ @blakeox
+/frontend/ @blakeox
+/src-tauri/ @blakeox
+/scripts/ @blakeox
+/*.yml @blakeox
+/*.yaml @blakeox
+/*.json @blakeox
+/*.md @blakeox

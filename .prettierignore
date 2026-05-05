@@ -1,0 +1,14 @@
+.git
+.ruff_cache
+.venv
+node_modules
+dist
+build
+target
+frontend/dist
+frontend/test-results
+src-tauri/gen
+src-tauri/target
+package-lock.json
+frontend/package-lock.json
+src-tauri/Cargo.lock

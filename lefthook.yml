@@ -1,0 +1,9 @@
+pre-commit:
+  commands:
+    verify-pre-commit:
+      run: npm run verify:pre-commit
+
+pre-push:
+  commands:
+    verify-pre-push:
+      run: npm run verify:pre-push

@@ -93,7 +93,9 @@ The test framework is intentionally split by runtime boundary so failures stay a
 Install test dependencies:
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+"$PYTHON_BIN" -m pip install -r requirements-dev.txt
+npm install
 npm --prefix frontend install
 ```
 
@@ -103,21 +105,69 @@ Run everything:
 make test
 ```
 
+Local guardrails:
+
+```bash
+npm run verify:pre-commit
+npm run verify:pre-push
+```
+
+- `npm install` at the repo root installs Lefthook and activates the repository's `pre-commit` and `pre-push` hooks.
+- `./scripts/resolve-python.sh` prefers Python 3.13, 3.12, then 3.11 so local verification does not accidentally bind itself to an unsupported 3.14 interpreter.
+- `pre-commit` runs a staged secret scan, Prettier check, a Python syntax smoke check, plus frontend lint/tests/build.
+- `pre-push` runs a full tracked-file secret scan plus Ruff, Prettier, frontend lint, Python tests, and frontend tests/build before the push leaves your machine.
+
 Run individual slices:
 
 ```bash
 make test-python
 make test-ui
 make test-e2e
+PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m ruff check backend worker shared tests
+npm --prefix frontend run lint
+npm run format:check
 PYTHONPATH=backend:shared python3 -m pytest tests/backend -k templates
 ```
 
 Continuous enforcement:
 
-- GitHub Actions runs Python tests on every push and pull request
-- Frontend CI installs dependencies, runs Vitest, and validates the production build
+- GitHub Actions runs Python tests and frontend verification on every push, pull request, and manual dispatch
+- Local Lefthook hooks run the same verification scripts used by CI so contributor machines and GitHub Actions enforce the same contract
 - A separate browser E2E job runs Playwright against the Vite app and covers upload -> run -> review with mocked API traffic
+- Secret scanning also runs in-repo through `scripts/scan-secrets.py` locally and in `.github/workflows/secret-scan.yml`, which is the fallback because GitHub native secret scanning is unavailable on this private repository
+- Ruff now standardizes the Python surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
 - Frontend CI uses `npm ci` against the checked-in lockfile for deterministic installs
+- PRs also run dependency review, CodeQL scans the Python and TypeScript surfaces, and Dependabot tracks npm, pip, cargo, and GitHub Actions updates
+- Workflow actions are pinned to exact commit SHAs, and `.github/CODEOWNERS` plus PR/issue templates keep review and change hygiene explicit
+- Vulnerability reports should go through GitHub Security Advisories as documented in [`SECURITY.md`](SECURITY.md)
+
+## Runtime Environment Contract
+
+The Python services now fail fast on invalid configuration instead of starting with ambiguous runtime state.
+
+- `DATABASE_URL` must use `sqlite:///...` because the current runtime and SQLAlchemy setup are SQLite-only
+- `UPLOADS_DIR`, `EXPORTS_DIR`, and `PARSED_DIR` must remain under `DATA_DIR`
+- `WORKER_STATUS_PATH` must remain under `DATA_DIR` so the worker health signal stays inside the shared app data volume
+- `PROVIDER_CATALOG_JSON`, when set, must be a JSON array
+- Provider base URLs must be explicit `http://` or `https://` URLs
+
+Backend readiness surfaces:
+
+- `/healthz`: liveness for the backend process
+- `/readyz`: backend readiness with explicit database and storage checks, used by container healthchecks
+- `/api/health`: API liveness used by the frontend bootstrap flow
+
+Observability surfaces:
+
+- backend responses include `X-Request-ID`; inbound request IDs are propagated when present, otherwise the API generates one
+- backend logs emit structured request events with method, path, status, duration, and request ID
+- worker logs emit structured lifecycle events for startup and non-idle job status transitions with job identifiers when available
+
+Failure-path expectations:
+
+- provider probes surface transport failures as `status: error` with the timeout or connection detail preserved
+- worker provider adapters retry up to `retry_count + 1` total attempts before failing the extraction
+- worker jobs move to `failed` with `error_message` populated when the document/template is missing or extraction raises at runtime
 
 ## Provider Configuration
 
@@ -233,6 +283,23 @@ Current desktop model:
 - packaged desktop builds now bundle a desktop runtime payload under Tauri resources
 - the desktop shell manages backend and worker services through Docker Compose using an app-local data directory
 - notarization and trusted macOS distribution still require a real Developer ID signing identity and notary credentials
+
+## Release and Rollback
+
+Release gate:
+
+- `.github/workflows/release.yml` runs on manual dispatch and `v*` tags
+- the workflow runs the full `verify:pre-push` contract before packaging anything
+- release artifacts currently include a source tarball, a desktop runtime bundle, and a `SHA256SUMS` manifest
+- you can build the same artifacts locally with `npm run release:package -- <version>` or `make release-package`
+
+Rollback checklist:
+
+1. Stop the running stack or desktop-managed containers.
+2. Revert to the last known-good tag or commit before redeploying artifacts.
+3. Restore the `/data` volume or app-local data snapshot if the failed release mutated runtime state.
+4. Restart services and verify `/healthz`, `/readyz`, and the worker status file under `/data/worker-status.json`.
+5. Confirm a known document can still complete upload -> extraction -> review -> export before resuming normal use.
 
 ## Workflow
 

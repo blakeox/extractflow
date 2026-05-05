@@ -13,11 +13,25 @@
     "test:python": "make test-python",
     "test:ui": "make test-ui",
     "test:e2e": "make test-e2e",
+    "format:check": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint:frontend": "npm --prefix frontend run lint",
+    "verify:secrets": "./scripts/scan-secrets.py",
+    "verify:secrets-staged": "./scripts/scan-secrets.py --staged",
+    "verify:frontend": "./scripts/verify-frontend.sh",
+    "verify:python": "./scripts/verify-python.sh",
+    "verify:pre-commit": "./scripts/verify-pre-commit.sh",
+    "verify:pre-push": "./scripts/verify-pre-push.sh",
+    "release:package": "./scripts/package-release-artifacts.sh",
     "tauri:dev": "./scripts/tauri-dev.sh",
     "tauri:build": "./scripts/tauri-build.sh",
-    "tauri:check-dist": "./scripts/macos-distribution-check.sh"
+    "tauri:check-dist": "./scripts/macos-distribution-check.sh",
+    "prepare": "lefthook install --reset-hooks-path"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1"
+    "@tauri-apps/cli": "^2.10.1",
+    "eslint-config-prettier": "^10.1.8",
+    "lefthook": "^2.1.6",
+    "prettier": "^3.8.3"
   }
 }
