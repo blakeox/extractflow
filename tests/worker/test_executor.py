@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import Mock
 
 import httpx
 import pandas as pd
 import pytest
-
 from app.services.executor import execute_extraction
 from app.services.parser import parse_document
 from app.services.provider import AzureOpenAIAdapter, ExtractionProvider, OpenAICompatibleAdapter
 from app.services.validator import validate_extracted_field
-from extraction_core.models import ExtractionFieldDefinition, ExtractionFieldResult, ExtractionTemplate, LLMProviderSettings
+from extraction_core.models import (
+    ExtractionFieldDefinition,
+    ExtractionFieldResult,
+    ExtractionTemplate,
+    LLMProviderSettings,
+)
 
 from tests.support.sample_data import build_template_definition
 
@@ -155,6 +158,62 @@ def test_llm_provider_extract_propagates_invalid_json(monkeypatch) -> None:
         provider.extract("Vendor Name: Acme Corp", template, settings)
 
 
+def test_llm_provider_extract_retries_until_timeout_exhausted(monkeypatch) -> None:
+    provider = ExtractionProvider()
+    template = ExtractionTemplate.model_validate(build_template_definition())
+    settings = LLMProviderSettings(
+        provider_type="openai",
+        base_url="http://llm.local/v1",
+        model="test-model",
+        api_style="openai_compatible",
+        retry_count=2,
+    )
+
+    attempts = {"count": 0}
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url: str, json: dict, headers: dict):
+            attempts["count"] += 1
+            raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    with pytest.raises(RuntimeError, match="Provider call failed for openai"):
+        provider.extract("Vendor Name: Acme Corp", template, settings)
+
+    assert attempts["count"] == 3
+
+
+def test_openai_compatible_adapter_requires_api_key_when_configured(monkeypatch) -> None:
+    template = ExtractionTemplate.model_validate(build_template_definition())
+    settings = LLMProviderSettings(
+        mode="cloud",
+        provider_type="openai",
+        provider_label="OpenAI",
+        api_style="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        api_key_env_var="OPENAI_API_KEY",
+        api_key_required=True,
+        model="gpt-4.1",
+    )
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    adapter = OpenAICompatibleAdapter()
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        adapter.extract("Vendor Name: Acme Corp", template, settings)
+
+
 def test_openai_compatible_adapter_reads_api_key_from_environment(monkeypatch) -> None:
     template = ExtractionTemplate.model_validate(build_template_definition())
     settings = LLMProviderSettings(
@@ -258,5 +317,71 @@ def test_azure_openai_adapter_builds_deployment_scoped_request(monkeypatch) -> N
     result = adapter.extract("Vendor Name: Acme Corp", template, settings)
 
     assert result[0].field_name == "vendor_name"
-    assert captured["url"] == "https://example.openai.azure.com/openai/deployments/doc-extract-prod/chat/completions?api-version=2024-10-21"
+    assert (
+        captured["url"]
+        == "https://example.openai.azure.com/openai/deployments/doc-extract-prod/chat/completions?api-version=2024-10-21"
+    )
     assert captured["headers"] == {"Content-Type": "application/json", "api-key": "azure-token"}
+
+
+def test_process_once_marks_job_failed_when_document_or_template_missing() -> None:
+    from app.core.database import SessionLocal
+    from app.main import process_once
+    from app.models import ExtractionJob
+
+    with SessionLocal() as db:
+        job = ExtractionJob(document_id=999, template_version_id=999, status="queued")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    process_once()
+
+    with SessionLocal() as db:
+        refreshed = db.get(ExtractionJob, job_id)
+        assert refreshed is not None
+        assert refreshed.status == "failed"
+        assert refreshed.error_message == "Document or template version missing."
+
+
+def test_process_once_marks_job_and_document_failed_when_extraction_raises(tmp_path, monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.main import process_once
+    from app.models import Document, ExtractionJob, TemplateVersion
+
+    document_path = tmp_path / "invoice.txt"
+    document_path.write_text("Vendor Name: Acme Corp", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(document_path),
+            status="uploaded",
+        )
+        db.add(document)
+        db.flush()
+        version = TemplateVersion(template_id=1, version="1.0.0", definition=build_template_definition())
+        db.add(version)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="queued")
+        db.add(job)
+        db.commit()
+        document_id = document.id
+        job_id = job.id
+
+    def fail_execute_extraction(**kwargs):
+        raise RuntimeError("provider timeout")
+
+    monkeypatch.setattr("app.main.execute_extraction", fail_execute_extraction)
+
+    process_once()
+
+    with SessionLocal() as db:
+        refreshed_job = db.get(ExtractionJob, job_id)
+        refreshed_document = db.get(Document, document_id)
+        assert refreshed_job is not None
+        assert refreshed_document is not None
+        assert refreshed_job.status == "failed"
+        assert refreshed_job.error_message == "provider timeout"
+        assert refreshed_document.status == "failed"

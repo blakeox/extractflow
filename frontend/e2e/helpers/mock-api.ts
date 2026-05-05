@@ -1,6 +1,5 @@
 import { Page, Route } from "@playwright/test";
 
-
 type ProviderSettings = {
   mode: "local" | "cloud";
   provider_type: string;
@@ -61,6 +60,14 @@ type ProviderProbe = {
   detail: string;
   endpoint?: string | null;
   status_code?: number | null;
+};
+
+type CustomProviderProfile = {
+  id: string;
+  name: string;
+  settings: ProviderSettings;
+  created_at: string;
+  updated_at: string;
 };
 
 type TemplateSummary = {
@@ -131,6 +138,7 @@ type State = {
   provider: ProviderSettings;
   providerCatalog: ProviderCatalogEntry[];
   providerHealth: ProviderHealth[];
+  customProfiles: CustomProviderProfile[];
   templates: TemplateSummary[];
   templateVersions: TemplateVersionRecord[];
   documents: DocumentRecord[];
@@ -150,7 +158,6 @@ type MockOverrides = {
   apiAvailable?: boolean;
 };
 
-
 function json(route: Route, status: number, body: unknown) {
   return route.fulfill({
     status,
@@ -159,7 +166,10 @@ function json(route: Route, status: number, body: unknown) {
   });
 }
 
-function buildReviewResult(jobId: number, provider: ProviderSettings): ResultEnvelope {
+function buildReviewResult(
+  jobId: number,
+  provider: ProviderSettings,
+): ResultEnvelope {
   return {
     result_id: 500 + jobId,
     job_id: jobId,
@@ -193,7 +203,11 @@ function buildReviewResult(jobId: number, provider: ProviderSettings): ResultEnv
           field_kind: "extracted",
           data_type: "currency",
           extracted_value: "$1,200.00",
-          normalized_value: { amount: 1200, currency: "USD", display_value: "$1,200.00" },
+          normalized_value: {
+            amount: 1200,
+            currency: "USD",
+            display_value: "$1,200.00",
+          },
           confidence_score: 0.91,
           source_text: "$1,200.00",
           page_number: 1,
@@ -211,7 +225,6 @@ function buildReviewResult(jobId: number, provider: ProviderSettings): ResultEnv
     },
   };
 }
-
 
 function buildInitialState(): State {
   const now = "2026-05-02T12:00:00.000Z";
@@ -268,7 +281,8 @@ function buildInitialState(): State {
       {
         key: "mock",
         label: "Mock Extractor",
-        description: "Bootstrap provider for local workflow validation without a live model runtime.",
+        description:
+          "Bootstrap provider for local workflow validation without a live model runtime.",
         mode: "local",
         provider_type: "mock",
         api_style: "mock",
@@ -297,6 +311,7 @@ function buildInitialState(): State {
         checks: ["Bootstrap provider only"],
       },
     ],
+    customProfiles: [],
     templates: [
       {
         id: 1,
@@ -325,11 +340,14 @@ function buildInitialState(): State {
   };
 }
 
-
 export async function mockExtractionApiWithState(
   page: Page,
   state: State,
-  options?: { jobScenarios?: JobScenario[]; exportScenarios?: ExportScenario[]; apiAvailable?: boolean },
+  options?: {
+    jobScenarios?: JobScenario[];
+    exportScenarios?: ExportScenario[];
+    apiAvailable?: boolean;
+  },
 ) {
   const jobScenarios = [...(options?.jobScenarios ?? ["review"])];
   const exportScenarios = [...(options?.exportScenarios ?? ["success"])];
@@ -373,6 +391,69 @@ export async function mockExtractionApiWithState(
     }
     if (method === "GET" && path === "/settings/providers/health") {
       return json(route, 200, state.providerHealth);
+    }
+    if (method === "GET" && path === "/settings/providers/custom") {
+      return json(route, 200, { profiles: state.customProfiles });
+    }
+    if (method === "POST" && path === "/settings/providers/custom") {
+      const payload = request.postDataJSON() as {
+        name: string;
+        settings: ProviderSettings;
+      };
+      const profile: CustomProviderProfile = {
+        id: "custom-1",
+        name: payload.name,
+        settings: payload.settings,
+        created_at: "2026-05-03T12:00:00.000Z",
+        updated_at: "2026-05-03T12:00:00.000Z",
+      };
+      state.customProfiles = [profile];
+      return json(route, 200, profile);
+    }
+    if (method === "PUT" && /^\/settings\/providers\/custom\/.+$/.test(path)) {
+      const payload = request.postDataJSON() as {
+        name: string;
+        settings: ProviderSettings;
+      };
+      const profileId = path.split("/").pop() ?? "custom-1";
+      const profile: CustomProviderProfile = {
+        id: profileId,
+        name: payload.name,
+        settings: payload.settings,
+        created_at:
+          state.customProfiles[0]?.created_at ?? "2026-05-03T12:00:00.000Z",
+        updated_at: "2026-05-03T12:05:00.000Z",
+      };
+      state.customProfiles = state.customProfiles.map((item) =>
+        item.id === profileId ? profile : item,
+      );
+      return json(route, 200, profile);
+    }
+    if (
+      method === "DELETE" &&
+      /^\/settings\/providers\/custom\/.+$/.test(path)
+    ) {
+      const profileId = path.split("/").pop() ?? "";
+      state.customProfiles = state.customProfiles.filter(
+        (item) => item.id !== profileId,
+      );
+      return json(route, 200, { deleted: true });
+    }
+    if (
+      method === "POST" &&
+      /^\/settings\/providers\/custom\/.+\/activate$/.test(path)
+    ) {
+      const profileId = path.split("/")[4];
+      const profile = state.customProfiles.find(
+        (item) => item.id === profileId,
+      );
+      if (!profile) {
+        return json(route, 404, {
+          detail: "Custom provider profile not found.",
+        });
+      }
+      state.provider = profile.settings;
+      return json(route, 200, state.provider);
     }
     if (method === "POST" && path === "/settings/providers/probe") {
       const payload = request.postDataJSON() as { settings: ProviderSettings };
@@ -418,7 +499,10 @@ export async function mockExtractionApiWithState(
       return json(route, 200, document);
     }
     if (method === "POST" && path === "/jobs") {
-      const payload = request.postDataJSON() as { document_id: number; template_version_id: number };
+      const payload = request.postDataJSON() as {
+        document_id: number;
+        template_version_id: number;
+      };
       const now = "2026-05-02T12:06:00.000Z";
       const scenario = jobScenarios.shift() ?? "review";
       const job: JobRecord = {
@@ -426,14 +510,22 @@ export async function mockExtractionApiWithState(
         document_id: payload.document_id,
         template_version_id: payload.template_version_id,
         status: scenario === "failed" ? "failed" : "completed",
-        error_message: scenario === "failed" ? "Provider timed out while extracting vendor_name. Check local runtime and rerun." : null,
+        error_message:
+          scenario === "failed"
+            ? "Provider timed out while extracting vendor_name. Check local runtime and rerun."
+            : null,
         created_at: now,
         updated_at: now,
       };
       nextJobId += 1;
       state.jobs = [job];
       state.documents = state.documents.map((document) =>
-        document.id === payload.document_id ? { ...document, status: scenario === "failed" ? "failed" : "completed" } : document,
+        document.id === payload.document_id
+          ? {
+              ...document,
+              status: scenario === "failed" ? "failed" : "completed",
+            }
+          : document,
       );
       if (scenario === "failed") {
         delete state.results[job.id];
@@ -444,25 +536,32 @@ export async function mockExtractionApiWithState(
     }
     if (method === "POST" && path === "/results/501/review") {
       const payload = request.postDataJSON() as {
-        edits: Array<{ field_name: string; normalized_value: { value: string } }>;
+        edits: Array<{
+          field_name: string;
+          normalized_value: { value: string };
+        }>;
       };
       const current = state.results[1];
       const edit = payload.edits[0];
-      current.result.extracted_fields = current.result.extracted_fields.map((field) =>
-        field.field_name === edit.field_name
-          ? {
-              ...field,
-              normalized_value: edit.normalized_value,
-              validation_status: "reviewed",
-              requires_review: false,
-            }
-          : field,
+      current.result.extracted_fields = current.result.extracted_fields.map(
+        (field) =>
+          field.field_name === edit.field_name
+            ? {
+                ...field,
+                normalized_value: edit.normalized_value,
+                validation_status: "reviewed",
+                requires_review: false,
+              }
+            : field,
       );
       current.result.fields_requiring_review = [];
       current.result.reviewed_at = "2026-05-02T12:07:00.000Z";
       return json(route, 200, current.result);
     }
-    if (method === "POST" && /^\/results\/\d+\/exports\/(json|csv|excel)$/.test(path)) {
+    if (
+      method === "POST" &&
+      /^\/results\/\d+\/exports\/(json|csv|excel)$/.test(path)
+    ) {
       const exportScenario = exportScenarios.shift() ?? "success";
       if (exportScenario === "failed") {
         return route.fulfill({
@@ -472,9 +571,12 @@ export async function mockExtractionApiWithState(
         });
       }
 
-      const [, resultIdText, format] = path.match(/^\/results\/(\d+)\/exports\/(json|csv|excel)$/) ?? [];
+      const [, resultIdText, format] =
+        path.match(/^\/results\/(\d+)\/exports\/(json|csv|excel)$/) ?? [];
       const resultId = Number(resultIdText);
-      const result = Object.values(state.results).find((item) => item.result_id === resultId);
+      const result = Object.values(state.results).find(
+        (item) => item.result_id === resultId,
+      );
       if (!result) {
         return json(route, 404, { detail: "Result not found." });
       }
@@ -492,10 +594,11 @@ export async function mockExtractionApiWithState(
       return json(route, 200, { export_id: exportRecord.id });
     }
 
-    return json(route, 404, { detail: `Unhandled mock route: ${method} ${path}` });
+    return json(route, 404, {
+      detail: `Unhandled mock route: ${method} ${path}`,
+    });
   });
 }
-
 
 export async function mockExtractionApi(page: Page, overrides?: MockOverrides) {
   const state = buildInitialState();

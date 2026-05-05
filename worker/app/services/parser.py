@@ -44,4 +44,3 @@ def parse_spreadsheet(path: Path) -> str:
     else:
         data = pd.read_excel(path)
     return data.to_csv(index=False)
-

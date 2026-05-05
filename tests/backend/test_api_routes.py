@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 from pathlib import Path
 from unittest.mock import Mock
 
+import httpx
 import pytest
-
 from app.db.database import SessionLocal
 from app.models import Document, ExtractionJob, ExtractionResult, Template, TemplateVersion
 
@@ -387,6 +388,31 @@ def test_provider_settings_round_trip(client) -> None:
     assert get_response.json()["provider_type"] == "mock"
 
 
+def test_readyz_reports_database_and_storage_checks(client) -> None:
+    response = client.get("/readyz")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ready"
+    assert payload["checks"]["database"]["ready"] is True
+    assert payload["checks"]["storage"]["data_dir"]["ready"] is True
+    assert payload["checks"]["storage"]["uploads_dir"]["ready"] is True
+
+
+def test_request_id_header_is_generated(client) -> None:
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"]
+
+
+def test_request_id_header_is_propagated(client) -> None:
+    response = client.get("/readyz", headers={"X-Request-ID": "req-123"})
+
+    assert response.status_code == 200
+    assert response.headers["x-request-id"] == "req-123"
+
+
 def test_provider_catalog_lists_remote_and_local_options(client) -> None:
     response = client.get("/api/settings/providers")
     assert response.status_code == 200
@@ -480,6 +506,50 @@ def test_provider_probe_reports_reachable_response(client, monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["reachable"] is True
     assert response.json()["status_code"] == 200
+
+
+def test_provider_probe_reports_timeout_errors(client, monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url: str, headers: dict):
+            raise httpx.ConnectTimeout("probe timed out")
+
+    monkeypatch.setattr("app.services.provider_probe.httpx.Client", FakeClient)
+
+    response = client.post(
+        "/api/settings/providers/probe",
+        json={
+            "settings": {
+                "mode": "local",
+                "provider_type": "ollama",
+                "provider_label": "Ollama",
+                "api_style": "openai_compatible",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "api_key_required": False,
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": True,
+                "allow_external_processing": False,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reachable"] is False
+    assert response.json()["status"] == "error"
+    assert "timed out" in response.json()["detail"]
 
 
 def test_custom_provider_profile_crud_and_activation(client) -> None:

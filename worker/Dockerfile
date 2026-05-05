@@ -17,6 +17,6 @@ COPY shared /shared
 
 ENV PYTHONPATH=/app:/shared
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 CMD test -f /tmp/worker-status.json || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=5 CMD test -f "${WORKER_STATUS_PATH:-/data/worker-status.json}" || exit 1
 
 CMD ["python", "app/main.py"]

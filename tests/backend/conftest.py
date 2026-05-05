@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="extractflow-backend-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'backend-test.db'}"
 os.environ["DATA_DIR"] = str(TEST_ROOT / "data")

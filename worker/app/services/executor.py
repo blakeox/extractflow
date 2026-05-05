@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from sqlalchemy.orm import Session
-
 from extraction_core import FormulaEngine, topologically_sort_calculated_fields
 from extraction_core.formulas import FormulaValidationError
-from extraction_core.models import CalculatedFieldResult, ExtractionTemplate, ExtractionValidationSummary, LLMProviderSettings
+from extraction_core.models import (
+    CalculatedFieldResult,
+    ExtractionTemplate,
+    ExtractionValidationSummary,
+    LLMProviderSettings,
+)
+
 from app.services.parser import parse_document
 from app.services.provider import ExtractionProvider
 from app.services.validator import validate_calculated_field, validate_extracted_field
 
 
-def execute_extraction(document_path: str, document_id: int, template_definition: dict, provider_override: dict | None = None) -> dict:
+def execute_extraction(
+    document_path: str, document_id: int, template_definition: dict, provider_override: dict | None = None
+) -> dict:
     template = ExtractionTemplate.model_validate(template_definition)
     settings = (
-        LLMProviderSettings.model_validate(provider_override)
-        if provider_override
-        else template.llm_provider_settings
+        LLMProviderSettings.model_validate(provider_override) if provider_override else template.llm_provider_settings
     )
     text = parse_document(document_path)
     provider = ExtractionProvider()
@@ -35,7 +37,9 @@ def execute_extraction(document_path: str, document_id: int, template_definition
         errors: list[str] = []
         value = None
         try:
-            engine.validate_formula(definition.formula, set(context.keys()) | {item.name for item in template.calculated_fields})
+            engine.validate_formula(
+                definition.formula, set(context.keys()) | {item.name for item in template.calculated_fields}
+            )
             value = engine.evaluate(definition.formula, context)
         except ZeroDivisionError:
             errors.append("Division by zero.")
@@ -43,7 +47,7 @@ def execute_extraction(document_path: str, document_id: int, template_definition
             errors.append(str(exc))
 
         display_value = ""
-        if definition.output_type.value == "currency" and isinstance(value, (int, float)):
+        if definition.output_type.value == "currency" and isinstance(value, int | float):
             currency = (definition.format.currency if definition.format else "USD") or "USD"
             value = {"amount": round(float(value), 2), "currency": currency}
             display_value = f"{currency} {value['amount']:,.2f}"
@@ -80,8 +84,7 @@ def execute_extraction(document_path: str, document_id: int, template_definition
         extraction_status="completed",
         extracted_fields=extracted_fields,
         calculated_fields=calculated_fields,
-        fields_requiring_review=[
-            field.field_name for field in extracted_fields if field.requires_review
-        ] + [field.field_name for field in calculated_fields if field.requires_review],
+        fields_requiring_review=[field.field_name for field in extracted_fields if field.requires_review]
+        + [field.field_name for field in calculated_fields if field.requires_review],
     )
     return summary.model_dump(mode="json")

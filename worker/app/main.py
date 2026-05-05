@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from pathlib import Path
 
+from extraction_core.observability import configure_logger, log_event
 from sqlalchemy import select
 
-from app.core.database import SessionLocal
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.models import Document, ExtractionJob, ExtractionResult, TemplateVersion
 from app.services.executor import execute_extraction
+
+logger = configure_logger("extractflow.worker")
 
 
 def write_worker_status(state: str, details: dict | None = None) -> None:
@@ -18,15 +23,25 @@ def write_worker_status(state: str, details: dict | None = None) -> None:
         "timestamp": datetime.now(UTC).isoformat(),
         "details": details or {},
     }
-    with open(settings.worker_status_path, "w", encoding="utf-8") as handle:
+    status_path = Path(settings.worker_status_path)
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = status_path.with_name(f"{status_path.name}.tmp")
+    with open(temp_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle)
+    temp_path.replace(status_path)
+    if state != "idle":
+        log_event(logger, logging.INFO, "worker_status_updated", state=state, **payload["details"])
 
 
 def process_once() -> None:
     with SessionLocal() as db:
-        job = db.execute(
-            select(ExtractionJob).where(ExtractionJob.status == "queued").order_by(ExtractionJob.created_at.asc())
-        ).scalars().first()
+        job = (
+            db.execute(
+                select(ExtractionJob).where(ExtractionJob.status == "queued").order_by(ExtractionJob.created_at.asc())
+            )
+            .scalars()
+            .first()
+        )
         if not job:
             write_worker_status("idle")
             return
@@ -65,6 +80,8 @@ def process_once() -> None:
 
 
 def main() -> None:
+    settings.ensure_paths()
+    log_event(logger, logging.INFO, "worker_starting", poll_seconds=settings.worker_poll_seconds)
     write_worker_status("starting")
     while True:
         process_once()

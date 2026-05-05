@@ -152,10 +152,8 @@ class ExtractionTemplate(BaseModel):
     local_only_mode: bool = True
 
     @model_validator(mode="after")
-    def validate_unique_names(self) -> "ExtractionTemplate":
-        names = [field.name for field in self.extracted_fields] + [
-            field.name for field in self.calculated_fields
-        ]
+    def validate_unique_names(self) -> ExtractionTemplate:
+        names = [field.name for field in self.extracted_fields] + [field.name for field in self.calculated_fields]
         if len(names) != len(set(names)):
             raise ValueError("Field names must be unique across extracted and calculated fields.")
         return self

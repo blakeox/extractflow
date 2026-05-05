@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
 from app.models import Template, TemplateVersion
 from extraction_core.models import ExtractionTemplate
+from sqlalchemy.orm import Session
 
 
 def seed_sample_template(db: Session, repo_root: Path) -> bool:

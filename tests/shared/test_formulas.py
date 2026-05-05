@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from extraction_core import FormulaEngine, FormulaValidationError, topologically_sort_calculated_fields
 from extraction_core.models import CalculatedFieldDefinition, DataType
 

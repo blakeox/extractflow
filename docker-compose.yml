@@ -37,9 +37,11 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     environment:
+      DATA_DIR: /data
       DATABASE_URL: sqlite:////data/app.db
       PARSED_DIR: /data/parsed
       WORKER_POLL_SECONDS: 5
+      WORKER_STATUS_PATH: /data/worker-status.json
     depends_on:
       backend:
         condition: service_healthy

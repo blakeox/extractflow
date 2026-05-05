@@ -3,13 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from extraction_core.models import LLMProviderSettings
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Setting
 from app.schemas.api import CustomProviderProfile
-from extraction_core.models import LLMProviderSettings
-
 
 CUSTOM_PROVIDER_PROFILES_KEY = "custom_provider_profiles"
 
@@ -37,7 +36,9 @@ def create_custom_provider_profile(db: Session, name: str, settings: LLMProvider
     return profile
 
 
-def update_custom_provider_profile(db: Session, profile_id: str, name: str, settings: LLMProviderSettings) -> CustomProviderProfile:
+def update_custom_provider_profile(
+    db: Session, profile_id: str, name: str, settings: LLMProviderSettings
+) -> CustomProviderProfile:
     profiles = list_custom_provider_profiles(db)
     target = next((profile for profile in profiles if profile.id == profile_id), None)
     if not target:

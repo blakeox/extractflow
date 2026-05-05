@@ -3,18 +3,24 @@ from __future__ import annotations
 import json
 import os
 import re
-from urllib.parse import urlencode
 from typing import Any, Protocol
+from urllib.parse import urlencode
 
 import httpx
-
-from extraction_core.models import ExtractionFieldDefinition, ExtractionFieldResult, ExtractionTemplate, LLMProviderSettings
+from extraction_core.models import (
+    ExtractionFieldDefinition,
+    ExtractionFieldResult,
+    ExtractionTemplate,
+    LLMProviderSettings,
+)
 
 
 class ProviderAdapter(Protocol):
     def supports(self, settings: LLMProviderSettings) -> bool: ...
 
-    def extract(self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings) -> list[ExtractionFieldResult]: ...
+    def extract(
+        self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
+    ) -> list[ExtractionFieldResult]: ...
 
 
 class ExtractionProvider:
@@ -25,7 +31,9 @@ class ExtractionProvider:
             OpenAICompatibleAdapter(),
         ]
 
-    def extract(self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings) -> list[ExtractionFieldResult]:
+    def extract(
+        self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
+    ) -> list[ExtractionFieldResult]:
         for adapter in self._adapters:
             if adapter.supports(settings):
                 return adapter.extract(text, template, settings)
@@ -36,7 +44,9 @@ class MockProviderAdapter:
     def supports(self, settings: LLMProviderSettings) -> bool:
         return settings.provider_type == "mock" or settings.api_style == "mock"
 
-    def extract(self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings) -> list[ExtractionFieldResult]:
+    def extract(
+        self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
+    ) -> list[ExtractionFieldResult]:
         return [self._mock_extract_field(text, field) for field in template.extracted_fields]
 
     def _mock_extract_field(self, text: str, field: ExtractionFieldDefinition) -> ExtractionFieldResult:
@@ -50,7 +60,11 @@ class MockProviderAdapter:
             match = re.search(r"\$?\s?(\d[\d,]*(?:\.\d{1,2})?)", text)
             if match:
                 amount = float(match.group(1).replace(",", ""))
-                normalized = {"amount": amount, "currency": field.validation.currency or "USD", "display_value": match.group(0).strip()}
+                normalized = {
+                    "amount": amount,
+                    "currency": field.validation.currency or "USD",
+                    "display_value": match.group(0).strip(),
+                }
                 extracted = match.group(0).strip()
                 source = match.group(0).strip()
                 confidence = 0.72
@@ -101,7 +115,9 @@ class OpenAICompatibleAdapter:
     def supports(self, settings: LLMProviderSettings) -> bool:
         return settings.api_style == "openai_compatible"
 
-    def extract(self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings) -> list[ExtractionFieldResult]:
+    def extract(
+        self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
+    ) -> list[ExtractionFieldResult]:
         if not settings.base_url:
             raise ValueError(f"Provider {settings.provider_type} requires a base URL.")
 
@@ -135,11 +151,14 @@ class OpenAICompatibleAdapter:
                     last_error = exc
             raise RuntimeError(f"Provider call failed for {settings.provider_type}: {last_error}") from last_error
 
+
 class AzureOpenAIAdapter:
     def supports(self, settings: LLMProviderSettings) -> bool:
         return settings.api_style == "azure_openai"
 
-    def extract(self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings) -> list[ExtractionFieldResult]:
+    def extract(
+        self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
+    ) -> list[ExtractionFieldResult]:
         if not settings.base_url:
             raise ValueError("Azure OpenAI provider requires a base URL.")
         if not settings.deployment:
@@ -197,5 +216,5 @@ Document:
 {text[:15000]}
 
 Extraction Template:
-{json.dumps(template.model_dump(mode='json'), indent=2)}
+{json.dumps(template.model_dump(mode="json"), indent=2)}
 """

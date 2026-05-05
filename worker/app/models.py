@@ -4,7 +4,6 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.types import JSON
 
-
 Base = declarative_base()
 
 

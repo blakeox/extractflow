@@ -14,7 +14,11 @@ def validate_extracted_field(field: ExtractionFieldDefinition, result: Extractio
     if result.normalized_value is None and not field.validation.allow_null:
         errors.append("Null is not allowed.")
     if field.allowed_values and result.normalized_value is not None:
-        candidate = result.normalized_value.get("value") if isinstance(result.normalized_value, dict) else result.normalized_value
+        candidate = (
+            result.normalized_value.get("value")
+            if isinstance(result.normalized_value, dict)
+            else result.normalized_value
+        )
         if candidate not in field.allowed_values:
             errors.append("Value is outside allowed values.")
     if field.validation.regex and result.extracted_value is not None:
@@ -30,7 +34,12 @@ def validate_extracted_field(field: ExtractionFieldDefinition, result: Extractio
     return result
 
 
-def validate_calculated_field(result: CalculatedFieldResult, allow_null: bool = True, min_value: float | None = None, max_value: float | None = None) -> CalculatedFieldResult:
+def validate_calculated_field(
+    result: CalculatedFieldResult,
+    allow_null: bool = True,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> CalculatedFieldResult:
     errors: list[str] = list(result.validation_errors)
     value = result.calculated_value
     if value is None and not allow_null:
@@ -44,4 +53,3 @@ def validate_calculated_field(result: CalculatedFieldResult, allow_null: bool = 
     result.validation_status = "valid" if not errors else "invalid"
     result.requires_review = result.requires_review or bool(errors)
     return result
-

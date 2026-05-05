@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -11,12 +12,12 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.models import Document, ExportRecord, ExtractionJob, ExtractionResult, Setting, Template, TemplateVersion
 from app.schemas.api import (
+    CustomProviderProfileListResponse,
+    CustomProviderProfileRequest,
     DocumentResponse,
     ExportResponse,
     JobCreateRequest,
     JobResponse,
-    CustomProviderProfileListResponse,
-    CustomProviderProfileRequest,
     ProviderCatalogResponse,
     ProviderHealthResponse,
     ProviderProbeRequest,
@@ -30,6 +31,7 @@ from app.schemas.api import (
 )
 from app.services.provider_catalog import list_provider_catalog
 from app.services.provider_health import get_provider_health
+from app.services.provider_probe import probe_provider
 from app.services.provider_profiles import (
     create_custom_provider_profile,
     delete_custom_provider_profile,
@@ -37,12 +39,8 @@ from app.services.provider_profiles import (
     list_custom_provider_profiles,
     update_custom_provider_profile,
 )
-from app.services.provider_probe import probe_provider
 from app.services.result_service import apply_review_edits, export_result
 from app.services.template_service import create_template, create_template_version
-from extraction_core.models import ExtractionTemplate
-from extraction_core.models import LLMProviderSettings, ReviewEditPayload
-
 
 router = APIRouter()
 
@@ -88,23 +86,36 @@ def create_template_endpoint(payload: TemplateCreateRequest, db: Session = Depen
     existing = db.query(Template).filter(Template.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="Template name already exists.")
-    template = create_template(db, payload.name, payload.description, payload.document_type, payload.definition)
+    create_template(db, payload.name, payload.description, payload.document_type, payload.definition)
     return list_templates(db)[-1]
 
 
 @router.post("/templates/{template_id}/versions", response_model=TemplateVersionResponse)
-def create_template_version_endpoint(template_id: int, payload: TemplateVersionCreateRequest, db: Session = Depends(get_db)):
+def create_template_version_endpoint(
+    template_id: int, payload: TemplateVersionCreateRequest, db: Session = Depends(get_db)
+):
     template = db.query(Template).filter(Template.id == template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found.")
     definition = ExtractionTemplate.model_validate(payload.definition)
     version = create_template_version(db, template, definition)
-    return TemplateVersionResponse(id=version.id, template_id=version.template_id, version=version.version, definition=version.definition, created_at=version.created_at)
+    return TemplateVersionResponse(
+        id=version.id,
+        template_id=version.template_id,
+        version=version.version,
+        definition=version.definition,
+        created_at=version.created_at,
+    )
 
 
 @router.get("/templates/{template_id}/versions", response_model=list[TemplateVersionResponse])
 def list_template_versions(template_id: int, db: Session = Depends(get_db)):
-    versions = db.query(TemplateVersion).filter(TemplateVersion.template_id == template_id).order_by(TemplateVersion.created_at.desc()).all()
+    versions = (
+        db.query(TemplateVersion)
+        .filter(TemplateVersion.template_id == template_id)
+        .order_by(TemplateVersion.created_at.desc())
+        .all()
+    )
     return [
         TemplateVersionResponse(
             id=item.id,
@@ -122,17 +133,36 @@ def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db))
     target = Path(settings.uploads_dir) / file.filename
     with target.open("wb") as handle:
         shutil.copyfileobj(file.file, handle)
-    document = Document(original_filename=file.filename, content_type=file.content_type or "application/octet-stream", stored_path=str(target))
+    document = Document(
+        original_filename=file.filename,
+        content_type=file.content_type or "application/octet-stream",
+        stored_path=str(target),
+    )
     db.add(document)
     db.commit()
     db.refresh(document)
-    return DocumentResponse(id=document.id, original_filename=document.original_filename, content_type=document.content_type, status=document.status, created_at=document.created_at)
+    return DocumentResponse(
+        id=document.id,
+        original_filename=document.original_filename,
+        content_type=document.content_type,
+        status=document.status,
+        created_at=document.created_at,
+    )
 
 
 @router.get("/documents", response_model=list[DocumentResponse])
 def list_documents(db: Session = Depends(get_db)):
     docs = db.query(Document).order_by(Document.created_at.desc()).all()
-    return [DocumentResponse(id=doc.id, original_filename=doc.original_filename, content_type=doc.content_type, status=doc.status, created_at=doc.created_at) for doc in docs]
+    return [
+        DocumentResponse(
+            id=doc.id,
+            original_filename=doc.original_filename,
+            content_type=doc.content_type,
+            status=doc.status,
+            created_at=doc.created_at,
+        )
+        for doc in docs
+    ]
 
 
 @router.post("/jobs", response_model=JobResponse)
@@ -150,13 +180,32 @@ def create_job(payload: JobCreateRequest, db: Session = Depends(get_db)):
     document.status = "queued"
     db.commit()
     db.refresh(job)
-    return JobResponse(id=job.id, document_id=job.document_id, template_version_id=job.template_version_id, status=job.status, error_message=job.error_message, created_at=job.created_at, updated_at=job.updated_at)
+    return JobResponse(
+        id=job.id,
+        document_id=job.document_id,
+        template_version_id=job.template_version_id,
+        status=job.status,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
 
 
 @router.get("/jobs", response_model=list[JobResponse])
 def list_jobs(db: Session = Depends(get_db)):
     jobs = db.query(ExtractionJob).order_by(ExtractionJob.created_at.desc()).all()
-    return [JobResponse(id=job.id, document_id=job.document_id, template_version_id=job.template_version_id, status=job.status, error_message=job.error_message, created_at=job.created_at, updated_at=job.updated_at) for job in jobs]
+    return [
+        JobResponse(
+            id=job.id,
+            document_id=job.document_id,
+            template_version_id=job.template_version_id,
+            status=job.status,
+            error_message=job.error_message,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+        )
+        for job in jobs
+    ]
 
 
 @router.get("/jobs/{job_id}/result", response_model=ResultEnvelope)
@@ -218,7 +267,9 @@ def get_provider_settings(db: Session = Depends(get_db)):
     if setting:
         return setting.value
 
-    default_provider = next((provider.settings for provider in list_provider_catalog() if provider.provider_type == "mock"), None)
+    default_provider = next(
+        (provider.settings for provider in list_provider_catalog() if provider.provider_type == "mock"), None
+    )
     return default_provider.model_dump() if default_provider else LLMProviderSettings().model_dump()
 
 
@@ -229,7 +280,9 @@ def get_provider_catalog():
 
 @router.get("/settings/providers/health", response_model=list[ProviderHealthResponse])
 def get_provider_catalog_health():
-    return [ProviderHealthResponse.model_validate(get_provider_health(provider)) for provider in list_provider_catalog()]
+    return [
+        ProviderHealthResponse.model_validate(get_provider_health(provider)) for provider in list_provider_catalog()
+    ]
 
 
 @router.post("/settings/providers/probe", response_model=ProviderProbeResponse)
@@ -248,7 +301,9 @@ def create_custom_provider_profile_endpoint(payload: CustomProviderProfileReques
 
 
 @router.put("/settings/providers/custom/{profile_id}")
-def update_custom_provider_profile_endpoint(profile_id: str, payload: CustomProviderProfileRequest, db: Session = Depends(get_db)):
+def update_custom_provider_profile_endpoint(
+    profile_id: str, payload: CustomProviderProfileRequest, db: Session = Depends(get_db)
+):
     return update_custom_provider_profile(db, profile_id, payload.name, payload.settings)
 
 

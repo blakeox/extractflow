@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 
-from app.core.config import settings
 from extraction_core.models import LLMProviderCapabilities, LLMProviderCatalogEntry, LLMProviderSettings
+
+from app.core.config import settings
 
 
 def list_provider_catalog() -> list[LLMProviderCatalogEntry]:

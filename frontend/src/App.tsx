@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 
 import { API_BASE } from "./lib/config";
 
@@ -306,7 +314,8 @@ const starterTemplateDefinition: TemplateDefinition = {
   template_name: "General Document Extraction Schema",
   template_version: "1.0.0",
   document_type: "General Document",
-  description: "Reusable starter schema for legal, medical, accounting, finance, HR, and operations document extraction workflows.",
+  description:
+    "Reusable starter schema for legal, medical, accounting, finance, HR, and operations document extraction workflows.",
   llm_provider_settings: {
     mode: "local",
     provider_type: "mock",
@@ -330,8 +339,10 @@ const starterTemplateDefinition: TemplateDefinition = {
       type: "text",
       required: true,
       citation_required: true,
-      description: "The main subject, entity, patient, client, contract, or matter described by the document.",
-      instructions: "Extract the primary named subject exactly as stated in the document.",
+      description:
+        "The main subject, entity, patient, client, contract, or matter described by the document.",
+      instructions:
+        "Extract the primary named subject exactly as stated in the document.",
     },
     {
       name: "effective_date",
@@ -339,8 +350,10 @@ const starterTemplateDefinition: TemplateDefinition = {
       type: "date",
       required: false,
       citation_required: true,
-      description: "The date the document, service, agreement, or record takes effect.",
-      instructions: "Extract the most relevant effective, service, filing, or issue date and normalize it when possible.",
+      description:
+        "The date the document, service, agreement, or record takes effect.",
+      instructions:
+        "Extract the most relevant effective, service, filing, or issue date and normalize it when possible.",
     },
     {
       name: "total_amount",
@@ -348,8 +361,10 @@ const starterTemplateDefinition: TemplateDefinition = {
       type: "currency",
       required: false,
       citation_required: true,
-      description: "The primary total monetary amount stated in the document, if applicable.",
-      instructions: "Extract the main total amount only when the document clearly states one.",
+      description:
+        "The primary total monetary amount stated in the document, if applicable.",
+      instructions:
+        "Extract the main total amount only when the document clearly states one.",
     },
   ],
   calculated_fields: [
@@ -366,10 +381,34 @@ const starterTemplateDefinition: TemplateDefinition = {
 };
 
 const auditRows = [
-  ["May 16, 2025 10:24 AM", "Alex Morgan", "Extraction completed", "Invoice_0042.pdf", "42 fields extracted, 1 needs review"],
-  ["May 16, 2025 10:19 AM", "Alex Morgan", "Field edited", "Total Amount", "Adjusted to match footer total"],
-  ["May 16, 2025 10:18 AM", "System", "Formula recalculated", "Invoice Processing v1.4", "Cost Per Unit updated"],
-  ["May 16, 2025 9:12 AM", "Alex Morgan", "Document uploaded", "MSA_Contract.docx", "Stored in local volume"],
+  [
+    "May 16, 2025 10:24 AM",
+    "Alex Morgan",
+    "Extraction completed",
+    "Invoice_0042.pdf",
+    "42 fields extracted, 1 needs review",
+  ],
+  [
+    "May 16, 2025 10:19 AM",
+    "Alex Morgan",
+    "Field edited",
+    "Total Amount",
+    "Adjusted to match footer total",
+  ],
+  [
+    "May 16, 2025 10:18 AM",
+    "System",
+    "Formula recalculated",
+    "Invoice Processing v1.4",
+    "Cost Per Unit updated",
+  ],
+  [
+    "May 16, 2025 9:12 AM",
+    "Alex Morgan",
+    "Document uploaded",
+    "MSA_Contract.docx",
+    "Stored in local volume",
+  ],
 ];
 
 const helpTopics = [
@@ -408,7 +447,10 @@ function NavGlyph({ icon }: { icon: NavItem["icon"] }) {
       return (
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <circle {...common} cx="10" cy="10" r="2.25" />
-          <path {...common} d="M10 3.25v1.5M10 15.25v1.5M15.25 10h1.5M3.25 10h1.5M14.77 5.23l1.06-1.06M4.17 15.83l1.06-1.06M14.77 14.77l1.06 1.06M4.17 4.17l1.06 1.06" />
+          <path
+            {...common}
+            d="M10 3.25v1.5M10 15.25v1.5M15.25 10h1.5M3.25 10h1.5M14.77 5.23l1.06-1.06M4.17 15.83l1.06-1.06M14.77 14.77l1.06 1.06M4.17 4.17l1.06 1.06"
+          />
         </svg>
       );
     case "audit":
@@ -421,7 +463,10 @@ function NavGlyph({ icon }: { icon: NavItem["icon"] }) {
     case "help":
       return (
         <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path {...common} d="M7.75 7.25a2.5 2.5 0 1 1 4.2 1.82c-.77.69-1.7 1.28-1.7 2.43" />
+          <path
+            {...common}
+            d="M7.75 7.25a2.5 2.5 0 1 1 4.2 1.82c-.77.69-1.7 1.28-1.7 2.43"
+          />
           <circle fill="currentColor" cx="10" cy="14.75" r="1" />
           <circle {...common} cx="10" cy="10" r="7" />
         </svg>
@@ -430,7 +475,10 @@ function NavGlyph({ icon }: { icon: NavItem["icon"] }) {
     default:
       return (
         <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path {...common} d="M5 3.5h7.5L16 7v9.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1Z" />
+          <path
+            {...common}
+            d="M5 3.5h7.5L16 7v9.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1Z"
+          />
           <path {...common} d="M12.5 3.5V7H16" />
           <path {...common} d="M7 10h6M7 13h6" />
         </svg>
@@ -470,7 +518,8 @@ function formatTimestamp(value?: string | null) {
 
 function getDocumentTypeLabel(contentType: string) {
   if (contentType.includes("pdf")) return "PDF";
-  if (contentType.includes("word") || contentType.includes("docx")) return "DOCX";
+  if (contentType.includes("word") || contentType.includes("docx"))
+    return "DOCX";
   if (contentType.includes("image")) return "Image";
   if (contentType.includes("text")) return "Text";
   return "File";
@@ -505,22 +554,34 @@ function formatValue(value: unknown): string {
       return String(value.value);
     }
     if (typeof value.amount === "number") {
-      const currency = typeof value.currency === "string" ? value.currency : "USD";
+      const currency =
+        typeof value.currency === "string" ? value.currency : "USD";
       return `${currency} ${value.amount.toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
   }
   return JSON.stringify(value);
 }
 
-function getFieldType(field: ReviewFieldResult, definition?: TemplateDefinitionField | null) {
+function getFieldType(
+  field: ReviewFieldResult,
+  definition?: TemplateDefinitionField | null,
+) {
   return String(field.data_type ?? definition?.type ?? "text").toLowerCase();
 }
 
-function getFieldDefinition(definition: TemplateDefinition | null, fieldName: string) {
-  return definition?.extracted_fields.find((item) => item.name === fieldName) ?? null;
+function getFieldDefinition(
+  definition: TemplateDefinition | null,
+  fieldName: string,
+) {
+  return (
+    definition?.extracted_fields.find((item) => item.name === fieldName) ?? null
+  );
 }
 
-function getInitialReviewDraft(field: ReviewFieldResult, definition?: TemplateDefinitionField | null) {
+function getInitialReviewDraft(
+  field: ReviewFieldResult,
+  definition?: TemplateDefinitionField | null,
+) {
   const value = field.normalized_value ?? field.extracted_value ?? null;
   const type = getFieldType(field, definition);
 
@@ -528,16 +589,24 @@ function getInitialReviewDraft(field: ReviewFieldResult, definition?: TemplateDe
     return "";
   }
 
-  if (type === "currency" && isRecord(value) && typeof value.amount === "number") {
+  if (
+    type === "currency" &&
+    isRecord(value) &&
+    typeof value.amount === "number"
+  ) {
     return String(value.amount);
   }
 
   if (type === "boolean") {
     if (typeof value === "boolean") return value ? "true" : "false";
-    if (isRecord(value) && typeof value.value === "boolean") return value.value ? "true" : "false";
+    if (isRecord(value) && typeof value.value === "boolean")
+      return value.value ? "true" : "false";
   }
 
-  if (isRecord(value) && (typeof value.value === "string" || typeof value.value === "number")) {
+  if (
+    isRecord(value) &&
+    (typeof value.value === "string" || typeof value.value === "number")
+  ) {
     return String(value.value);
   }
 
@@ -552,7 +621,11 @@ function getInitialReviewDraft(field: ReviewFieldResult, definition?: TemplateDe
   return JSON.stringify(value);
 }
 
-function parseReviewDraft(field: ReviewFieldResult, raw: string, definition?: TemplateDefinitionField | null): unknown {
+function parseReviewDraft(
+  field: ReviewFieldResult,
+  raw: string,
+  definition?: TemplateDefinitionField | null,
+): unknown {
   const trimmed = raw.trim();
   const type = getFieldType(field, definition);
 
@@ -566,8 +639,11 @@ function parseReviewDraft(field: ReviewFieldResult, raw: string, definition?: Te
       if (Number.isNaN(amount)) {
         throw new Error(`${field.label} must be a valid number.`);
       }
-      const existing = isRecord(field.normalized_value) ? field.normalized_value : null;
-      const currency = typeof existing?.currency === "string" ? existing.currency : "USD";
+      const existing = isRecord(field.normalized_value)
+        ? field.normalized_value
+        : null;
+      const currency =
+        typeof existing?.currency === "string" ? existing.currency : "USD";
       return {
         amount,
         currency,
@@ -590,7 +666,11 @@ function parseReviewDraft(field: ReviewFieldResult, raw: string, definition?: Te
   }
 }
 
-function buildTemplatePayload(draft: DraftTemplate, provider: ProviderSettings | null, base?: TemplateDefinition): TemplateDefinition {
+function buildTemplatePayload(
+  draft: DraftTemplate,
+  provider: ProviderSettings | null,
+  base?: TemplateDefinition,
+): TemplateDefinition {
   const seed = base ?? starterTemplateDefinition;
   return {
     ...seed,
@@ -613,7 +693,10 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
 async function uploadDocument(file: File): Promise<DocumentRecord> {
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch(`${API_BASE}/documents`, { method: "POST", body: formData });
+  const response = await fetch(`${API_BASE}/documents`, {
+    method: "POST",
+    body: formData,
+  });
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -624,7 +707,9 @@ function buildProviderPayload(input: ProviderCatalogEntry): ProviderSettings {
   return input.settings;
 }
 
-function buildCustomProviderSettings(input: CustomProviderDraft): ProviderSettings {
+function buildCustomProviderSettings(
+  input: CustomProviderDraft,
+): ProviderSettings {
   const isAzure = input.api_style === "azure_openai";
   const trimmedBaseUrl = input.base_url.trim();
   const trimmedApiKeyEnvVar = input.api_key_env_var.trim();
@@ -652,7 +737,9 @@ function buildCustomProviderSettings(input: CustomProviderDraft): ProviderSettin
   };
 }
 
-function validateCustomProviderDraft(input: CustomProviderDraft): string | null {
+function validateCustomProviderDraft(
+  input: CustomProviderDraft,
+): string | null {
   if (!input.label.trim()) {
     return "Custom provider label is required.";
   }
@@ -689,11 +776,16 @@ function validateCustomProviderDraft(input: CustomProviderDraft): string | null 
   return null;
 }
 
-function buildCustomProviderDraftFromSettings(settings: ProviderSettings): CustomProviderDraft {
+function buildCustomProviderDraftFromSettings(
+  settings: ProviderSettings,
+): CustomProviderDraft {
   return {
     label: settings.provider_label ?? settings.provider_type,
     mode: settings.mode,
-    api_style: settings.api_style === "azure_openai" ? "azure_openai" : "openai_compatible",
+    api_style:
+      settings.api_style === "azure_openai"
+        ? "azure_openai"
+        : "openai_compatible",
     provider_type: settings.provider_type,
     base_url: settings.base_url ?? "",
     api_key_env_var: settings.api_key_env_var ?? "",
@@ -738,14 +830,19 @@ function AppSidebar({
             <button
               key={item.id}
               type="button"
-              className={classNames("nav-item", activePage === item.id && "active")}
+              className={classNames(
+                "nav-item",
+                activePage === item.id && "active",
+              )}
               onClick={() => onSelectPage(item.id)}
             >
               <span className="nav-icon" aria-hidden="true">
                 <NavGlyph icon={item.icon} />
               </span>
               <span>{item.label}</span>
-              {item.id === "extractions" && reviewCount > 0 ? <span className="nav-badge">{reviewCount}</span> : null}
+              {item.id === "extractions" && reviewCount > 0 ? (
+                <span className="nav-badge">{reviewCount}</span>
+              ) : null}
             </button>
           ))}
         </nav>
@@ -758,7 +855,10 @@ function AppSidebar({
             <button
               key={item.id}
               type="button"
-              className={classNames("nav-item", activePage === item.id && "active")}
+              className={classNames(
+                "nav-item",
+                activePage === item.id && "active",
+              )}
               onClick={() => onSelectPage(item.id)}
             >
               <span className="nav-icon" aria-hidden="true">
@@ -773,13 +873,24 @@ function AppSidebar({
       <div className="local-mode-card">
         <div className="local-mode-dot" />
         <div>
-          <strong>{provider?.mode === "cloud" ? "Cloud Mode" : "Local Mode"}</strong>
+          <strong>
+            {provider?.mode === "cloud" ? "Cloud Mode" : "Local Mode"}
+          </strong>
           <p>
-            {provider?.provider_type ?? "mock"} ({provider?.model ?? "qwen3.5:27b"})
+            {provider?.provider_type ?? "mock"} (
+            {provider?.model ?? "qwen3.5:27b"})
           </p>
-          <span>{reviewCount ? `${reviewCount} fields waiting on review` : "No review backlog right now"}</span>
+          <span>
+            {reviewCount
+              ? `${reviewCount} fields waiting on review`
+              : "No review backlog right now"}
+          </span>
         </div>
-        <button type="button" className="tertiary-button" onClick={() => onSelectPage("settings")}>
+        <button
+          type="button"
+          className="tertiary-button"
+          onClick={() => onSelectPage("settings")}
+        >
           Open settings
         </button>
       </div>
@@ -794,10 +905,14 @@ function TopBar({ activePage }: { activePage: PageId }) {
     "Workspace";
 
   const subtitles: Record<PageId, string> = {
-    extractions: "Upload a document, run extraction, review only exceptions, and export from one place.",
-    templates: "Schemas stay reusable, but they should not interrupt the extraction job.",
-    settings: "Provider, privacy, and runtime controls live here instead of hijacking the main workflow.",
-    audit: "Track operational history without putting it in the user’s critical path.",
+    extractions:
+      "Upload a document, run extraction, review only exceptions, and export from one place.",
+    templates:
+      "Schemas stay reusable, but they should not interrupt the extraction job.",
+    settings:
+      "Provider, privacy, and runtime controls live here instead of hijacking the main workflow.",
+    audit:
+      "Track operational history without putting it in the user’s critical path.",
     help: "Support the workflow after first value, not before it.",
   };
 
@@ -818,7 +933,9 @@ function StatusBadge({
   children: string;
   tone: "success" | "warning" | "danger" | "info" | "indigo" | "neutral";
 }) {
-  return <span className={classNames("badge", `badge-${tone}`)}>{children}</span>;
+  return (
+    <span className={classNames("badge", `badge-${tone}`)}>{children}</span>
+  );
 }
 
 function SummaryStat({
@@ -833,7 +950,12 @@ function SummaryStat({
   tone?: "default" | "accent" | "success" | "warning" | "danger";
 }) {
   return (
-    <div className={classNames("metric-card", tone !== "default" && `metric-card-${tone}`)}>
+    <div
+      className={classNames(
+        "metric-card",
+        tone !== "default" && `metric-card-${tone}`,
+      )}
+    >
       <span className="metric-label">{label}</span>
       <strong className="metric-value">{value}</strong>
       {support ? <p className="metric-support">{support}</p> : null}
@@ -914,13 +1036,7 @@ function PageHeader({
   );
 }
 
-function CardHeader({
-  title,
-  subtitle,
-}: {
-  title: string;
-  subtitle?: string;
-}) {
+function CardHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="card-header">
       <div className="card-header-copy">
@@ -962,17 +1078,23 @@ function DesktopSetupPanel({
     {
       label: "Desktop shell has a project root",
       complete: Boolean(desktopStatus.projectRoot),
-      detail: desktopStatus.projectRoot ?? "The shell does not know where the backend project lives.",
+      detail:
+        desktopStatus.projectRoot ??
+        "The shell does not know where the backend project lives.",
     },
     {
       label: "Docker daemon is available",
       complete: desktopStatus.dockerAvailable,
-      detail: desktopStatus.dockerAvailable ? "Docker can manage backend and worker services." : "Start Docker Desktop before managing the local stack.",
+      detail: desktopStatus.dockerAvailable
+        ? "Docker can manage backend and worker services."
+        : "Start Docker Desktop before managing the local stack.",
     },
     {
       label: "Docker Compose is available",
       complete: desktopStatus.composeAvailable,
-      detail: desktopStatus.composeAvailable ? "Compose commands can start backend and worker services." : "Install or enable Docker Compose for this machine.",
+      detail: desktopStatus.composeAvailable
+        ? "Compose commands can start backend and worker services."
+        : "Install or enable Docker Compose for this machine.",
     },
     {
       label: "Backend API is reachable",
@@ -994,19 +1116,29 @@ function DesktopSetupPanel({
           <div className="desktop-status-banner">
             <strong>{desktopStatus.message}</strong>
             <p>
-              Runtime source: {desktopStatus.runtimeSource === "bundled_resources" ? "Bundled desktop payload" : "Repo checkout"}
+              Runtime source:{" "}
+              {desktopStatus.runtimeSource === "bundled_resources"
+                ? "Bundled desktop payload"
+                : "Repo checkout"}
               <br />
               Runtime root: {desktopStatus.projectRoot ?? "Unavailable"}
               <br />
               App data: {desktopStatus.appDataDir ?? "Unavailable"}
               <br />
-              Backend target: {desktopStatus.backendHost}:{desktopStatus.backendPort}
+              Backend target: {desktopStatus.backendHost}:
+              {desktopStatus.backendPort}
             </p>
           </div>
 
           <div className="desktop-checklist">
             {checklist.map((item) => (
-              <div key={item.label} className={classNames("desktop-check-item", item.complete && "complete")}>
+              <div
+                key={item.label}
+                className={classNames(
+                  "desktop-check-item",
+                  item.complete && "complete",
+                )}
+              >
                 <div className="desktop-check-state" aria-hidden="true">
                   {item.complete ? "✓" : "!"}
                 </div>
@@ -1020,27 +1152,68 @@ function DesktopSetupPanel({
 
           <div className="desktop-action-groups">
             <div className="desktop-action-row">
-              <button type="button" className="primary-button" onClick={() => void onStart()} disabled={busyAction === "desktop-start"}>
-                {busyAction === "desktop-start" ? "Starting..." : "Start local stack"}
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void onStart()}
+                disabled={busyAction === "desktop-start"}
+              >
+                {busyAction === "desktop-start"
+                  ? "Starting..."
+                  : "Start local stack"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => void onRestart()} disabled={busyAction === "desktop-restart"}>
-                {busyAction === "desktop-restart" ? "Restarting..." : "Restart stack"}
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onRestart()}
+                disabled={busyAction === "desktop-restart"}
+              >
+                {busyAction === "desktop-restart"
+                  ? "Restarting..."
+                  : "Restart stack"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => void onStop()} disabled={busyAction === "desktop-stop"}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onStop()}
+                disabled={busyAction === "desktop-stop"}
+              >
                 {busyAction === "desktop-stop" ? "Stopping..." : "Stop stack"}
               </button>
             </div>
             <div className="desktop-action-row">
-              <button type="button" className="secondary-button" onClick={() => void onRefresh()} disabled={busyAction === "desktop-refresh"}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onRefresh()}
+                disabled={busyAction === "desktop-refresh"}
+              >
                 Refresh status
               </button>
-              <button type="button" className="secondary-button" onClick={() => void onLoadLogs()} disabled={busyAction === "desktop-logs"}>
-                {busyAction === "desktop-logs" ? "Loading logs..." : "Load backend logs"}
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onLoadLogs()}
+                disabled={busyAction === "desktop-logs"}
+              >
+                {busyAction === "desktop-logs"
+                  ? "Loading logs..."
+                  : "Load backend logs"}
               </button>
-              <button type="button" className="secondary-button" onClick={() => void onOpenProjectRoot()} disabled={busyAction === "desktop-open-root"}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onOpenProjectRoot()}
+                disabled={busyAction === "desktop-open-root"}
+              >
                 Open runtime root
               </button>
-              <button type="button" className="secondary-button" onClick={() => void onOpenAppDataDir()} disabled={busyAction === "desktop-open-data"}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onOpenAppDataDir()}
+                disabled={busyAction === "desktop-open-data"}
+              >
                 Open app data
               </button>
             </div>
@@ -1059,7 +1232,10 @@ function DesktopSetupPanel({
           </div>
           <div className="desktop-side-card">
             <span className="eyebrow">Why this is secondary</span>
-            <p>Runtime setup belongs behind the extraction flow, not in front of it.</p>
+            <p>
+              Runtime setup belongs behind the extraction flow, not in front of
+              it.
+            </p>
           </div>
         </div>
       </div>
@@ -1101,13 +1277,20 @@ function DesktopOnboardingOverlay({
   const checklist = [
     {
       label: "Desktop runtime bundle available",
-      complete: desktopStatus.runtimeSource === "bundled_resources" || desktopStatus.runtimeSource === "repo_checkout",
-      detail: desktopStatus.runtimeSource === "bundled_resources" ? "The app is running against its bundled runtime payload." : "The app is connected to a repo-backed desktop runtime.",
+      complete:
+        desktopStatus.runtimeSource === "bundled_resources" ||
+        desktopStatus.runtimeSource === "repo_checkout",
+      detail:
+        desktopStatus.runtimeSource === "bundled_resources"
+          ? "The app is running against its bundled runtime payload."
+          : "The app is connected to a repo-backed desktop runtime.",
     },
     {
       label: "Docker Desktop running",
       complete: desktopStatus.dockerAvailable,
-      detail: desktopStatus.dockerAvailable ? "Container runtime is available for backend and worker services." : "Start Docker Desktop before continuing.",
+      detail: desktopStatus.dockerAvailable
+        ? "Container runtime is available for backend and worker services."
+        : "Start Docker Desktop before continuing.",
     },
     {
       label: "Local backend reachable",
@@ -1120,20 +1303,38 @@ function DesktopOnboardingOverlay({
     {
       label: "Default provider selected",
       complete: Boolean(provider),
-      detail: provider ? `${provider.provider_type} (${provider.model}) is configured as the current default provider.` : "Choose a local or cloud provider before running real extraction jobs.",
+      detail: provider
+        ? `${provider.provider_type} (${provider.model}) is configured as the current default provider.`
+        : "Choose a local or cloud provider before running real extraction jobs.",
     },
   ];
 
   return (
-    <div className="desktop-onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="desktopOnboardingTitle">
+    <div
+      className="desktop-onboarding-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="desktopOnboardingTitle"
+    >
       <div className="desktop-onboarding-card">
         <div className="desktop-onboarding-header">
           <div>
             <span className="hero-label">Desktop setup</span>
-            <h2 id="desktopOnboardingTitle">Finish the runtime checks, then get back to the extraction workspace.</h2>
-            <p>The desktop shell is packaged, but local runtime health still determines whether extraction and review actually work.</p>
+            <h2 id="desktopOnboardingTitle">
+              Finish the runtime checks, then get back to the extraction
+              workspace.
+            </h2>
+            <p>
+              The desktop shell is packaged, but local runtime health still
+              determines whether extraction and review actually work.
+            </p>
           </div>
-          <button type="button" className="icon-button" onClick={onDismiss} aria-label="Dismiss onboarding">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onDismiss}
+            aria-label="Dismiss onboarding"
+          >
             ×
           </button>
         </div>
@@ -1141,7 +1342,13 @@ function DesktopOnboardingOverlay({
         <div className="desktop-onboarding-grid">
           <div className="desktop-checklist">
             {checklist.map((item) => (
-              <div key={item.label} className={classNames("desktop-check-item", item.complete && "complete")}>
+              <div
+                key={item.label}
+                className={classNames(
+                  "desktop-check-item",
+                  item.complete && "complete",
+                )}
+              >
                 <div className="desktop-check-state" aria-hidden="true">
                   {item.complete ? "✓" : "!"}
                 </div>
@@ -1164,13 +1371,28 @@ function DesktopOnboardingOverlay({
               </ol>
             </div>
             <div className="desktop-action-groups">
-              <button type="button" className="primary-button" onClick={() => void onStartDesktopStack()} disabled={busyAction === "desktop-start"}>
-                {busyAction === "desktop-start" ? "Starting..." : "Start local stack"}
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void onStartDesktopStack()}
+                disabled={busyAction === "desktop-start"}
+              >
+                {busyAction === "desktop-start"
+                  ? "Starting..."
+                  : "Start local stack"}
               </button>
-              <button type="button" className="secondary-button" onClick={onOpenSettings}>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={onOpenSettings}
+              >
                 Open settings
               </button>
-              <button type="button" className="tertiary-button" onClick={onDismiss}>
+              <button
+                type="button"
+                className="tertiary-button"
+                onClick={onDismiss}
+              >
                 Continue to extraction workspace
               </button>
             </div>
@@ -1207,7 +1429,9 @@ function SchemaPage({
   busyAction: string | null;
 }) {
   const definition = currentTemplateDefinition ?? starterTemplateDefinition;
-  const selectedVersions = templateVersions.filter((item) => item.template_id === selectedTemplateId);
+  const selectedVersions = templateVersions.filter(
+    (item) => item.template_id === selectedTemplateId,
+  );
 
   return (
     <div className="page-stack">
@@ -1217,7 +1441,12 @@ function SchemaPage({
           title="Keep schema management expert-friendly without putting it in the first-run path."
           description="Operators should only come here when the extraction definition truly needs to change."
           actions={
-            <button type="button" className="primary-button" onClick={() => void onCreateTemplate()} disabled={busyAction === "save-template"}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void onCreateTemplate()}
+              disabled={busyAction === "save-template"}
+            >
               {busyAction === "save-template" ? "Saving..." : "Save schema"}
             </button>
           }
@@ -1226,34 +1455,80 @@ function SchemaPage({
 
       <div className="detail-grid">
         <section className="surface span-7">
-          <CardHeader title="Schema header" subtitle="Name the schema, describe the job, and keep versioning explicit but secondary." />
+          <CardHeader
+            title="Schema header"
+            subtitle="Name the schema, describe the job, and keep versioning explicit but secondary."
+          />
           <div className="form-grid">
             <label>
               <span>Schema name</span>
-              <input value={draft.template_name} onChange={(event) => setDraft((current) => ({ ...current, template_name: event.target.value }))} />
+              <input
+                value={draft.template_name}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    template_name: event.target.value,
+                  }))
+                }
+              />
             </label>
             <label>
               <span>Document type</span>
-              <input value={draft.document_type} onChange={(event) => setDraft((current) => ({ ...current, document_type: event.target.value }))} />
+              <input
+                value={draft.document_type}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    document_type: event.target.value,
+                  }))
+                }
+              />
             </label>
             <label className="full-line">
               <span>Description</span>
-              <textarea rows={3} value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} />
+              <textarea
+                rows={3}
+                value={draft.description}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    description: event.target.value,
+                  }))
+                }
+              />
             </label>
             <label>
               <span>Schema version</span>
-              <input value={draft.template_version} onChange={(event) => setDraft((current) => ({ ...current, template_version: event.target.value }))} />
+              <input
+                value={draft.template_version}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    template_version: event.target.value,
+                  }))
+                }
+              />
             </label>
             <SwitchField
               label="Local-only processing"
               checked={draft.local_only}
               hint="Use the shared privacy default for this schema."
-              onToggle={() => setDraft((current) => ({ ...current, local_only: !current.local_only }))}
+              onToggle={() =>
+                setDraft((current) => ({
+                  ...current,
+                  local_only: !current.local_only,
+                }))
+              }
             />
           </div>
 
           <div className="inline-actions top-gap">
-            <select value={selectedTemplateId ?? ""} onChange={(event) => setSelectedTemplateId(parseOptionalId(event.target.value))}>
+            <select
+              value={selectedTemplateId ?? ""}
+              onChange={(event) =>
+                setSelectedTemplateId(parseOptionalId(event.target.value))
+              }
+            >
               <option value="">Select schema</option>
               {templates.map((template) => (
                 <option key={template.id} value={template.id}>
@@ -1261,7 +1536,14 @@ function SchemaPage({
                 </option>
               ))}
             </select>
-            <select value={selectedTemplateVersionId ?? ""} onChange={(event) => setSelectedTemplateVersionId(parseOptionalId(event.target.value))}>
+            <select
+              value={selectedTemplateVersionId ?? ""}
+              onChange={(event) =>
+                setSelectedTemplateVersionId(
+                  parseOptionalId(event.target.value),
+                )
+              }
+            >
               <option value="">Select schema version</option>
               {selectedVersions.map((version) => (
                 <option key={version.id} value={version.id}>
@@ -1273,17 +1555,36 @@ function SchemaPage({
         </section>
 
         <section className="surface span-5">
-          <CardHeader title="Field summary" subtitle="The extraction workspace should only surface the fields that matter to the job." />
+          <CardHeader
+            title="Field summary"
+            subtitle="The extraction workspace should only surface the fields that matter to the job."
+          />
           <div className="summary-grid">
-            <SummaryStat label="Extracted fields" value={definition.extracted_fields.length} tone="accent" />
-            <SummaryStat label="Calculated fields" value={definition.calculated_fields.length} />
-            <SummaryStat label="Provider" value={definition.llm_provider_settings.provider_type} />
-            <SummaryStat label="Exports" value={definition.output_settings.export_formats.join(" · ")} />
+            <SummaryStat
+              label="Extracted fields"
+              value={definition.extracted_fields.length}
+              tone="accent"
+            />
+            <SummaryStat
+              label="Calculated fields"
+              value={definition.calculated_fields.length}
+            />
+            <SummaryStat
+              label="Provider"
+              value={definition.llm_provider_settings.provider_type}
+            />
+            <SummaryStat
+              label="Exports"
+              value={definition.output_settings.export_formats.join(" · ")}
+            />
           </div>
         </section>
 
         <section className="surface span-7">
-          <CardHeader title="Extraction fields" subtitle="These are the values the extraction workspace will show and review." />
+          <CardHeader
+            title="Extraction fields"
+            subtitle="These are the values the extraction workspace will show and review."
+          />
           <div className="builder-list">
             {definition.extracted_fields.map((field) => (
               <div key={field.name} className="builder-item">
@@ -1291,11 +1592,19 @@ function SchemaPage({
                   <strong>{field.label}</strong>
                   <div className="inline-badges">
                     <span className="pill">{field.type}</span>
-                    <StatusBadge tone={field.required ? "info" : "warning"}>{field.required ? "Required" : "Optional"}</StatusBadge>
-                    {field.citation_required ? <span className="pill">Citation</span> : null}
+                    <StatusBadge tone={field.required ? "info" : "warning"}>
+                      {field.required ? "Required" : "Optional"}
+                    </StatusBadge>
+                    {field.citation_required ? (
+                      <span className="pill">Citation</span>
+                    ) : null}
                   </div>
                 </div>
-                <p>{field.instructions ?? field.description ?? "Field instructions not defined."}</p>
+                <p>
+                  {field.instructions ??
+                    field.description ??
+                    "Field instructions not defined."}
+                </p>
                 <div className="builder-meta">
                   <span>Field name: {field.name}</span>
                   <span>Allow null: {field.required ? "No" : "Yes"}</span>
@@ -1306,7 +1615,10 @@ function SchemaPage({
         </section>
 
         <section className="surface span-5">
-          <CardHeader title="Calculated fields" subtitle="Deterministic formulas should stay in the product, not in the model prompt." />
+          <CardHeader
+            title="Calculated fields"
+            subtitle="Deterministic formulas should stay in the product, not in the model prompt."
+          />
           <div className="formula-editor-shell">
             {definition.calculated_fields.map((field) => (
               <div key={field.name} className="formula-chip">
@@ -1374,26 +1686,41 @@ function ExtractionWorkspacePage({
   onOpenSchemas: () => void;
 }) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const selectedJob = selectedJobId ? jobs.find((job) => job.id === selectedJobId) ?? null : null;
-  const selectedResult = selectedJob ? resultsByJob[selectedJob.id] ?? null : null;
+  const selectedJob = selectedJobId
+    ? (jobs.find((job) => job.id === selectedJobId) ?? null)
+    : null;
+  const selectedResult = selectedJob
+    ? (resultsByJob[selectedJob.id] ?? null)
+    : null;
   const selectedDocument =
-    (selectedJob ? documents.find((item) => item.id === selectedJob.document_id) : null) ??
+    (selectedJob
+      ? documents.find((item) => item.id === selectedJob.document_id)
+      : null) ??
     documents.find((item) => item.id === selectedDocumentId) ??
     null;
   const selectedTemplateVersion =
-    (selectedJob ? templateVersions.find((item) => item.id === selectedJob.template_version_id) : null) ??
+    (selectedJob
+      ? templateVersions.find(
+          (item) => item.id === selectedJob.template_version_id,
+        )
+      : null) ??
     templateVersions.find((item) => item.id === selectedTemplateVersionId) ??
     null;
   const selectedTemplate =
-    templates.find((item) => item.id === selectedTemplateVersion?.template_id) ??
+    templates.find(
+      (item) => item.id === selectedTemplateVersion?.template_id,
+    ) ??
     templates.find((item) => item.id === selectedTemplateId) ??
     null;
-  const selectedSchemaVersions = templateVersions.filter((item) => item.template_id === (selectedTemplate?.id ?? selectedTemplateId));
+  const selectedSchemaVersions = templateVersions.filter(
+    (item) => item.template_id === (selectedTemplate?.id ?? selectedTemplateId),
+  );
   const stage: WorkspaceStage = selectedJob
     ? selectedJob.status === "failed"
       ? "failed"
       : selectedJob.status === "completed"
-        ? selectedResult && selectedResult.result.fields_requiring_review.length > 0
+        ? selectedResult &&
+          selectedResult.result.fields_requiring_review.length > 0
           ? "review"
           : "ready"
         : "processing"
@@ -1401,9 +1728,16 @@ function ExtractionWorkspacePage({
 
   const extractedFields = selectedResult?.result.extracted_fields ?? [];
   const calculatedFields = selectedResult?.result.calculated_fields ?? [];
-  const fieldsNeedingReview = extractedFields.filter((field) => field.requires_review || field.validation_status === "invalid");
-  const validatedFields = extractedFields.filter((field) => !fieldsNeedingReview.some((item) => item.field_name === field.field_name));
-  const exportHistory = selectedJob ? exportsList.filter((item) => item.job_id === selectedJob.id) : [];
+  const fieldsNeedingReview = extractedFields.filter(
+    (field) => field.requires_review || field.validation_status === "invalid",
+  );
+  const validatedFields = extractedFields.filter(
+    (field) =>
+      !fieldsNeedingReview.some((item) => item.field_name === field.field_name),
+  );
+  const exportHistory = selectedJob
+    ? exportsList.filter((item) => item.job_id === selectedJob.id)
+    : [];
   const focusedField =
     extractedFields.find((field) => field.field_name === focusedFieldName) ??
     fieldsNeedingReview[0] ??
@@ -1411,18 +1745,44 @@ function ExtractionWorkspacePage({
     null;
 
   const jobGroups = [
-    { label: "Processing", items: jobs.filter((job) => job.status === "queued" || job.status === "running") },
-    { label: "Needs review", items: jobs.filter((job) => (resultsByJob[job.id]?.result.fields_requiring_review.length ?? 0) > 0) },
+    {
+      label: "Processing",
+      items: jobs.filter(
+        (job) => job.status === "queued" || job.status === "running",
+      ),
+    },
+    {
+      label: "Needs review",
+      items: jobs.filter(
+        (job) =>
+          (resultsByJob[job.id]?.result.fields_requiring_review.length ?? 0) >
+          0,
+      ),
+    },
     { label: "Failed", items: jobs.filter((job) => job.status === "failed") },
-    { label: "Completed", items: jobs.filter((job) => job.status === "completed" && (resultsByJob[job.id]?.result.fields_requiring_review.length ?? 0) === 0) },
+    {
+      label: "Completed",
+      items: jobs.filter(
+        (job) =>
+          job.status === "completed" &&
+          (resultsByJob[job.id]?.result.fields_requiring_review.length ?? 0) ===
+            0,
+      ),
+    },
   ].filter((group) => group.items.length > 0);
 
   const progressSteps = [
     { label: "File uploaded", complete: Boolean(selectedDocument) },
     { label: "Schema selected", complete: Boolean(selectedTemplateVersion) },
     { label: "Extraction queued", complete: Boolean(selectedJob) },
-    { label: "Fields processed", complete: Boolean(selectedJob && selectedJob.status !== "queued") },
-    { label: stage === "review" ? "Review waiting" : "Result ready", complete: stage === "review" || stage === "ready" },
+    {
+      label: "Fields processed",
+      complete: Boolean(selectedJob && selectedJob.status !== "queued"),
+    },
+    {
+      label: stage === "review" ? "Review waiting" : "Result ready",
+      complete: stage === "review" || stage === "ready",
+    },
   ];
 
   const headerTitle =
@@ -1451,8 +1811,15 @@ function ExtractionWorkspacePage({
     <div className="page-stack">
       <div className="workspace-layout">
         <aside className="surface job-rail">
-          <CardHeader title="Extraction jobs" subtitle="Treat each extraction as one object from upload to export." />
-          <button type="button" className="primary-button full-width" onClick={onStartNew}>
+          <CardHeader
+            title="Extraction jobs"
+            subtitle="Treat each extraction as one object from upload to export."
+          />
+          <button
+            type="button"
+            className="primary-button full-width"
+            onClick={onStartNew}
+          >
             New extraction
           </button>
           <div className="job-rail-sections">
@@ -1463,14 +1830,34 @@ function ExtractionWorkspacePage({
                   <div className="queue-list">
                     {group.items.map((job) => {
                       const result = resultsByJob[job.id];
-                      const document = documents.find((item) => item.id === job.document_id);
-                      const reviewCount = result?.result.fields_requiring_review.length ?? 0;
+                      const document = documents.find(
+                        (item) => item.id === job.document_id,
+                      );
+                      const reviewCount =
+                        result?.result.fields_requiring_review.length ?? 0;
                       return (
-                        <button key={job.id} type="button" className={classNames("queue-item", selectedJobId === job.id && "selected")} onClick={() => onSelectJob(job.id)}>
-                          <strong>{document?.original_filename ?? `Document ${job.document_id}`}</strong>
+                        <button
+                          key={job.id}
+                          type="button"
+                          className={classNames(
+                            "queue-item",
+                            selectedJobId === job.id && "selected",
+                          )}
+                          onClick={() => onSelectJob(job.id)}
+                        >
+                          <strong>
+                            {document?.original_filename ??
+                              `Document ${job.document_id}`}
+                          </strong>
                           <span>{formatTimestamp(job.updated_at)}</span>
                           <em>
-                            {job.status === "completed" ? (reviewCount ? `${reviewCount} need review` : "Ready to export") : job.status === "failed" ? "Failed" : "Processing"}
+                            {job.status === "completed"
+                              ? reviewCount
+                                ? `${reviewCount} need review`
+                                : "Ready to export"
+                              : job.status === "failed"
+                                ? "Failed"
+                                : "Processing"}
                           </em>
                         </button>
                       );
@@ -1481,7 +1868,9 @@ function ExtractionWorkspacePage({
             ) : (
               <div className="note-card compact">
                 <strong>No extraction history yet</strong>
-                <p>Your first upload should not require a tour of the product.</p>
+                <p>
+                  Your first upload should not require a tour of the product.
+                </p>
               </div>
             )}
           </div>
@@ -1496,29 +1885,62 @@ function ExtractionWorkspacePage({
               actions={
                 <>
                   {stage === "review" ? (
-                    <button type="button" className="primary-button" onClick={() => void onSaveReview()} disabled={busyAction === "save-review"}>
-                      {busyAction === "save-review" ? "Saving..." : "Save changes"}
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => void onSaveReview()}
+                      disabled={busyAction === "save-review"}
+                    >
+                      {busyAction === "save-review"
+                        ? "Saving..."
+                        : "Save changes"}
                     </button>
                   ) : null}
                   {stage === "ready" || stage === "review" ? (
                     <>
-                      <button type="button" className="secondary-button" onClick={() => void onExport("json")} disabled={busyAction === "export-json"}>
-                        {busyAction === "export-json" ? "Exporting JSON..." : "Export JSON"}
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void onExport("json")}
+                        disabled={busyAction === "export-json"}
+                      >
+                        {busyAction === "export-json"
+                          ? "Exporting JSON..."
+                          : "Export JSON"}
                       </button>
-                      <button type="button" className="secondary-button" onClick={() => void onExport("csv")} disabled={busyAction === "export-csv"}>
-                        {busyAction === "export-csv" ? "Exporting CSV..." : "Export CSV"}
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void onExport("csv")}
+                        disabled={busyAction === "export-csv"}
+                      >
+                        {busyAction === "export-csv"
+                          ? "Exporting CSV..."
+                          : "Export CSV"}
                       </button>
-                      <button type="button" className="secondary-button" onClick={() => void onExport("excel")} disabled={busyAction === "export-excel"}>
-                        {busyAction === "export-excel" ? "Exporting Excel..." : "Export Excel"}
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void onExport("excel")}
+                        disabled={busyAction === "export-excel"}
+                      >
+                        {busyAction === "export-excel"
+                          ? "Exporting Excel..."
+                          : "Export Excel"}
                       </button>
                     </>
                   ) : null}
-                  {(stage === "draft" || stage === "failed") && templates.length ? (
+                  {(stage === "draft" || stage === "failed") &&
+                  templates.length ? (
                     <button
                       type="button"
                       className="primary-button"
                       onClick={() => void onRunExtraction()}
-                      disabled={!selectedDocument || !selectedTemplateVersion || busyAction === "run"}
+                      disabled={
+                        !selectedDocument ||
+                        !selectedTemplateVersion ||
+                        busyAction === "run"
+                      }
                     >
                       {busyAction === "run" ? "Queueing..." : "Run extraction"}
                     </button>
@@ -1529,17 +1951,27 @@ function ExtractionWorkspacePage({
 
             <div className="workspace-detail-grid">
               <section className="surface section-surface">
-                <CardHeader title="Source" subtitle="Keep the document, schema, and evidence together so the next action stays obvious." />
+                <CardHeader
+                  title="Source"
+                  subtitle="Keep the document, schema, and evidence together so the next action stays obvious."
+                />
                 {stage === "draft" ? (
                   <div className="draft-source-stack">
                     <div className="upload-zone">
                       <div className="upload-glyph">↑</div>
                       <strong>Upload PDF or source file</strong>
                       <p>PDF, DOCX, JPG, PNG, TIFF, TXT</p>
-                      <button type="button" className="primary-button" onClick={() => uploadInputRef.current?.click()}>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => uploadInputRef.current?.click()}
+                      >
                         Choose file
                       </button>
-                      <span>Stay in this workspace after upload. Do not get kicked to another destination.</span>
+                      <span>
+                        Stay in this workspace after upload. Do not get kicked
+                        to another destination.
+                      </span>
                       <input
                         ref={uploadInputRef}
                         type="file"
@@ -1555,14 +1987,36 @@ function ExtractionWorkspacePage({
                     </div>
 
                     <div className="settings-grid">
-                      <SummaryStat label="Selected document" value={selectedDocument?.original_filename ?? "None yet"} tone="accent" />
-                      <SummaryStat label="Type" value={selectedDocument ? getDocumentTypeLabel(selectedDocument.content_type) : "—"} />
+                      <SummaryStat
+                        label="Selected document"
+                        value={
+                          selectedDocument?.original_filename ?? "None yet"
+                        }
+                        tone="accent"
+                      />
+                      <SummaryStat
+                        label="Type"
+                        value={
+                          selectedDocument
+                            ? getDocumentTypeLabel(
+                                selectedDocument.content_type,
+                              )
+                            : "—"
+                        }
+                      />
                     </div>
 
                     {documents.length ? (
                       <label>
                         <span>Recent sources</span>
-                        <select value={selectedDocumentId ?? ""} onChange={(event) => onSelectDocument(parseOptionalId(event.target.value))}>
+                        <select
+                          value={selectedDocumentId ?? ""}
+                          onChange={(event) =>
+                            onSelectDocument(
+                              parseOptionalId(event.target.value),
+                            )
+                          }
+                        >
                           <option value="">Select document</option>
                           {documents.map((document) => (
                             <option key={document.id} value={document.id}>
@@ -1577,7 +2031,14 @@ function ExtractionWorkspacePage({
                       <div className="form-grid">
                         <label>
                           <span>Schema</span>
-                          <select value={selectedTemplate?.id ?? ""} onChange={(event) => onSelectTemplate(parseOptionalId(event.target.value))}>
+                          <select
+                            value={selectedTemplate?.id ?? ""}
+                            onChange={(event) =>
+                              onSelectTemplate(
+                                parseOptionalId(event.target.value),
+                              )
+                            }
+                          >
                             <option value="">Select schema</option>
                             {templates.map((template) => (
                               <option key={template.id} value={template.id}>
@@ -1588,7 +2049,14 @@ function ExtractionWorkspacePage({
                         </label>
                         <label>
                           <span>Advanced: version</span>
-                          <select value={selectedTemplateVersion?.id ?? ""} onChange={(event) => onSelectTemplateVersion(parseOptionalId(event.target.value))}>
+                          <select
+                            value={selectedTemplateVersion?.id ?? ""}
+                            onChange={(event) =>
+                              onSelectTemplateVersion(
+                                parseOptionalId(event.target.value),
+                              )
+                            }
+                          >
                             <option value="">Select version</option>
                             {selectedSchemaVersions.map((version) => (
                               <option key={version.id} value={version.id}>
@@ -1601,8 +2069,15 @@ function ExtractionWorkspacePage({
                     ) : (
                       <div className="note-card">
                         <strong>No schemas yet</strong>
-                        <p>You only need to leave this workspace if a schema truly does not exist.</p>
-                        <button type="button" className="secondary-button top-gap" onClick={onOpenSchemas}>
+                        <p>
+                          You only need to leave this workspace if a schema
+                          truly does not exist.
+                        </p>
+                        <button
+                          type="button"
+                          className="secondary-button top-gap"
+                          onClick={onOpenSchemas}
+                        >
                           Open schema builder
                         </button>
                       </div>
@@ -1611,17 +2086,37 @@ function ExtractionWorkspacePage({
                 ) : selectedResult ? (
                   <div className="evidence-stack">
                     <div className="evidence-preview">
-                      <strong>{selectedDocument?.original_filename ?? "Selected document"}</strong>
-                      <p>{focusedField ? "Source evidence should justify the field the user is editing." : "No field is currently selected."}</p>
+                      <strong>
+                        {selectedDocument?.original_filename ??
+                          "Selected document"}
+                      </strong>
+                      <p>
+                        {focusedField
+                          ? "Source evidence should justify the field the user is editing."
+                          : "No field is currently selected."}
+                      </p>
                     </div>
                     {focusedField ? (
                       <div className="note-card">
                         <strong>{focusedField.label}</strong>
-                        <p>{focusedField.source_text || "No citation snippet returned for this field."}</p>
+                        <p>
+                          {focusedField.source_text ||
+                            "No citation snippet returned for this field."}
+                        </p>
                         <div className="inline-actions top-gap">
-                          <span className="pill">{focusedField.page_number ? `Page ${focusedField.page_number}` : "Page —"}</span>
-                          <span className="pill">{focusedField.location_reference || "Unknown location"}</span>
-                          <span className="pill">Confidence {formatConfidence(focusedField.confidence_score)}</span>
+                          <span className="pill">
+                            {focusedField.page_number
+                              ? `Page ${focusedField.page_number}`
+                              : "Page —"}
+                          </span>
+                          <span className="pill">
+                            {focusedField.location_reference ||
+                              "Unknown location"}
+                          </span>
+                          <span className="pill">
+                            Confidence{" "}
+                            {formatConfidence(focusedField.confidence_score)}
+                          </span>
                         </div>
                       </div>
                     ) : null}
@@ -1630,15 +2125,35 @@ function ExtractionWorkspacePage({
                         <button
                           key={field.field_name}
                           type="button"
-                          className={classNames("evidence-row", focusedField?.field_name === field.field_name && "selected")}
+                          className={classNames(
+                            "evidence-row",
+                            focusedField?.field_name === field.field_name &&
+                              "selected",
+                          )}
                           onClick={() => onSetFocusedField(field.field_name)}
                         >
                           <div>
                             <strong>{field.label}</strong>
-                            <p>{field.source_text || field.extraction_notes || "No source snippet returned."}</p>
+                            <p>
+                              {field.source_text ||
+                                field.extraction_notes ||
+                                "No source snippet returned."}
+                            </p>
                           </div>
-                          <StatusBadge tone={field.validation_status === "invalid" ? "danger" : field.requires_review ? "warning" : "success"}>
-                            {field.requires_review ? "Needs Review" : field.validation_status === "invalid" ? "Invalid" : "Valid"}
+                          <StatusBadge
+                            tone={
+                              field.validation_status === "invalid"
+                                ? "danger"
+                                : field.requires_review
+                                  ? "warning"
+                                  : "success"
+                            }
+                          >
+                            {field.requires_review
+                              ? "Needs Review"
+                              : field.validation_status === "invalid"
+                                ? "Invalid"
+                                : "Valid"}
                           </StatusBadge>
                         </button>
                       ))}
@@ -1647,7 +2162,10 @@ function ExtractionWorkspacePage({
                 ) : (
                   <div className="processing-stack">
                     <div className="evidence-preview">
-                      <strong>{selectedDocument?.original_filename ?? "Selected document"}</strong>
+                      <strong>
+                        {selectedDocument?.original_filename ??
+                          "Selected document"}
+                      </strong>
                       <p>
                         {selectedDocument
                           ? `${getDocumentTypeLabel(selectedDocument.content_type)} · uploaded ${formatTimestamp(selectedDocument.created_at)}`
@@ -1656,7 +2174,13 @@ function ExtractionWorkspacePage({
                     </div>
                     <div className="progress-list">
                       {progressSteps.map((step) => (
-                        <div key={step.label} className={classNames("progress-step", step.complete && "complete")}>
+                        <div
+                          key={step.label}
+                          className={classNames(
+                            "progress-step",
+                            step.complete && "complete",
+                          )}
+                        >
                           <div className="progress-dot" aria-hidden="true" />
                           <span>{step.label}</span>
                         </div>
@@ -1675,54 +2199,128 @@ function ExtractionWorkspacePage({
               <section className="surface section-surface">
                 {stage === "draft" ? (
                   <>
-                    <CardHeader title="Outcome preview" subtitle="The user should know what progress looks like before they press run." />
+                    <CardHeader
+                      title="Outcome preview"
+                      subtitle="The user should know what progress looks like before they press run."
+                    />
                     <div className="summary-grid">
-                      <SummaryStat label="Schema" value={selectedTemplate?.name ?? "Choose one schema"} tone="accent" />
-                      <SummaryStat label="Version" value={selectedTemplateVersion?.version ?? "Advanced only"} />
-                      <SummaryStat label="Fields to extract" value={selectedTemplateVersion?.definition.extracted_fields.length ?? 0} />
-                      <SummaryStat label="Export formats" value={selectedTemplateVersion?.definition.output_settings.export_formats.join(" · ") ?? "JSON · CSV · Excel"} />
+                      <SummaryStat
+                        label="Schema"
+                        value={selectedTemplate?.name ?? "Choose one schema"}
+                        tone="accent"
+                      />
+                      <SummaryStat
+                        label="Version"
+                        value={
+                          selectedTemplateVersion?.version ?? "Advanced only"
+                        }
+                      />
+                      <SummaryStat
+                        label="Fields to extract"
+                        value={
+                          selectedTemplateVersion?.definition.extracted_fields
+                            .length ?? 0
+                        }
+                      />
+                      <SummaryStat
+                        label="Export formats"
+                        value={
+                          selectedTemplateVersion?.definition.output_settings.export_formats.join(
+                            " · ",
+                          ) ?? "JSON · CSV · Excel"
+                        }
+                      />
                     </div>
                     <div className="note-card">
                       <strong>What happens next</strong>
-                      <p>Upload a PDF, keep the recommended schema unless it is wrong, run extraction, then review only the uncertain fields.</p>
+                      <p>
+                        Upload a PDF, keep the recommended schema unless it is
+                        wrong, run extraction, then review only the uncertain
+                        fields.
+                      </p>
                     </div>
                     {selectedTemplateVersion ? (
                       <div className="preview-list">
-                        {selectedTemplateVersion.definition.extracted_fields.map((field) => (
-                          <div key={field.name} className="preview-row">
-                            <div className="field-token">{field.label.charAt(0).toUpperCase()}</div>
-                            <div className="preview-copy">
-                              <strong>{field.label}</strong>
-                              <span>{field.type}</span>
+                        {selectedTemplateVersion.definition.extracted_fields.map(
+                          (field) => (
+                            <div key={field.name} className="preview-row">
+                              <div className="field-token">
+                                {field.label.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="preview-copy">
+                                <strong>{field.label}</strong>
+                                <span>{field.type}</span>
+                              </div>
+                              <div className="preview-meta">
+                                <StatusBadge
+                                  tone={field.required ? "info" : "warning"}
+                                >
+                                  {field.required ? "Required" : "Optional"}
+                                </StatusBadge>
+                                {field.citation_required ? (
+                                  <span className="pill">Citation</span>
+                                ) : null}
+                              </div>
                             </div>
-                            <div className="preview-meta">
-                                <StatusBadge tone={field.required ? "info" : "warning"}>{field.required ? "Required" : "Optional"}</StatusBadge>
-                              {field.citation_required ? <span className="pill">Citation</span> : null}
-                            </div>
-                          </div>
-                        ))}
+                          ),
+                        )}
                       </div>
                     ) : null}
                   </>
                 ) : stage === "processing" || stage === "failed" ? (
                   <>
-                    <CardHeader title="Progress" subtitle="This replaces the old Runs page. Status belongs inside the active job." />
+                    <CardHeader
+                      title="Progress"
+                      subtitle="This replaces the old Runs page. Status belongs inside the active job."
+                    />
                     <div className="summary-grid">
-                      <SummaryStat label="Status" value={selectedJob?.status ?? "Queued"} tone={stage === "failed" ? "danger" : stage === "processing" ? "warning" : "accent"} />
-                      <SummaryStat label="Schema" value={selectedTemplateVersion?.definition.template_name ?? "Unknown schema"} />
-                      <SummaryStat label="Started" value={formatTimestamp(selectedJob?.created_at)} />
-                      <SummaryStat label="Last update" value={formatTimestamp(selectedJob?.updated_at)} />
+                      <SummaryStat
+                        label="Status"
+                        value={selectedJob?.status ?? "Queued"}
+                        tone={
+                          stage === "failed"
+                            ? "danger"
+                            : stage === "processing"
+                              ? "warning"
+                              : "accent"
+                        }
+                      />
+                      <SummaryStat
+                        label="Schema"
+                        value={
+                          selectedTemplateVersion?.definition.template_name ??
+                          "Unknown schema"
+                        }
+                      />
+                      <SummaryStat
+                        label="Started"
+                        value={formatTimestamp(selectedJob?.created_at)}
+                      />
+                      <SummaryStat
+                        label="Last update"
+                        value={formatTimestamp(selectedJob?.updated_at)}
+                      />
                     </div>
                     <div className="progress-list">
                       {progressSteps.map((step) => (
-                        <div key={step.label} className={classNames("progress-step", step.complete && "complete")}>
+                        <div
+                          key={step.label}
+                          className={classNames(
+                            "progress-step",
+                            step.complete && "complete",
+                          )}
+                        >
                           <div className="progress-dot" aria-hidden="true" />
                           <span>{step.label}</span>
                         </div>
                       ))}
                     </div>
                     <div className="note-card">
-                      <strong>{stage === "failed" ? "Recovery path" : "Why this stays here"}</strong>
+                      <strong>
+                        {stage === "failed"
+                          ? "Recovery path"
+                          : "Why this stays here"}
+                      </strong>
                       <p>
                         {stage === "failed"
                           ? "The user should be one action away from retrying instead of hunting through a job table."
@@ -1733,7 +2331,11 @@ function ExtractionWorkspacePage({
                 ) : (
                   <>
                     <CardHeader
-                      title={stage === "review" ? "Review only the exceptions" : "Trusted result"}
+                      title={
+                        stage === "review"
+                          ? "Review only the exceptions"
+                          : "Trusted result"
+                      }
                       subtitle={
                         stage === "review"
                           ? `${fieldsNeedingReview.length} fields need a human decision before export.`
@@ -1741,10 +2343,29 @@ function ExtractionWorkspacePage({
                       }
                     />
                     <div className="summary-grid">
-                      <SummaryStat label="Extracted fields" value={extractedFields.length} />
-                      <SummaryStat label="Needs review" value={fieldsNeedingReview.length} tone={fieldsNeedingReview.length ? "warning" : "success"} />
-                      <SummaryStat label="Calculated fields" value={calculatedFields.length} />
-                      <SummaryStat label="Reviewed" value={selectedResult?.result.reviewed_at ? formatTimestamp(selectedResult.result.reviewed_at) : "Not yet"} />
+                      <SummaryStat
+                        label="Extracted fields"
+                        value={extractedFields.length}
+                      />
+                      <SummaryStat
+                        label="Needs review"
+                        value={fieldsNeedingReview.length}
+                        tone={
+                          fieldsNeedingReview.length ? "warning" : "success"
+                        }
+                      />
+                      <SummaryStat
+                        label="Calculated fields"
+                        value={calculatedFields.length}
+                      />
+                      <SummaryStat
+                        label="Reviewed"
+                        value={
+                          selectedResult?.result.reviewed_at
+                            ? formatTimestamp(selectedResult.result.reviewed_at)
+                            : "Not yet"
+                        }
+                      />
                     </div>
 
                     {fieldsNeedingReview.length ? (
@@ -1755,18 +2376,42 @@ function ExtractionWorkspacePage({
                             <span>{fieldsNeedingReview.length} fields</span>
                           </div>
                           {fieldsNeedingReview.map((field) => {
-                            const definition = getFieldDefinition(selectedTemplateVersion?.definition ?? null, field.field_name);
+                            const definition = getFieldDefinition(
+                              selectedTemplateVersion?.definition ?? null,
+                              field.field_name,
+                            );
                             const fieldType = getFieldType(field, definition);
-                            const draftValue = reviewDrafts[field.field_name] ?? getInitialReviewDraft(field, definition);
+                            const draftValue =
+                              reviewDrafts[field.field_name] ??
+                              getInitialReviewDraft(field, definition);
                             return (
-                              <div key={field.field_name} className={classNames("triage-card", focusedField?.field_name === field.field_name && "selected-card")}>
+                              <div
+                                key={field.field_name}
+                                className={classNames(
+                                  "triage-card",
+                                  focusedField?.field_name ===
+                                    field.field_name && "selected-card",
+                                )}
+                              >
                                 <div className="review-card-header">
                                   <div>
                                     <strong>{field.label}</strong>
-                                    <p>{field.validation_errors[0] || field.extraction_notes || "This field needs confirmation."}</p>
+                                    <p>
+                                      {field.validation_errors[0] ||
+                                        field.extraction_notes ||
+                                        "This field needs confirmation."}
+                                    </p>
                                   </div>
-                                  <StatusBadge tone={field.validation_status === "invalid" ? "danger" : "warning"}>
-                                    {field.validation_status === "invalid" ? "Invalid" : "Needs Review"}
+                                  <StatusBadge
+                                    tone={
+                                      field.validation_status === "invalid"
+                                        ? "danger"
+                                        : "warning"
+                                    }
+                                  >
+                                    {field.validation_status === "invalid"
+                                      ? "Invalid"
+                                      : "Needs Review"}
                                   </StatusBadge>
                                 </div>
                                 <FieldShell
@@ -1782,29 +2427,77 @@ function ExtractionWorkspacePage({
                                   }
                                 >
                                   {fieldType === "boolean" ? (
-                                    <select aria-label={`${field.label} review value`} value={draftValue} onChange={(event) => onSetReviewDraft(field.field_name, event.target.value)}>
+                                    <select
+                                      aria-label={`${field.label} review value`}
+                                      value={draftValue}
+                                      onChange={(event) =>
+                                        onSetReviewDraft(
+                                          field.field_name,
+                                          event.target.value,
+                                        )
+                                      }
+                                    >
                                       <option value="">Unknown</option>
                                       <option value="true">True</option>
                                       <option value="false">False</option>
                                     </select>
                                   ) : fieldType === "paragraph" ? (
-                                    <textarea aria-label={`${field.label} review value`} rows={4} value={draftValue} onChange={(event) => onSetReviewDraft(field.field_name, event.target.value)} />
+                                    <textarea
+                                      aria-label={`${field.label} review value`}
+                                      rows={4}
+                                      value={draftValue}
+                                      onChange={(event) =>
+                                        onSetReviewDraft(
+                                          field.field_name,
+                                          event.target.value,
+                                        )
+                                      }
+                                    />
                                   ) : (
                                     <input
                                       aria-label={`${field.label} review value`}
-                                      type={fieldType === "date" ? "date" : "text"}
+                                      type={
+                                        fieldType === "date" ? "date" : "text"
+                                      }
                                       value={draftValue}
-                                      onChange={(event) => onSetReviewDraft(field.field_name, event.target.value)}
+                                      onChange={(event) =>
+                                        onSetReviewDraft(
+                                          field.field_name,
+                                          event.target.value,
+                                        )
+                                      }
                                     />
                                   )}
                                 </FieldShell>
                                 <div className="triage-meta">
-                                  <span>Current value: {formatValue(field.normalized_value ?? field.extracted_value)}</span>
-                                  <span>{field.page_number ? `Page ${field.page_number}` : "Page —"} · {field.location_reference || "Unknown location"}</span>
-                                  <span>Confidence {formatConfidence(field.confidence_score)}</span>
+                                  <span>
+                                    Current value:{" "}
+                                    {formatValue(
+                                      field.normalized_value ??
+                                        field.extracted_value,
+                                    )}
+                                  </span>
+                                  <span>
+                                    {field.page_number
+                                      ? `Page ${field.page_number}`
+                                      : "Page —"}{" "}
+                                    ·{" "}
+                                    {field.location_reference ||
+                                      "Unknown location"}
+                                  </span>
+                                  <span>
+                                    Confidence{" "}
+                                    {formatConfidence(field.confidence_score)}
+                                  </span>
                                 </div>
                                 <div className="inline-actions top-gap">
-                                  <button type="button" className="text-link" onClick={() => onSetFocusedField(field.field_name)}>
+                                  <button
+                                    type="button"
+                                    className="text-link"
+                                    onClick={() =>
+                                      onSetFocusedField(field.field_name)
+                                    }
+                                  >
                                     Show source
                                   </button>
                                   <span className="pill">{fieldType}</span>
@@ -1817,7 +2510,10 @@ function ExtractionWorkspacePage({
                     ) : (
                       <div className="note-card">
                         <strong>No manual review required</strong>
-                        <p>The result is already ready for export. Do not make the user visit another page just to download it.</p>
+                        <p>
+                          The result is already ready for export. Do not make
+                          the user visit another page just to download it.
+                        </p>
                       </div>
                     )}
 
@@ -1830,10 +2526,17 @@ function ExtractionWorkspacePage({
                         <div className="preview-list">
                           {validatedFields.slice(0, 6).map((field) => (
                             <div key={field.field_name} className="preview-row">
-                              <div className="field-token">{field.label.charAt(0).toUpperCase()}</div>
+                              <div className="field-token">
+                                {field.label.charAt(0).toUpperCase()}
+                              </div>
                               <div className="preview-copy">
                                 <strong>{field.label}</strong>
-                                <span>{formatValue(field.normalized_value ?? field.extracted_value)}</span>
+                                <span>
+                                  {formatValue(
+                                    field.normalized_value ??
+                                      field.extracted_value,
+                                  )}
+                                </span>
                               </div>
                               <div className="preview-meta">
                                 <StatusBadge tone="success">Valid</StatusBadge>
@@ -1853,14 +2556,26 @@ function ExtractionWorkspacePage({
                         <div className="preview-list">
                           {calculatedFields.map((field) => (
                             <div key={field.field_name} className="preview-row">
-                              <div className="field-token">{field.label.charAt(0).toUpperCase()}</div>
+                              <div className="field-token">
+                                {field.label.charAt(0).toUpperCase()}
+                              </div>
                               <div className="preview-copy">
                                 <strong>{field.label}</strong>
-                                <span>{formatValue(field.calculated_value)}</span>
+                                <span>
+                                  {formatValue(field.calculated_value)}
+                                </span>
                               </div>
                               <div className="preview-meta">
-                                <StatusBadge tone={field.validation_status === "invalid" ? "danger" : "success"}>
-                                  {field.validation_status === "invalid" ? "Invalid" : "Valid"}
+                                <StatusBadge
+                                  tone={
+                                    field.validation_status === "invalid"
+                                      ? "danger"
+                                      : "success"
+                                  }
+                                >
+                                  {field.validation_status === "invalid"
+                                    ? "Invalid"
+                                    : "Valid"}
                                 </StatusBadge>
                               </div>
                             </div>
@@ -1878,13 +2593,22 @@ function ExtractionWorkspacePage({
                         <div className="preview-list">
                           {exportHistory.map((record) => (
                             <div key={record.id} className="preview-row">
-                              <div className="field-token">{record.export_format.charAt(0).toUpperCase()}</div>
+                              <div className="field-token">
+                                {record.export_format.charAt(0).toUpperCase()}
+                              </div>
                               <div className="preview-copy">
                                 <strong>{basename(record.file_path)}</strong>
-                                <span>{formatTimestamp(record.created_at)}</span>
+                                <span>
+                                  {formatTimestamp(record.created_at)}
+                                </span>
                               </div>
                               <div className="preview-meta">
-                                <a className="text-link" href={`${API_BASE}/exports/${record.id}/download`} target="_blank" rel="noreferrer">
+                                <a
+                                  className="text-link"
+                                  href={`${API_BASE}/exports/${record.id}/download`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
                                   Download
                                 </a>
                               </div>
@@ -1894,7 +2618,10 @@ function ExtractionWorkspacePage({
                       ) : (
                         <div className="note-card compact">
                           <strong>No exports yet</strong>
-                          <p>Exports should be available from this result, not hidden behind another destination.</p>
+                          <p>
+                            Exports should be available from this result, not
+                            hidden behind another destination.
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1964,6 +2691,8 @@ function SettingsPage({
   onLoadDesktopLogs: () => Promise<void>;
   desktopLogs: DesktopLogs | null;
 }) {
+  const savedCustomProfiles = customProfiles ?? [];
+
   return (
     <div className="page-stack">
       <section className="surface page-header-surface">
@@ -1975,21 +2704,53 @@ function SettingsPage({
       </section>
 
       <section className="surface">
-        <CardHeader title="Provider presets" subtitle="Choose where extraction runs without hiding where documents are processed." />
+        <CardHeader
+          title="Provider presets"
+          subtitle="Choose where extraction runs without hiding where documents are processed."
+        />
         <div className="provider-grid">
           {providerCatalog.map((item) => {
-            const selected = provider?.provider_type === item.settings.provider_type && provider?.model === item.settings.model;
+            const selected =
+              provider?.provider_type === item.settings.provider_type &&
+              provider?.model === item.settings.model;
             const health = providerHealth[item.key];
             const probe = probeResults[item.key];
             return (
               <section key={item.key} className="provider-card">
                 <div className="provider-header">
                   <div>
-                    <span className={classNames("provider-mode", item.mode === "local" ? "local" : "cloud")}>{item.mode === "local" ? "Local" : "Cloud"}</span>
+                    <span
+                      className={classNames(
+                        "provider-mode",
+                        item.mode === "local" ? "local" : "cloud",
+                      )}
+                    >
+                      {item.mode === "local" ? "Local" : "Cloud"}
+                    </span>
                     <h3>{item.label}</h3>
                   </div>
-                  <StatusBadge tone={selected ? "info" : health?.ready ? "success" : item.recommended ? "indigo" : item.enabled ? "neutral" : "danger"}>
-                    {selected ? "Default" : health?.ready ? "Ready" : item.recommended ? "Recommended" : item.enabled ? "Available" : "Disabled"}
+                  <StatusBadge
+                    tone={
+                      selected
+                        ? "info"
+                        : health?.ready
+                          ? "success"
+                          : item.recommended
+                            ? "indigo"
+                            : item.enabled
+                              ? "neutral"
+                              : "danger"
+                    }
+                  >
+                    {selected
+                      ? "Default"
+                      : health?.ready
+                        ? "Ready"
+                        : item.recommended
+                          ? "Recommended"
+                          : item.enabled
+                            ? "Available"
+                            : "Disabled"}
                   </StatusBadge>
                 </div>
                 <div className="provider-body">
@@ -2010,15 +2771,27 @@ function SettingsPage({
                   ) : null}
                   <div className="provider-item">
                     <span>Controls</span>
-                    <strong>{item.capabilities.requires_api_key ? `API key via ${item.api_key_env_var}` : "No API key required"}</strong>
+                    <strong>
+                      {item.capabilities.requires_api_key
+                        ? `API key via ${item.api_key_env_var}`
+                        : "No API key required"}
+                    </strong>
                   </div>
                   <div className="provider-item">
                     <span>Policy</span>
-                    <strong>{item.settings.allow_external_processing ? "External processing allowed" : "Local-only processing"}</strong>
+                    <strong>
+                      {item.settings.allow_external_processing
+                        ? "External processing allowed"
+                        : "Local-only processing"}
+                    </strong>
                   </div>
                   <div className="provider-item">
                     <span>Readiness</span>
-                    <strong>{health ? health.checks.join(" • ") : "No health data loaded"}</strong>
+                    <strong>
+                      {health
+                        ? health.checks.join(" • ")
+                        : "No health data loaded"}
+                    </strong>
                   </div>
                   <div className="provider-item">
                     <span>Probe</span>
@@ -2033,10 +2806,16 @@ function SettingsPage({
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => void onSetProvider(buildProviderPayload(item))}
+                    onClick={() =>
+                      void onSetProvider(buildProviderPayload(item))
+                    }
                     disabled={busyAction === "save-provider"}
                   >
-                    {selected ? "Default provider" : busyAction === "save-provider" ? "Saving..." : "Set as default"}
+                    {selected
+                      ? "Default provider"
+                      : busyAction === "save-provider"
+                        ? "Saving..."
+                        : "Set as default"}
                   </button>
                   <button
                     type="button"
@@ -2044,7 +2823,9 @@ function SettingsPage({
                     onClick={() => void onProbeProvider(item)}
                     disabled={busyAction === `probe-${item.key}`}
                   >
-                    {busyAction === `probe-${item.key}` ? "Probing..." : "Probe"}
+                    {busyAction === `probe-${item.key}`
+                      ? "Probing..."
+                      : "Probe"}
                   </button>
                 </div>
               </section>
@@ -2054,17 +2835,28 @@ function SettingsPage({
       </section>
 
       <section className="surface">
-        <CardHeader title="Product defaults" subtitle="Keep the defaults predictable so users rarely need this page." />
+        <CardHeader
+          title="Product defaults"
+          subtitle="Keep the defaults predictable so users rarely need this page."
+        />
         <div className="settings-grid settings-grid-wide">
           {[
-            ["App mode", provider?.mode === "cloud" ? "Cloud-assisted" : "Local"],
+            [
+              "App mode",
+              provider?.mode === "cloud" ? "Cloud-assisted" : "Local",
+            ],
             ["Default provider", provider?.provider_type ?? "Not configured"],
             ["Default model", provider?.model ?? "Not configured"],
             ["Storage location", "/data"],
             ["OCR settings", "Enabled for scanned PDFs"],
             ["Export defaults", "JSON + CSV + Excel"],
             ["Logging preference", "Minimal document text logging"],
-            ["Privacy mode", provider?.allow_external_processing ? "Cloud allowed" : "Local-only by default"],
+            [
+              "Privacy mode",
+              provider?.allow_external_processing
+                ? "Cloud allowed"
+                : "Local-only by default",
+            ],
           ].map(([label, value]) => (
             <SummaryStat key={label} label={label} value={value} />
           ))}
@@ -2081,14 +2873,24 @@ function SettingsPage({
             <span>Display label</span>
             <input
               value={customProviderDraft.label}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, label: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  label: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
             <span>Provider type</span>
             <input
               value={customProviderDraft.provider_type}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, provider_type: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  provider_type: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
@@ -2114,7 +2916,8 @@ function SettingsPage({
               onChange={(event) =>
                 onCustomProviderDraftChange((current) => ({
                   ...current,
-                  api_style: event.target.value as CustomProviderDraft["api_style"],
+                  api_style: event.target
+                    .value as CustomProviderDraft["api_style"],
                 }))
               }
             >
@@ -2127,14 +2930,24 @@ function SettingsPage({
             <input
               value={customProviderDraft.base_url}
               placeholder="https://llm.company.internal/v1"
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, base_url: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  base_url: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
             <span>Model</span>
             <input
               value={customProviderDraft.model}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, model: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  model: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
@@ -2142,7 +2955,12 @@ function SettingsPage({
             <input
               value={customProviderDraft.api_key_env_var}
               placeholder="OPENAI_API_KEY"
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, api_key_env_var: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  api_key_env_var: event.target.value,
+                }))
+              }
             />
           </label>
           {customProviderDraft.api_style === "azure_openai" ? (
@@ -2151,14 +2969,24 @@ function SettingsPage({
                 <span>Deployment</span>
                 <input
                   value={customProviderDraft.deployment}
-                  onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, deployment: event.target.value }))}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      deployment: event.target.value,
+                    }))
+                  }
                 />
               </label>
               <label>
                 <span>API version</span>
                 <input
                   value={customProviderDraft.api_version}
-                  onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, api_version: event.target.value }))}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      api_version: event.target.value,
+                    }))
+                  }
                 />
               </label>
             </>
@@ -2167,35 +2995,60 @@ function SettingsPage({
             <span>Temperature</span>
             <input
               value={customProviderDraft.temperature}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, temperature: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  temperature: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
             <span>Max tokens</span>
             <input
               value={customProviderDraft.max_tokens}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, max_tokens: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  max_tokens: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
             <span>Timeout seconds</span>
             <input
               value={customProviderDraft.timeout_seconds}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, timeout_seconds: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  timeout_seconds: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
             <span>Retry count</span>
             <input
               value={customProviderDraft.retry_count}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, retry_count: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  retry_count: event.target.value,
+                }))
+              }
             />
           </label>
           <label>
             <span>Chunk size</span>
             <input
               value={customProviderDraft.chunk_size}
-              onChange={(event) => onCustomProviderDraftChange((current) => ({ ...current, chunk_size: event.target.value }))}
+              onChange={(event) =>
+                onCustomProviderDraftChange((current) => ({
+                  ...current,
+                  chunk_size: event.target.value,
+                }))
+              }
             />
           </label>
           <SwitchField
@@ -2236,10 +3089,21 @@ function SettingsPage({
             onClick={() => void onSaveCustomProfile()}
             disabled={busyAction === "save-custom-profile"}
           >
-            {busyAction === "save-custom-profile" ? "Saving profile..." : selectedCustomProfileId ? "Update saved profile" : "Save profile"}
+            {busyAction === "save-custom-profile"
+              ? "Saving profile..."
+              : selectedCustomProfileId
+                ? "Update saved profile"
+                : "Save profile"}
           </button>
-          <button type="button" className="primary-button" onClick={() => void onSetCustomProvider()} disabled={busyAction === "save-provider"}>
-            {busyAction === "save-provider" ? "Saving..." : "Set custom provider as default"}
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void onSetCustomProvider()}
+            disabled={busyAction === "save-provider"}
+          >
+            {busyAction === "save-provider"
+              ? "Saving..."
+              : "Set custom provider as default"}
           </button>
           <button
             type="button"
@@ -2247,22 +3111,37 @@ function SettingsPage({
             onClick={() => void onProbeCustomProvider()}
             disabled={busyAction === `probe-${CUSTOM_PROVIDER_KEY}`}
           >
-            {busyAction === `probe-${CUSTOM_PROVIDER_KEY}` ? "Probing..." : "Probe custom provider"}
+            {busyAction === `probe-${CUSTOM_PROVIDER_KEY}`
+              ? "Probing..."
+              : "Probe custom provider"}
           </button>
         </div>
-        {customProfiles.length ? (
+        {savedCustomProfiles.length ? (
           <div className="provider-grid top-gap">
-            {customProfiles.map((profile) => (
+            {savedCustomProfiles.map((profile) => (
               <section key={profile.id} className="provider-card">
                 <div className="provider-header">
                   <div>
-                    <span className={classNames("provider-mode", profile.settings.mode === "local" ? "local" : "cloud")}>
+                    <span
+                      className={classNames(
+                        "provider-mode",
+                        profile.settings.mode === "local" ? "local" : "cloud",
+                      )}
+                    >
                       {profile.settings.mode === "local" ? "Local" : "Cloud"}
                     </span>
                     <h3>{profile.name}</h3>
                   </div>
-                  <StatusBadge tone={selectedCustomProfileId === profile.id ? "info" : "neutral"}>
-                    {selectedCustomProfileId === profile.id ? "Loaded" : "Saved"}
+                  <StatusBadge
+                    tone={
+                      selectedCustomProfileId === profile.id
+                        ? "info"
+                        : "neutral"
+                    }
+                  >
+                    {selectedCustomProfileId === profile.id
+                      ? "Loaded"
+                      : "Saved"}
                   </StatusBadge>
                 </div>
                 <div className="provider-body">
@@ -2276,11 +3155,17 @@ function SettingsPage({
                   </div>
                   <div className="provider-item">
                     <span>Updated</span>
-                    <strong>{new Date(profile.updated_at).toLocaleString()}</strong>
+                    <strong>
+                      {new Date(profile.updated_at).toLocaleString()}
+                    </strong>
                   </div>
                 </div>
                 <div className="inline-actions">
-                  <button type="button" className="secondary-button" onClick={() => onLoadCustomProfile(profile)}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => onLoadCustomProfile(profile)}
+                  >
                     Load into form
                   </button>
                   <button
@@ -2289,7 +3174,9 @@ function SettingsPage({
                     onClick={() => void onActivateCustomProfile(profile)}
                     disabled={busyAction === `activate-${profile.id}`}
                   >
-                    {busyAction === `activate-${profile.id}` ? "Activating..." : "Activate default"}
+                    {busyAction === `activate-${profile.id}`
+                      ? "Activating..."
+                      : "Activate default"}
                   </button>
                   <button
                     type="button"
@@ -2297,7 +3184,9 @@ function SettingsPage({
                     onClick={() => void onDeleteCustomProfile(profile)}
                     disabled={busyAction === `delete-${profile.id}`}
                   >
-                    {busyAction === `delete-${profile.id}` ? "Deleting..." : "Delete"}
+                    {busyAction === `delete-${profile.id}`
+                      ? "Deleting..."
+                      : "Delete"}
                   </button>
                 </div>
               </section>
@@ -2326,13 +3215,26 @@ function AuditPage() {
   return (
     <div className="page-stack">
       <section className="surface page-header-surface">
-        <PageHeader eyebrow="Audit" title="Track uploads, review edits, recalculations, and exports without turning audit into the main workflow." />
+        <PageHeader
+          eyebrow="Audit"
+          title="Track uploads, review edits, recalculations, and exports without turning audit into the main workflow."
+        />
       </section>
       <section className="surface">
-        <CardHeader title="Recent activity" subtitle="Audit should be scannable at a glance without looking like another primary workspace." />
+        <CardHeader
+          title="Recent activity"
+          subtitle="Audit should be scannable at a glance without looking like another primary workspace."
+        />
         <div className="table-toolbar">
-          <SummaryStat label="Recorded events" value={auditRows.length} tone="accent" />
-          <p className="table-toolbar-copy">Uploads, review edits, recalculations, and exports should read like one coherent timeline.</p>
+          <SummaryStat
+            label="Recorded events"
+            value={auditRows.length}
+            tone="accent"
+          />
+          <p className="table-toolbar-copy">
+            Uploads, review edits, recalculations, and exports should read like
+            one coherent timeline.
+          </p>
         </div>
         <div className="table-shell">
           <table>
@@ -2369,7 +3271,10 @@ function HelpPage() {
   return (
     <div className="page-stack">
       <section className="surface page-header-surface">
-        <PageHeader eyebrow="Help" title="Support the extraction job after first value, not before it." />
+        <PageHeader
+          eyebrow="Help"
+          title="Support the extraction job after first value, not before it."
+        />
       </section>
       <div className="detail-grid">
         <section className="surface span-6">
@@ -2377,15 +3282,24 @@ function HelpPage() {
           <div className="note-list">
             <div className="note-card">
               <strong>First schema missing?</strong>
-              <p>Create one reusable extraction schema, then return to the extraction workspace.</p>
+              <p>
+                Create one reusable extraction schema, then return to the
+                extraction workspace.
+              </p>
             </div>
             <div className="note-card">
               <strong>Review is for exceptions</strong>
-              <p>The app should let the model extract first, then ask a human only for the uncertain fields.</p>
+              <p>
+                The app should let the model extract first, then ask a human
+                only for the uncertain fields.
+              </p>
             </div>
             <div className="note-card">
               <strong>Why source evidence matters</strong>
-              <p>Users trust extraction when the cited snippet makes the decision easy.</p>
+              <p>
+                Users trust extraction when the cited snippet makes the decision
+                easy.
+              </p>
             </div>
           </div>
         </section>
@@ -2407,22 +3321,43 @@ function HelpPage() {
 export function App() {
   const [activePage, setActivePage] = useState<PageId>("extractions");
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
-  const [templateVersions, setTemplateVersions] = useState<TemplateVersionRecord[]>([]);
+  const [templateVersions, setTemplateVersions] = useState<
+    TemplateVersionRecord[]
+  >([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [exportsList, setExportsList] = useState<ExportRecord[]>([]);
   const [provider, setProvider] = useState<ProviderSettings | null>(null);
-  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([]);
-  const [providerHealth, setProviderHealth] = useState<Record<string, ProviderHealth>>({});
-  const [probeResults, setProbeResults] = useState<Record<string, ProviderProbe>>({});
-  const [customProviderDraft, setCustomProviderDraft] = useState<CustomProviderDraft>(() => loadSavedCustomProviderDraft());
-  const [customProfiles, setCustomProfiles] = useState<CustomProviderProfile[]>([]);
-  const [selectedCustomProfileId, setSelectedCustomProfileId] = useState<string | null>(null);
+  const [providerCatalog, setProviderCatalog] = useState<
+    ProviderCatalogEntry[]
+  >([]);
+  const [providerHealth, setProviderHealth] = useState<
+    Record<string, ProviderHealth>
+  >({});
+  const [probeResults, setProbeResults] = useState<
+    Record<string, ProviderProbe>
+  >({});
+  const [customProviderDraft, setCustomProviderDraft] =
+    useState<CustomProviderDraft>(() => loadSavedCustomProviderDraft());
+  const [customProfiles, setCustomProfiles] = useState<CustomProviderProfile[]>(
+    [],
+  );
+  const [selectedCustomProfileId, setSelectedCustomProfileId] = useState<
+    string | null
+  >(null);
   const [devStatus, setDevStatus] = useState<DevStatus | null>(null);
-  const [resultsByJob, setResultsByJob] = useState<Record<number, ResultEnvelope>>({});
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
-  const [selectedTemplateVersionId, setSelectedTemplateVersionId] = useState<number | null>(null);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
+  const [resultsByJob, setResultsByJob] = useState<
+    Record<number, ResultEnvelope>
+  >({});
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(
+    null,
+  );
+  const [selectedTemplateVersionId, setSelectedTemplateVersionId] = useState<
+    number | null
+  >(null);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(
+    null,
+  );
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [focusedFieldName, setFocusedFieldName] = useState<string | null>(null);
@@ -2434,11 +3369,17 @@ export function App() {
     local_only: true,
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [banner, setBanner] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [banner, setBanner] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
-  const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(null);
+  const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
+    null,
+  );
   const [desktopLogs, setDesktopLogs] = useState<DesktopLogs | null>(null);
-  const [desktopOnboardingDismissed, setDesktopOnboardingDismissed] = useState(false);
+  const [desktopOnboardingDismissed, setDesktopOnboardingDismissed] =
+    useState(false);
   const [workspaceSeeded, setWorkspaceSeeded] = useState(false);
 
   async function refreshDesktopStatus() {
@@ -2473,12 +3414,24 @@ export function App() {
       setProviderCatalog([]);
       setProviderHealth({});
       setProbeResults({});
+      setCustomProfiles([]);
+      setSelectedCustomProfileId(null);
       setDevStatus(null);
       setResultsByJob({});
       return;
     }
 
-    const [templateData, documentData, jobData, exportData, providerData, providerCatalogData, providerHealthData, statusData] = await Promise.allSettled([
+    const [
+      templateData,
+      documentData,
+      jobData,
+      exportData,
+      providerData,
+      providerCatalogData,
+      providerHealthData,
+      customProfilesData,
+      statusData,
+    ] = await Promise.allSettled([
       readJson<TemplateSummary[]>("/templates"),
       readJson<DocumentRecord[]>("/documents"),
       readJson<JobRecord[]>("/jobs"),
@@ -2486,23 +3439,43 @@ export function App() {
       readJson<ProviderSettings | null>("/settings/provider"),
       readJson<{ providers: ProviderCatalogEntry[] }>("/settings/providers"),
       readJson<ProviderHealth[]>("/settings/providers/health"),
+      readJson<{ profiles: CustomProviderProfile[] }>(
+        "/settings/providers/custom",
+      ),
       readJson<DevStatus>("/dev/status"),
     ]);
 
-    const liveTemplates = templateData.status === "fulfilled" ? templateData.value : [];
-    const liveDocuments = documentData.status === "fulfilled" ? documentData.value : [];
+    const liveTemplates =
+      templateData.status === "fulfilled" ? templateData.value : [];
+    const liveDocuments =
+      documentData.status === "fulfilled" ? documentData.value : [];
     const liveJobs = jobData.status === "fulfilled" ? jobData.value : [];
 
     setTemplates(liveTemplates);
     setDocuments(liveDocuments);
     setJobs(liveJobs);
     setExportsList(exportData.status === "fulfilled" ? exportData.value : []);
-    setProvider(providerData.status === "fulfilled" ? providerData.value : null);
-    setProviderCatalog(providerCatalogData.status === "fulfilled" ? providerCatalogData.value.providers : []);
+    setProvider(
+      providerData.status === "fulfilled" ? providerData.value : null,
+    );
+    setProviderCatalog(
+      providerCatalogData.status === "fulfilled"
+        ? providerCatalogData.value.providers
+        : [],
+    );
     setProviderHealth(
-      providerHealthData.status === "fulfilled" && Array.isArray(providerHealthData.value)
-        ? Object.fromEntries(providerHealthData.value.map((item) => [item.provider_key, item]))
+      providerHealthData.status === "fulfilled" &&
+        Array.isArray(providerHealthData.value)
+        ? Object.fromEntries(
+            providerHealthData.value.map((item) => [item.provider_key, item]),
+          )
         : {},
+    );
+    setCustomProfiles(
+      customProfilesData.status === "fulfilled" &&
+        Array.isArray(customProfilesData.value.profiles)
+        ? customProfilesData.value.profiles
+        : [],
     );
     setDevStatus(statusData.status === "fulfilled" ? statusData.value : null);
 
@@ -2510,7 +3483,9 @@ export function App() {
       const versionLists = await Promise.all(
         liveTemplates.map(async (template) => {
           try {
-            return await readJson<TemplateVersionRecord[]>(`/templates/${template.id}/versions`);
+            return await readJson<TemplateVersionRecord[]>(
+              `/templates/${template.id}/versions`,
+            );
           } catch {
             return [];
           }
@@ -2529,14 +3504,18 @@ export function App() {
     const resultPairs = await Promise.all(
       completedJobs.map(async (job) => {
         try {
-          const result = await readJson<ResultEnvelope>(`/jobs/${job.id}/result`);
+          const result = await readJson<ResultEnvelope>(
+            `/jobs/${job.id}/result`,
+          );
           return [job.id, result] as const;
         } catch {
           return null;
         }
       }),
     );
-    const nextResults = Object.fromEntries(resultPairs.filter(Boolean) as Array<readonly [number, ResultEnvelope]>);
+    const nextResults = Object.fromEntries(
+      resultPairs.filter(Boolean) as Array<readonly [number, ResultEnvelope]>,
+    );
     setResultsByJob(nextResults);
 
     if (selectedJobId && !liveJobs.some((job) => job.id === selectedJobId)) {
@@ -2555,14 +3534,19 @@ export function App() {
     if (typeof window === "undefined") {
       return;
     }
-    setDesktopOnboardingDismissed(window.localStorage.getItem(DESKTOP_ONBOARDING_KEY) === "true");
+    setDesktopOnboardingDismissed(
+      window.localStorage.getItem(DESKTOP_ONBOARDING_KEY) === "true",
+    );
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(CUSTOM_PROVIDER_KEY, JSON.stringify(customProviderDraft));
+    window.localStorage.setItem(
+      CUSTOM_PROVIDER_KEY,
+      JSON.stringify(customProviderDraft),
+    );
   }, [customProviderDraft]);
 
   useEffect(() => {
@@ -2580,11 +3564,16 @@ export function App() {
     if (!selectedTemplateId || !templateVersions.length) {
       return;
     }
-    const matching = templateVersions.filter((item) => item.template_id === selectedTemplateId);
+    const matching = templateVersions.filter(
+      (item) => item.template_id === selectedTemplateId,
+    );
     if (!matching.length) {
       return;
     }
-    if (!selectedTemplateVersionId || !matching.some((item) => item.id === selectedTemplateVersionId)) {
+    if (
+      !selectedTemplateVersionId ||
+      !matching.some((item) => item.id === selectedTemplateVersionId)
+    ) {
       setSelectedTemplateVersionId(matching[0].id);
     }
   }, [selectedTemplateId, selectedTemplateVersionId, templateVersions]);
@@ -2596,10 +3585,19 @@ export function App() {
     setSelectedDocumentId(documents[0].id);
   }, [documents, selectedDocumentId]);
 
-  const currentTemplateDefinition = templateVersions.find((item) => item.id === selectedTemplateVersionId)?.definition ?? null;
-  const reviewableResults = Object.values(resultsByJob).filter((result) => result.result.fields_requiring_review.length > 0);
-  const reviewCount = reviewableResults.reduce((sum, result) => sum + result.result.fields_requiring_review.length, 0);
-  const showDesktopOnboarding = Boolean(desktopStatus?.tauriMode) && (!desktopOnboardingDismissed || apiUnavailable || !provider);
+  const currentTemplateDefinition =
+    templateVersions.find((item) => item.id === selectedTemplateVersionId)
+      ?.definition ?? null;
+  const reviewableResults = Object.values(resultsByJob).filter(
+    (result) => result.result.fields_requiring_review.length > 0,
+  );
+  const reviewCount = reviewableResults.reduce(
+    (sum, result) => sum + result.result.fields_requiring_review.length,
+    0,
+  );
+  const showDesktopOnboarding =
+    Boolean(desktopStatus?.tauriMode) &&
+    (!desktopOnboardingDismissed || apiUnavailable || !provider);
 
   useEffect(() => {
     if (!currentTemplateDefinition) {
@@ -2610,7 +3608,9 @@ export function App() {
       document_type: currentTemplateDefinition.document_type,
       description: currentTemplateDefinition.description,
       template_version: currentTemplateDefinition.template_version,
-      local_only: !currentTemplateDefinition.llm_provider_settings.allow_external_processing,
+      local_only:
+        !currentTemplateDefinition.llm_provider_settings
+          .allow_external_processing,
     });
   }, [currentTemplateDefinition]);
 
@@ -2623,9 +3623,15 @@ export function App() {
       setSelectedJobId(null);
       setFocusedFieldName(null);
       setActivePage("extractions");
-      setBanner({ tone: "success", message: `Uploaded ${created.original_filename}.` });
+      setBanner({
+        tone: "success",
+        message: `Uploaded ${created.original_filename}.`,
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Upload failed." });
+      setBanner({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Upload failed.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2633,7 +3639,11 @@ export function App() {
 
   async function handleRunExtraction() {
     if (!selectedDocumentId || !selectedTemplateVersionId) {
-      setBanner({ tone: "error", message: "Select a document and schema version before running extraction." });
+      setBanner({
+        tone: "error",
+        message:
+          "Select a document and schema version before running extraction.",
+      });
       return;
     }
     try {
@@ -2650,9 +3660,18 @@ export function App() {
       setSelectedJobId(created.id);
       setFocusedFieldName(null);
       setActivePage("extractions");
-      setBanner({ tone: "success", message: "Extraction job queued in the active workspace." });
+      setBanner({
+        tone: "success",
+        message: "Extraction job queued in the active workspace.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not queue extraction." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not queue extraction.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2661,7 +3680,11 @@ export function App() {
   async function handleCreateTemplate() {
     try {
       setBusyAction("save-template");
-      const definition = buildTemplatePayload(draftTemplate, provider, currentTemplateDefinition ?? starterTemplateDefinition);
+      const definition = buildTemplatePayload(
+        draftTemplate,
+        provider,
+        currentTemplateDefinition ?? starterTemplateDefinition,
+      );
       await readJson<TemplateSummary>("/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2673,43 +3696,65 @@ export function App() {
         }),
       });
       await refreshCoreData();
-      setBanner({ tone: "success", message: `Saved schema "${draftTemplate.template_name}".` });
+      setBanner({
+        tone: "success",
+        message: `Saved schema "${draftTemplate.template_name}".`,
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not save schema." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Could not save schema.",
+      });
     } finally {
       setBusyAction(null);
     }
   }
 
-  function buildReviewDraftMap(result: ResultEnvelope, definition: TemplateDefinition | null) {
-    return Object.fromEntries(
-      result.result.extracted_fields.map((field) => [field.field_name, getInitialReviewDraft(field, getFieldDefinition(definition, field.field_name))]),
-    );
-  }
+  const syncJobSelection = useCallback(
+    (jobId: number) => {
+      const job = jobs.find((item) => item.id === jobId) ?? null;
+      const definition =
+        templateVersions.find((item) => item.id === job?.template_version_id)
+          ?.definition ?? null;
+      const result = resultsByJob[jobId];
 
-  function syncJobSelection(jobId: number) {
-    const job = jobs.find((item) => item.id === jobId) ?? null;
-    const definition = templateVersions.find((item) => item.id === job?.template_version_id)?.definition ?? null;
-    const result = resultsByJob[jobId];
-
-    setSelectedJobId(jobId);
-    if (job) {
-      setSelectedDocumentId(job.document_id);
-      const version = templateVersions.find((item) => item.id === job.template_version_id);
-      if (version) {
-        setSelectedTemplateId(version.template_id);
-        setSelectedTemplateVersionId(version.id);
+      setSelectedJobId(jobId);
+      if (job) {
+        setSelectedDocumentId(job.document_id);
+        const version = templateVersions.find(
+          (item) => item.id === job.template_version_id,
+        );
+        if (version) {
+          setSelectedTemplateId(version.template_id);
+          setSelectedTemplateVersionId(version.id);
+        }
       }
-    }
 
-    if (result) {
-      setReviewDrafts(buildReviewDraftMap(result, definition));
-      setFocusedFieldName(result.result.fields_requiring_review[0] ?? result.result.extracted_fields[0]?.field_name ?? null);
-    } else {
-      setReviewDrafts({});
-      setFocusedFieldName(null);
-    }
-  }
+      if (result) {
+        setReviewDrafts(
+          Object.fromEntries(
+            result.result.extracted_fields.map((field) => [
+              field.field_name,
+              getInitialReviewDraft(
+                field,
+                getFieldDefinition(definition, field.field_name),
+              ),
+            ]),
+          ),
+        );
+        setFocusedFieldName(
+          result.result.fields_requiring_review[0] ??
+            result.result.extracted_fields[0]?.field_name ??
+            null,
+        );
+      } else {
+        setReviewDrafts({});
+        setFocusedFieldName(null);
+      }
+    },
+    [jobs, resultsByJob, templateVersions],
+  );
 
   useEffect(() => {
     if (workspaceSeeded || !jobs.length) {
@@ -2717,7 +3762,11 @@ export function App() {
     }
 
     const prioritizedJob =
-      jobs.find((job) => (resultsByJob[job.id]?.result.fields_requiring_review.length ?? 0) > 0) ??
+      jobs.find(
+        (job) =>
+          (resultsByJob[job.id]?.result.fields_requiring_review.length ?? 0) >
+          0,
+      ) ??
       jobs.find((job) => job.status === "queued" || job.status === "running") ??
       jobs[0];
 
@@ -2725,7 +3774,7 @@ export function App() {
       syncJobSelection(prioritizedJob.id);
     }
     setWorkspaceSeeded(true);
-  }, [jobs, resultsByJob, templateVersions, workspaceSeeded]);
+  }, [jobs, resultsByJob, syncJobSelection, workspaceSeeded]);
 
   function handleSelectJob(jobId: number) {
     setWorkspaceSeeded(true);
@@ -2748,7 +3797,10 @@ export function App() {
 
     const selectedResult = resultsByJob[selectedJobId];
     const selectedJob = jobs.find((item) => item.id === selectedJobId) ?? null;
-    const definition = templateVersions.find((item) => item.id === selectedJob?.template_version_id)?.definition ?? null;
+    const definition =
+      templateVersions.find(
+        (item) => item.id === selectedJob?.template_version_id,
+      )?.definition ?? null;
 
     if (!selectedResult) {
       return;
@@ -2758,9 +3810,19 @@ export function App() {
       setBusyAction("save-review");
       const edits = selectedResult.result.extracted_fields
         .map((field) => {
-          const draft = reviewDrafts[field.field_name] ?? getInitialReviewDraft(field, getFieldDefinition(definition, field.field_name));
-          const parsed = parseReviewDraft(field, draft, getFieldDefinition(definition, field.field_name));
-          const original = field.normalized_value ?? field.extracted_value ?? null;
+          const draft =
+            reviewDrafts[field.field_name] ??
+            getInitialReviewDraft(
+              field,
+              getFieldDefinition(definition, field.field_name),
+            );
+          const parsed = parseReviewDraft(
+            field,
+            draft,
+            getFieldDefinition(definition, field.field_name),
+          );
+          const original =
+            field.normalized_value ?? field.extracted_value ?? null;
           if (JSON.stringify(parsed) === JSON.stringify(original)) {
             return null;
           }
@@ -2777,15 +3839,18 @@ export function App() {
         return;
       }
 
-      const updatedResult = await readJson<ResultPayload>(`/results/${selectedResult.result_id}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reviewer: "local-ui",
-          edits,
-          recalculate: true,
-        }),
-      });
+      const updatedResult = await readJson<ResultPayload>(
+        `/results/${selectedResult.result_id}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reviewer: "local-ui",
+            edits,
+            recalculate: true,
+          }),
+        },
+      );
       setResultsByJob((current) => ({
         ...current,
         [selectedJobId]: {
@@ -2795,20 +3860,32 @@ export function App() {
         },
       }));
       setReviewDrafts(
-        buildReviewDraftMap(
-          {
-            result_id: selectedResult.result_id,
-            job_id: selectedJobId,
-            result: updatedResult,
-          },
-          definition,
+        Object.fromEntries(
+          updatedResult.extracted_fields.map((field) => [
+            field.field_name,
+            getInitialReviewDraft(
+              field,
+              getFieldDefinition(definition, field.field_name),
+            ),
+          ]),
         ),
       );
-      setFocusedFieldName(updatedResult.fields_requiring_review[0] ?? updatedResult.extracted_fields[0]?.field_name ?? null);
+      setFocusedFieldName(
+        updatedResult.fields_requiring_review[0] ??
+          updatedResult.extracted_fields[0]?.field_name ??
+          null,
+      );
       await refreshCoreData();
-      setBanner({ tone: "success", message: "Review edits saved and formulas recalculated." });
+      setBanner({
+        tone: "success",
+        message: "Review edits saved and formulas recalculated.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not save review." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Could not save review.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2825,14 +3902,28 @@ export function App() {
 
     try {
       setBusyAction(`export-${format}`);
-      const payload = await readJson<{ export_id: number }>(`/results/${selectedResult.result_id}/exports/${format}`, {
-        method: "POST",
-      });
-      window.open(`${API_BASE}/exports/${payload.export_id}/download`, "_blank", "noopener,noreferrer");
+      const payload = await readJson<{ export_id: number }>(
+        `/results/${selectedResult.result_id}/exports/${format}`,
+        {
+          method: "POST",
+        },
+      );
+      window.open(
+        `${API_BASE}/exports/${payload.export_id}/download`,
+        "_blank",
+        "noopener,noreferrer",
+      );
       await refreshCoreData();
-      setBanner({ tone: "success", message: `Generated ${format.toUpperCase()} export.` });
+      setBanner({
+        tone: "success",
+        message: `Generated ${format.toUpperCase()} export.`,
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not generate export." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Could not generate export.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2847,22 +3938,38 @@ export function App() {
         body: JSON.stringify({ settings: nextProvider }),
       });
       setProvider(nextProvider);
-      setBanner({ tone: "success", message: `Default provider set to ${nextProvider.provider_type} (${nextProvider.model}).` });
+      setBanner({
+        tone: "success",
+        message: `Default provider set to ${nextProvider.provider_type} (${nextProvider.model}).`,
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not save provider settings." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not save provider settings.",
+      });
     } finally {
       setBusyAction(null);
     }
   }
 
-  async function runProviderProbe(probeKey: string, label: string, settings: ProviderSettings) {
+  async function runProviderProbe(
+    probeKey: string,
+    label: string,
+    settings: ProviderSettings,
+  ) {
     try {
       setBusyAction(`probe-${probeKey}`);
-      const result = await readJson<ProviderProbe>("/settings/providers/probe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings }),
-      });
+      const result = await readJson<ProviderProbe>(
+        "/settings/providers/probe",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings }),
+        },
+      );
       setProbeResults((current) => ({
         ...current,
         [probeKey]: result,
@@ -2872,14 +3979,22 @@ export function App() {
         message: `${label}: ${result.detail}`,
       });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not probe provider." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Could not probe provider.",
+      });
     } finally {
       setBusyAction(null);
     }
   }
 
   async function handleProbeProvider(nextProvider: ProviderCatalogEntry) {
-    await runProviderProbe(nextProvider.key, nextProvider.label, nextProvider.settings);
+    await runProviderProbe(
+      nextProvider.key,
+      nextProvider.label,
+      nextProvider.settings,
+    );
   }
 
   async function handleSetCustomProvider() {
@@ -2898,7 +4013,133 @@ export function App() {
       return;
     }
     const settings = buildCustomProviderSettings(customProviderDraft);
-    await runProviderProbe(CUSTOM_PROVIDER_KEY, customProviderDraft.label || "Custom provider", settings);
+    await runProviderProbe(
+      CUSTOM_PROVIDER_KEY,
+      customProviderDraft.label || "Custom provider",
+      settings,
+    );
+  }
+
+  async function handleSaveCustomProfile() {
+    const validationError = validateCustomProviderDraft(customProviderDraft);
+    if (validationError) {
+      setBanner({ tone: "error", message: validationError });
+      return;
+    }
+
+    const settings = buildCustomProviderSettings(customProviderDraft);
+    const payload = {
+      name: customProviderDraft.label.trim(),
+      settings,
+    };
+
+    try {
+      setBusyAction("save-custom-profile");
+      if (selectedCustomProfileId) {
+        await readJson<CustomProviderProfile>(
+          `/settings/providers/custom/${selectedCustomProfileId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+        );
+      } else {
+        const created = await readJson<CustomProviderProfile>(
+          "/settings/providers/custom",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+        );
+        setSelectedCustomProfileId(created.id);
+      }
+      await refreshCoreData();
+      setBanner({
+        tone: "success",
+        message: `Saved custom provider profile "${payload.name}".`,
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not save custom provider profile.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function handleLoadCustomProfile(profile: CustomProviderProfile) {
+    setCustomProviderDraft(
+      buildCustomProviderDraftFromSettings(profile.settings),
+    );
+    setSelectedCustomProfileId(profile.id);
+    setBanner({
+      tone: "success",
+      message: `Loaded custom provider profile "${profile.name}" into the form.`,
+    });
+  }
+
+  async function handleActivateCustomProfile(profile: CustomProviderProfile) {
+    try {
+      setBusyAction(`activate-${profile.id}`);
+      const activated = await readJson<ProviderSettings>(
+        `/settings/providers/custom/${profile.id}/activate`,
+        {
+          method: "POST",
+        },
+      );
+      setProvider(activated);
+      await refreshCoreData();
+      setBanner({
+        tone: "success",
+        message: `Activated custom provider profile "${profile.name}" as default.`,
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not activate custom provider profile.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleDeleteCustomProfile(profile: CustomProviderProfile) {
+    try {
+      setBusyAction(`delete-${profile.id}`);
+      await readJson<{ deleted: boolean }>(
+        `/settings/providers/custom/${profile.id}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (selectedCustomProfileId === profile.id) {
+        setSelectedCustomProfileId(null);
+      }
+      await refreshCoreData();
+      setBanner({
+        tone: "success",
+        message: `Deleted custom provider profile "${profile.name}".`,
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not delete custom provider profile.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   async function handleDesktopStart() {
@@ -2910,9 +4151,18 @@ export function App() {
       const result = await invoke<DesktopStatus>("start_local_stack");
       setDesktopStatus(result);
       await refreshCoreData();
-      setBanner({ tone: "success", message: "Local backend stack started from the desktop shell." });
+      setBanner({
+        tone: "success",
+        message: "Local backend stack started from the desktop shell.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not start local stack." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not start local stack.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2927,9 +4177,18 @@ export function App() {
       const result = await invoke<DesktopStatus>("stop_local_stack");
       setDesktopStatus(result);
       await refreshCoreData();
-      setBanner({ tone: "success", message: "Local backend stack stopped from the desktop shell." });
+      setBanner({
+        tone: "success",
+        message: "Local backend stack stopped from the desktop shell.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not stop local stack." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not stop local stack.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2944,9 +4203,18 @@ export function App() {
       const result = await invoke<DesktopStatus>("restart_local_stack");
       setDesktopStatus(result);
       await refreshCoreData();
-      setBanner({ tone: "success", message: "Local backend stack restarted from the desktop shell." });
+      setBanner({
+        tone: "success",
+        message: "Local backend stack restarted from the desktop shell.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not restart local stack." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not restart local stack.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2959,9 +4227,18 @@ export function App() {
     try {
       setBusyAction("desktop-open-root");
       await invoke("open_project_root");
-      setBanner({ tone: "success", message: "Opened the ExtractFlow project root from the desktop shell." });
+      setBanner({
+        tone: "success",
+        message: "Opened the ExtractFlow project root from the desktop shell.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not open the project root." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not open the project root.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2974,9 +4251,18 @@ export function App() {
     try {
       setBusyAction("desktop-open-data");
       await invoke("open_app_data_dir");
-      setBanner({ tone: "success", message: "Opened the ExtractFlow desktop data directory." });
+      setBanner({
+        tone: "success",
+        message: "Opened the ExtractFlow desktop data directory.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not open the app data directory." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not open the app data directory.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -2990,9 +4276,18 @@ export function App() {
       setBusyAction("desktop-logs");
       const result = await invoke<DesktopLogs>("get_backend_logs");
       setDesktopLogs(result);
-      setBanner({ tone: "success", message: "Loaded backend logs from the desktop shell." });
+      setBanner({
+        tone: "success",
+        message: "Loaded backend logs from the desktop shell.",
+      });
     } catch (error) {
-      setBanner({ tone: "error", message: error instanceof Error ? error.message : "Could not load backend logs." });
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not load backend logs.",
+      });
     } finally {
       setBusyAction(null);
     }
@@ -3007,7 +4302,12 @@ export function App() {
 
   return (
     <div className="app-frame">
-      <AppSidebar activePage={activePage} onSelectPage={setActivePage} provider={provider} reviewCount={reviewCount} />
+      <AppSidebar
+        activePage={activePage}
+        onSelectPage={setActivePage}
+        provider={provider}
+        reviewCount={reviewCount}
+      />
       <div className="main-shell">
         <TopBar activePage={activePage} />
         <main className="workspace">
@@ -3026,16 +4326,30 @@ export function App() {
           {apiUnavailable ? (
             <div className="banner banner-error">
               <span>
-                Backend unavailable. The extraction workspace is open, but the local API is not reachable at {API_BASE}. Start the backend stack or use
+                Backend unavailable. The extraction workspace is open, but the
+                local API is not reachable at {API_BASE}. Start the backend
+                stack or use
                 <code> npm run tauri:dev</code> for the managed desktop flow.
               </span>
               {desktopStatus?.tauriMode ? (
                 <div className="inline-actions">
-                  <button type="button" className="secondary-button small" onClick={() => void refreshDesktopStatus()} disabled={busyAction === "desktop-refresh"}>
+                  <button
+                    type="button"
+                    className="secondary-button small"
+                    onClick={() => void refreshDesktopStatus()}
+                    disabled={busyAction === "desktop-refresh"}
+                  >
                     Refresh
                   </button>
-                  <button type="button" className="primary-button small" onClick={() => void handleDesktopStart()} disabled={busyAction === "desktop-start"}>
-                    {busyAction === "desktop-start" ? "Starting..." : "Start stack"}
+                  <button
+                    type="button"
+                    className="primary-button small"
+                    onClick={() => void handleDesktopStart()}
+                    disabled={busyAction === "desktop-start"}
+                  >
+                    {busyAction === "desktop-start"
+                      ? "Starting..."
+                      : "Start stack"}
                   </button>
                 </div>
               ) : null}
@@ -3043,9 +4357,18 @@ export function App() {
           ) : null}
 
           {banner ? (
-            <div className={classNames("banner", banner.tone === "error" ? "banner-error" : "banner-success")}>
+            <div
+              className={classNames(
+                "banner",
+                banner.tone === "error" ? "banner-error" : "banner-success",
+              )}
+            >
               <span>{banner.message}</span>
-              <button type="button" className="text-link" onClick={() => setBanner(null)}>
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => setBanner(null)}
+              >
                 Dismiss
               </button>
             </div>
@@ -3072,7 +4395,12 @@ export function App() {
               onSelectDocument={setSelectedDocumentId}
               onSelectTemplate={setSelectedTemplateId}
               onSelectTemplateVersion={setSelectedTemplateVersionId}
-              onSetReviewDraft={(fieldName, value) => setReviewDrafts((current) => ({ ...current, [fieldName]: value }))}
+              onSetReviewDraft={(fieldName, value) =>
+                setReviewDrafts((current) => ({
+                  ...current,
+                  [fieldName]: value,
+                }))
+              }
               onSetFocusedField={setFocusedFieldName}
               onRunExtraction={handleRunExtraction}
               onSaveReview={handleSaveReview}
@@ -3103,11 +4431,17 @@ export function App() {
               providerCatalog={providerCatalog}
               providerHealth={providerHealth}
               customProviderDraft={customProviderDraft}
+              selectedCustomProfileId={selectedCustomProfileId}
+              customProfiles={customProfiles}
               onCustomProviderDraftChange={setCustomProviderDraft}
               onSetProvider={handleSetProvider}
               onProbeProvider={handleProbeProvider}
               onSetCustomProvider={handleSetCustomProvider}
               onProbeCustomProvider={handleProbeCustomProvider}
+              onSaveCustomProfile={handleSaveCustomProfile}
+              onLoadCustomProfile={handleLoadCustomProfile}
+              onActivateCustomProfile={handleActivateCustomProfile}
+              onDeleteCustomProfile={handleDeleteCustomProfile}
               probeResults={probeResults}
               busyAction={busyAction}
               desktopStatus={desktopStatus}
@@ -3127,7 +4461,8 @@ export function App() {
 
           {devStatus && activePage !== "extractions" ? (
             <div className="runtime-message">
-              Live state: {devStatus.documents} documents, {devStatus.jobs} jobs, {devStatus.results} results.
+              Live state: {devStatus.documents} documents, {devStatus.jobs}{" "}
+              jobs, {devStatus.results} results.
             </div>
           ) : null}
         </main>

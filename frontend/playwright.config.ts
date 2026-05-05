@@ -1,6 +1,5 @@
 import { defineConfig } from "@playwright/test";
 
-
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -14,7 +13,8 @@ export default defineConfig({
   },
   outputDir: "./test-results/playwright",
   webServer: {
-    command: "env -u FORCE_COLOR -u NO_COLOR -u NODE_DISABLE_COLORS VITE_API_BASE_URL=/api sh -c 'npm run build && npm run preview'",
+    command:
+      "env -u FORCE_COLOR -u NO_COLOR -u NODE_DISABLE_COLORS VITE_API_BASE_URL=/api sh -c 'npm run build && npm run preview'",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     stdout: "ignore",

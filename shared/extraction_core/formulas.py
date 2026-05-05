@@ -84,14 +84,14 @@ def coalesce(*values: Any) -> Any:
 
 
 def avg(values: list[Any]) -> float | None:
-    numeric = [value for value in values if isinstance(value, (int, float, Decimal))]
+    numeric = [value for value in values if isinstance(value, int | float | Decimal)]
     return None if not numeric else float(sum(numeric) / len(numeric))
 
 
 def count(values: Any) -> int:
     if values is None:
         return 0
-    if isinstance(values, (list, tuple, dict, str)):
+    if isinstance(values, list | tuple | dict | str):
         return len(values)
     return 1
 

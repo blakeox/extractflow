@@ -4,7 +4,6 @@ import os
 from urllib.parse import urlencode
 
 import httpx
-
 from extraction_core.models import LLMProviderSettings
 
 

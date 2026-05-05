@@ -3,9 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
-
 from extraction_core.models import ExtractionTemplate, LLMProviderCatalogEntry, LLMProviderSettings
+from pydantic import BaseModel
 
 
 class TemplateCreateRequest(BaseModel):
