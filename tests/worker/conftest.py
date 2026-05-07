@@ -11,6 +11,8 @@ from sqlalchemy import Column, Integer, Table, text
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="extractflow-worker-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'worker-test.db'}"
 os.environ["DATA_DIR"] = str(TEST_ROOT / "data")
+os.environ["UPLOADS_DIR"] = str(TEST_ROOT / "data" / "uploads")
+os.environ["EXPORTS_DIR"] = str(TEST_ROOT / "data" / "exports")
 os.environ["PARSED_DIR"] = str(TEST_ROOT / "data" / "parsed")
 os.environ["WORKER_STATUS_PATH"] = str(TEST_ROOT / "data" / "worker-status.json")
 os.environ["WORKER_POLL_SECONDS"] = "1"
@@ -94,5 +96,6 @@ def reset_worker_state() -> None:
     data_dir = Path(os.environ["DATA_DIR"])
     if data_dir.exists():
         shutil.rmtree(data_dir)
-    Path(os.environ["PARSED_DIR"]).mkdir(parents=True, exist_ok=True)
+    for key in ("UPLOADS_DIR", "EXPORTS_DIR", "PARSED_DIR"):
+        Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
     yield

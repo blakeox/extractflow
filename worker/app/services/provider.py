@@ -36,7 +36,21 @@ class ExtractionProvider:
     ) -> list[ExtractionFieldResult]:
         for adapter in self._adapters:
             if adapter.supports(settings):
-                return adapter.extract(text, template, settings)
+                chunks = split_text_into_chunks(text, settings.chunk_size)
+                results: list[ExtractionFieldResult] = []
+                for index, chunk in enumerate(chunks, start=1):
+                    chunk_results = adapter.extract(
+                        chunk,
+                        template,
+                        settings,
+                    )
+                    for item in chunk_results:
+                        if item.extraction_notes:
+                            item.extraction_notes = f"{item.extraction_notes} Chunk {index}/{len(chunks)}."
+                        else:
+                            item.extraction_notes = f"Chunk {index}/{len(chunks)}."
+                    results.extend(chunk_results)
+                return results
         raise ValueError(f"Unsupported provider configuration: {settings.provider_type} ({settings.api_style})")
 
 
@@ -213,8 +227,38 @@ def build_prompt(text: str, template: ExtractionTemplate) -> str:
 Return only valid JSON. Do not calculate formula fields.
 
 Document:
-{text[:15000]}
+{text}
 
 Extraction Template:
 {json.dumps(template.model_dump(mode="json"), indent=2)}
 """
+
+
+def split_text_into_chunks(text: str, chunk_size: int, overlap: int = 500) -> list[str]:
+    normalized = text.strip()
+    if not normalized:
+        return [""]
+
+    if chunk_size <= 0 or len(normalized) <= chunk_size:
+        return [normalized]
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(normalized):
+        end = min(start + chunk_size, len(normalized))
+        if end < len(normalized):
+            last_break = max(
+                normalized.rfind("\n\n", start, end),
+                normalized.rfind("\n", start, end),
+                normalized.rfind(" ", start, end),
+            )
+            if last_break > start + (chunk_size // 2):
+                end = last_break
+        chunk = normalized[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(normalized):
+            break
+        start = max(end - overlap, start + 1)
+
+    return chunks or [normalized]

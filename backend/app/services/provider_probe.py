@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 import httpx
 from extraction_core.models import LLMProviderSettings
+from fastapi import HTTPException
 
 
 def probe_provider(settings: LLMProviderSettings) -> dict[str, object]:
@@ -44,6 +45,16 @@ def probe_provider(settings: LLMProviderSettings) -> dict[str, object]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return _probe_endpoint(settings, endpoint, headers)
+
+
+def require_reachable_provider(settings: LLMProviderSettings, action: str) -> dict[str, object]:
+    result = probe_provider(settings)
+    if result["reachable"]:
+        return result
+    raise HTTPException(
+        status_code=400,
+        detail=f"{action} blocked until provider probe succeeds. {result['detail']}",
+    )
 
 
 def _probe_endpoint(settings: LLMProviderSettings, endpoint: str, headers: dict[str, str]) -> dict[str, object]:
