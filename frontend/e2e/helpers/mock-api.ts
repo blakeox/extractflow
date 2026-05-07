@@ -392,6 +392,9 @@ export async function mockExtractionApiWithState(
     if (method === "GET" && path === "/settings/providers/health") {
       return json(route, 200, state.providerHealth);
     }
+    if (method === "GET" && path === "/settings/providers/controls") {
+      return json(route, 200, { custom_provider_probe_max_age_hours: 24 });
+    }
     if (method === "GET" && path === "/settings/providers/custom") {
       return json(route, 200, { profiles: state.customProfiles });
     }
@@ -404,6 +407,9 @@ export async function mockExtractionApiWithState(
         id: "custom-1",
         name: payload.name,
         settings: payload.settings,
+        last_probe_at: "2026-05-03T12:00:00.000Z",
+        last_probe_status: "reachable",
+        last_probe_detail: "Endpoint responded with HTTP 200.",
         created_at: "2026-05-03T12:00:00.000Z",
         updated_at: "2026-05-03T12:00:00.000Z",
       };
@@ -420,6 +426,9 @@ export async function mockExtractionApiWithState(
         id: profileId,
         name: payload.name,
         settings: payload.settings,
+        last_probe_at: "2026-05-03T12:05:00.000Z",
+        last_probe_status: "reachable",
+        last_probe_detail: "Endpoint responded with HTTP 200.",
         created_at:
           state.customProfiles[0]?.created_at ?? "2026-05-03T12:00:00.000Z",
         updated_at: "2026-05-03T12:05:00.000Z",

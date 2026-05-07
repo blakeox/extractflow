@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     default_azure_openai_base_url: str = "https://example.openai.azure.com"
     default_azure_openai_api_version: str = "2024-10-21"
     default_azure_openai_deployment: str = "gpt-4.1-mini"
+    custom_provider_probe_max_age_hours: int = Field(default=24, ge=1, le=168)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

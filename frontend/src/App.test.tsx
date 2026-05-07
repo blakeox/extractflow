@@ -717,11 +717,114 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("blocks saving a custom provider profile until the probe succeeds", async () => {
+    const fetchMock = vi.fn(
+      (input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (
+          url.endsWith("/settings/providers/probe") &&
+          init?.method === "POST"
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              provider_type: "private_gateway",
+              reachable: false,
+              status: "not_ready",
+              detail: "Missing environment variable OPENAI_API_KEY.",
+              endpoint: null,
+              status_code: null,
+            }),
+          );
+        }
+        if (url.endsWith("/dev/status"))
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+
+        return Promise.resolve(jsonResponse({}));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(
+      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+        "button",
+        { name: "Settings" },
+      ),
+    );
+
+    const customProviderSection = (
+      await screen.findAllByRole("heading", { name: "Custom provider" })
+    )[0].closest("section");
+    expect(customProviderSection).not.toBeNull();
+    const customProviderScope = within(customProviderSection as HTMLElement);
+
+    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+      target: { value: "QA Gateway" },
+    });
+    fireEvent.change(customProviderScope.getByLabelText("Base URL"), {
+      target: { value: "https://gateway.example/v1" },
+    });
+    fireEvent.change(customProviderScope.getByLabelText("API key env var"), {
+      target: { value: "OPENAI_API_KEY" },
+    });
+    fireEvent.click(
+      customProviderScope.getByRole("button", { name: "Save profile" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Custom provider save blocked until provider probe succeeds. Missing environment variable OPENAI_API_KEY.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input, requestInit]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return (
+          url.endsWith("/settings/providers/custom") &&
+          requestInit?.method === "POST"
+        );
+      }),
+    ).toBe(false);
+  });
+
   it("activates a saved custom provider profile as the default provider", async () => {
     let activeProvider: Record<string, unknown> | null = null;
     const profile = {
       id: "profile-1",
       name: "Finance Gateway",
+      last_probe_at: "2026-05-07T12:00:00Z",
+      last_probe_status: "reachable",
+      last_probe_detail: "Endpoint responded with HTTP 200.",
       updated_at: "2026-05-03T12:00:00Z",
       settings: {
         mode: "cloud",
@@ -767,6 +870,21 @@ describe("App", () => {
         if (url.endsWith("/settings/providers/health"))
           return Promise.resolve(jsonResponse([]));
         if (
+          url.endsWith("/settings/providers/probe") &&
+          init?.method === "POST"
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              provider_type: "finance_gateway",
+              reachable: true,
+              status: "reachable",
+              detail: "Endpoint responded with HTTP 200.",
+              endpoint: "https://finance.example/v1/models",
+              status_code: 200,
+            }),
+          );
+        }
+        if (
           url.endsWith("/settings/providers/custom/profile-1/activate") &&
           init?.method === "POST"
         ) {
@@ -791,6 +909,10 @@ describe("App", () => {
     }
 
     expect(await screen.findByText("Finance Gateway")).toBeInTheDocument();
+    expect(
+      screen.getByText("reachable: Endpoint responded with HTTP 200."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Verified")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Activate default" }));
 
     expect(
@@ -800,5 +922,196 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("finance_gateway").length).toBeGreaterThan(0);
     expect(screen.getAllByText("finance-llm").length).toBeGreaterThan(0);
+  });
+
+  it("blocks activating a stale custom provider profile until it is reverified", async () => {
+    const staleProfile = {
+      id: "profile-stale",
+      name: "Stale Gateway",
+      last_probe_at: "2026-05-05T12:00:00Z",
+      last_probe_status: "reachable",
+      last_probe_detail: "Endpoint responded with HTTP 200.",
+      updated_at: "2026-05-05T12:00:00Z",
+      settings: {
+        mode: "cloud",
+        provider_type: "stale_gateway",
+        provider_label: "Stale Gateway",
+        api_style: "openai_compatible",
+        base_url: "https://stale.example/v1",
+        api_key_env_var: "STALE_API_KEY",
+        api_key_required: true,
+        model: "stale-llm",
+        temperature: 0.1,
+        max_tokens: 6000,
+        supports_json_mode: true,
+        allow_external_processing: true,
+        timeout_seconds: 120,
+        retry_count: 2,
+        chunk_size: 16000,
+      },
+    };
+
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+
+      if (url.endsWith("/health"))
+        return Promise.resolve(jsonResponse({ status: "ok" }));
+      if (url.endsWith("/templates")) return Promise.resolve(jsonResponse([]));
+      if (url.endsWith("/documents")) return Promise.resolve(jsonResponse([]));
+      if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+      if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+      if (url.endsWith("/settings/provider"))
+        return Promise.resolve(jsonResponse(null));
+      if (url.endsWith("/settings/providers"))
+        return Promise.resolve(jsonResponse({ providers: [] }));
+      if (url.endsWith("/settings/providers/health"))
+        return Promise.resolve(jsonResponse([]));
+      if (url.endsWith("/settings/providers/custom")) {
+        return Promise.resolve(jsonResponse({ profiles: [staleProfile] }));
+      }
+      if (url.endsWith("/dev/status")) {
+        return Promise.resolve(
+          jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+        );
+      }
+
+      return Promise.resolve(jsonResponse({}));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(
+      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+        "button",
+        { name: "Settings" },
+      ),
+    );
+
+    expect(await screen.findByText("Stale Gateway")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Activate default" }));
+
+    expect(
+      await screen.findByText(
+        'Custom provider activation blocked until "Stale Gateway" is reverified. The last successful probe is missing or older than 24 hours.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input, requestInit]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        return (
+          url.endsWith("/settings/providers/custom/profile-stale/activate") &&
+          requestInit?.method === "POST"
+        );
+      }),
+    ).toBe(false);
+  });
+
+  it("reverifies a stale custom provider profile from the saved profile card", async () => {
+    const staleProfile = {
+      id: "profile-stale",
+      name: "Stale Gateway",
+      last_probe_at: "2026-05-05T12:00:00Z",
+      last_probe_status: "reachable",
+      last_probe_detail: "Endpoint responded with HTTP 200.",
+      updated_at: "2026-05-05T12:00:00Z",
+      settings: {
+        mode: "cloud",
+        provider_type: "stale_gateway",
+        provider_label: "Stale Gateway",
+        api_style: "openai_compatible",
+        base_url: "https://stale.example/v1",
+        api_key_env_var: "STALE_API_KEY",
+        api_key_required: true,
+        model: "stale-llm",
+        temperature: 0.1,
+        max_tokens: 6000,
+        supports_json_mode: true,
+        allow_external_processing: true,
+        timeout_seconds: 120,
+        retry_count: 2,
+        chunk_size: 16000,
+      },
+    };
+    const verifiedProfile = {
+      ...staleProfile,
+      last_probe_at: "2026-05-07T12:00:00Z",
+      last_probe_status: "reachable",
+      last_probe_detail: "Endpoint responded with HTTP 200.",
+    };
+    let profiles = [staleProfile];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (
+          url.endsWith("/settings/providers/custom/profile-stale/reverify") &&
+          init?.method === "POST"
+        ) {
+          profiles = [verifiedProfile];
+          return Promise.resolve(jsonResponse(verifiedProfile));
+        }
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles }));
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+        "button",
+        { name: "Settings" },
+      ),
+    );
+
+    expect(await screen.findByText("Stale Gateway")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reverify" }));
+
+    expect(
+      await screen.findByText(
+        'Reverified custom provider profile "Stale Gateway".',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Verified")).toBeInTheDocument();
   });
 });

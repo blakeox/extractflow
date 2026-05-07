@@ -192,6 +192,7 @@ DEFAULT_AZURE_OPENAI_API_VERSION=2024-10-21
 DEFAULT_AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
 DEFAULT_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEFAULT_KIMI_BASE_URL=https://api.moonshot.ai/v1
+CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS=24
 PROVIDER_CATALOG_JSON=
 ```
 
@@ -199,7 +200,9 @@ Readiness and control surfaces:
 
 - `/api/settings/providers` returns catalog entries and default settings
 - `/api/settings/providers/health` reports whether each provider is actually ready based on required endpoint and env configuration
+- `/api/settings/providers/controls` returns app-level provider controls including the custom-profile reverification threshold
 - the Settings page now includes a custom provider form for private OpenAI-compatible and Azure endpoints, with save and probe actions
+- saved custom provider profiles move between `Saved`, `Verified`, and `Stale` based on the configured `CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS` window
 - Azure readiness requires `base_url`, `deployment`, `api_version`, and `AZURE_OPENAI_API_KEY`
 
 Example custom provider catalog entry:

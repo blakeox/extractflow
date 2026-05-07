@@ -109,10 +109,17 @@ type ProviderProbe = {
   status_code?: number | null;
 };
 
+type ProviderControls = {
+  custom_provider_probe_max_age_hours: number;
+};
+
 type CustomProviderProfile = {
   id: string;
   name: string;
   settings: ProviderSettings;
+  last_probe_at?: string | null;
+  last_probe_status?: string | null;
+  last_probe_detail?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -271,6 +278,7 @@ const secondaryNavigation: NavItem[] = [
 ];
 
 const CUSTOM_PROVIDER_KEY = "custom-provider-draft";
+const DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS = 24;
 
 const DEFAULT_CUSTOM_PROVIDER_DRAFT: CustomProviderDraft = {
   label: "Private Gateway",
@@ -308,6 +316,20 @@ function loadSavedCustomProviderDraft(): CustomProviderDraft {
     window.localStorage.removeItem(CUSTOM_PROVIDER_KEY);
     return DEFAULT_CUSTOM_PROVIDER_DRAFT;
   }
+}
+
+function customProviderProfileProbeIsStale(
+  profile: CustomProviderProfile,
+  maxAgeHours: number,
+): boolean {
+  if (!profile.last_probe_at) {
+    return true;
+  }
+  if (profile.last_probe_status !== "reachable") {
+    return true;
+  }
+  const ageMs = Date.now() - new Date(profile.last_probe_at).getTime();
+  return ageMs > maxAgeHours * 60 * 60 * 1000;
 }
 
 const starterTemplateDefinition: TemplateDefinition = {
@@ -980,17 +1002,31 @@ function SwitchField({
         <span>{label}</span>
         {hint ? <p>{hint}</p> : null}
       </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        className={classNames("switch-control", checked && "active")}
-        onClick={onToggle}
-      >
-        <span className="switch-thumb" aria-hidden="true" />
-        <span className="switch-state">{checked ? "On" : "Off"}</span>
-      </button>
+      {checked ? (
+        <button
+          type="button"
+          role="switch"
+          aria-checked="true"
+          aria-label={label}
+          className={classNames("switch-control", "active")}
+          onClick={onToggle}
+        >
+          <span className="switch-thumb" aria-hidden="true" />
+          <span className="switch-state">On</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          role="switch"
+          aria-checked="false"
+          aria-label={label}
+          className="switch-control"
+          onClick={onToggle}
+        >
+          <span className="switch-thumb" aria-hidden="true" />
+          <span className="switch-state">Off</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -1429,17 +1465,29 @@ function SchemaPage({
   busyAction: string | null;
 }) {
   const definition = currentTemplateDefinition ?? starterTemplateDefinition;
+  const selectedSchema =
+    templates.find((item) => item.id === selectedTemplateId) ?? null;
   const selectedVersions = templateVersions.filter(
     (item) => item.template_id === selectedTemplateId,
   );
+  const requiredFieldCount = definition.extracted_fields.filter(
+    (field) => field.required,
+  ).length;
+  const citationFieldCount = definition.extracted_fields.filter(
+    (field) => field.citation_required,
+  ).length;
+  const optionalFieldCount =
+    definition.extracted_fields.length - requiredFieldCount;
+  const exportFormatsLabel =
+    definition.output_settings.export_formats.join(" · ");
 
   return (
     <div className="page-stack">
       <section className="surface page-header-surface">
         <PageHeader
           eyebrow="Schemas"
-          title="Keep schema management expert-friendly without putting it in the first-run path."
-          description="Operators should only come here when the extraction definition truly needs to change."
+          title="Define what the model should look for before the document run starts."
+          description="Keep the setup sequence obvious: choose a reusable schema, describe the extraction job, review the search parameters, then confirm evidence and export rules."
           actions={
             <button
               type="button"
@@ -1454,160 +1502,300 @@ function SchemaPage({
       </section>
 
       <div className="detail-grid">
+        <section className="surface span-12 schema-selector-surface">
+          <CardHeader
+            title="1. Start from the closest existing schema"
+            subtitle="Most operators should begin from a reusable schema and only change the brief when the job truly differs."
+          />
+          <div className="schema-selector-grid">
+            <FieldShell
+              label="Base schema"
+              hint="Choose the reusable extraction pattern that is closest to this job."
+            >
+              <select
+                aria-label="Base schema"
+                value={selectedTemplateId ?? ""}
+                onChange={(event) =>
+                  setSelectedTemplateId(parseOptionalId(event.target.value))
+                }
+              >
+                <option value="">Select schema</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </FieldShell>
+            <FieldShell
+              label="Version"
+              hint="Use the exact saved version the extraction run should follow."
+            >
+              <select
+                aria-label="Version"
+                value={selectedTemplateVersionId ?? ""}
+                onChange={(event) =>
+                  setSelectedTemplateVersionId(
+                    parseOptionalId(event.target.value),
+                  )
+                }
+              >
+                <option value="">Select schema version</option>
+                {selectedVersions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    {version.version}
+                  </option>
+                ))}
+              </select>
+            </FieldShell>
+            <div className="schema-active-card">
+              <span className="metric-label">Active setup</span>
+              <strong>
+                {selectedSchema?.name ?? definition.template_name}
+              </strong>
+              <p>
+                {selectedSchema?.description ||
+                  definition.description ||
+                  "Use this starter schema as the base contract for the extraction job below."}
+              </p>
+              <div className="inline-badges">
+                <StatusBadge tone="indigo">
+                  {selectedTemplateVersionId
+                    ? "Version selected"
+                    : "Starter template"}
+                </StatusBadge>
+                <span className="pill">
+                  {selectedVersions.length
+                    ? `${selectedVersions.length} saved versions`
+                    : "No saved versions yet"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="surface span-7">
           <CardHeader
-            title="Schema header"
-            subtitle="Name the schema, describe the job, and keep versioning explicit but secondary."
+            title="2. Describe the extraction brief"
+            subtitle="Tell the system what class of document this is and what information the run is meant to find."
           />
-          <div className="form-grid">
-            <label>
-              <span>Schema name</span>
-              <input
-                value={draft.template_name}
-                onChange={(event) =>
+          <div className="schema-brief-grid">
+            <div className="form-grid">
+              <label>
+                <span>Schema name</span>
+                <input
+                  value={draft.template_name}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      template_name: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Document family</span>
+                <input
+                  value={draft.document_type}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      document_type: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="full-line">
+                <span>What should this run look for?</span>
+                <textarea
+                  rows={4}
+                  value={draft.description}
+                  placeholder="Example: Extract every bank account reference, the account holder, the institution, and the exact source sentence or row that proves each value."
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Schema version</span>
+                <input
+                  value={draft.template_version}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      template_version: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <SwitchField
+                label="Local-only processing"
+                checked={draft.local_only}
+                hint="Keep this on when the schema should stay inside the local runtime by default."
+                onToggle={() =>
                   setDraft((current) => ({
                     ...current,
-                    template_name: event.target.value,
+                    local_only: !current.local_only,
                   }))
                 }
               />
-            </label>
-            <label>
-              <span>Document type</span>
-              <input
-                value={draft.document_type}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    document_type: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="full-line">
-              <span>Description</span>
-              <textarea
-                rows={3}
-                value={draft.description}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              <span>Schema version</span>
-              <input
-                value={draft.template_version}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    template_version: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <SwitchField
-              label="Local-only processing"
-              checked={draft.local_only}
-              hint="Use the shared privacy default for this schema."
-              onToggle={() =>
-                setDraft((current) => ({
-                  ...current,
-                  local_only: !current.local_only,
-                }))
-              }
-            />
-          </div>
-
-          <div className="inline-actions top-gap">
-            <select
-              value={selectedTemplateId ?? ""}
-              onChange={(event) =>
-                setSelectedTemplateId(parseOptionalId(event.target.value))
-              }
-            >
-              <option value="">Select schema</option>
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.name}
-                </option>
-              ))}
-            </select>
-            <select
-              value={selectedTemplateVersionId ?? ""}
-              onChange={(event) =>
-                setSelectedTemplateVersionId(
-                  parseOptionalId(event.target.value),
-                )
-              }
-            >
-              <option value="">Select schema version</option>
-              {selectedVersions.map((version) => (
-                <option key={version.id} value={version.id}>
-                  {version.version}
-                </option>
-              ))}
-            </select>
+            </div>
+            <div className="schema-guidance-stack">
+              <div className="schema-guidance-card">
+                <span className="metric-label">Best practice</span>
+                <strong>Describe the extraction goal, not the model.</strong>
+                <p>
+                  Write the task the operator cares about: what values must be
+                  found, what evidence matters, and what should happen when the
+                  value is missing or ambiguous.
+                </p>
+              </div>
+              <div className="schema-guidance-card muted">
+                <span className="metric-label">Current search surface</span>
+                <ul className="schema-checklist">
+                  <li>
+                    {definition.extracted_fields.length} extraction targets
+                    defined
+                  </li>
+                  <li>{requiredFieldCount} required values must be found</li>
+                  <li>{citationFieldCount} fields expect source evidence</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </section>
 
         <section className="surface span-5">
           <CardHeader
-            title="Field summary"
-            subtitle="The extraction workspace should only surface the fields that matter to the job."
+            title="Setup map"
+            subtitle="Keep the configuration sequence obvious so the user always knows what comes next."
           />
-          <div className="summary-grid">
+          <div className="schema-step-list">
+            <div className="schema-step-card active">
+              <span className="schema-step-number">1</span>
+              <div>
+                <strong>Choose a schema base</strong>
+                <p>
+                  Reuse the closest existing definition before creating a new
+                  one.
+                </p>
+              </div>
+            </div>
+            <div className="schema-step-card active">
+              <span className="schema-step-number">2</span>
+              <div>
+                <strong>Describe the extraction goal</strong>
+                <p>
+                  State what the run should search for in plain operational
+                  terms.
+                </p>
+              </div>
+            </div>
+            <div className="schema-step-card">
+              <span className="schema-step-number">3</span>
+              <div>
+                <strong>Review search parameters</strong>
+                <p>
+                  Confirm the exact fields, evidence requirements, and output
+                  types.
+                </p>
+              </div>
+            </div>
+            <div className="schema-step-card">
+              <span className="schema-step-number">4</span>
+              <div>
+                <strong>Confirm review and export rules</strong>
+                <p>
+                  Make sure the output and human-review burden match the
+                  workflow.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="summary-grid top-gap">
             <SummaryStat
-              label="Extracted fields"
+              label="Search targets"
               value={definition.extracted_fields.length}
+              support={`${requiredFieldCount} required · ${optionalFieldCount} optional`}
               tone="accent"
             />
             <SummaryStat
-              label="Calculated fields"
-              value={definition.calculated_fields.length}
+              label="Evidence-backed"
+              value={citationFieldCount}
+              support="Fields expecting source citations"
             />
             <SummaryStat
-              label="Provider"
-              value={definition.llm_provider_settings.provider_type}
+              label="Calculated outputs"
+              value={definition.calculated_fields.length}
+              support="Deterministic formulas after extraction"
             />
             <SummaryStat
               label="Exports"
-              value={definition.output_settings.export_formats.join(" · ")}
+              value={exportFormatsLabel}
+              support="Standardized output formats"
             />
           </div>
         </section>
 
         <section className="surface span-7">
           <CardHeader
-            title="Extraction fields"
-            subtitle="These are the values the extraction workspace will show and review."
+            title="3. Review the search parameters"
+            subtitle="This is the actual search contract the extraction run will follow."
           />
-          <div className="builder-list">
-            {definition.extracted_fields.map((field) => (
-              <div key={field.name} className="builder-item">
-                <div className="builder-item-topline">
-                  <strong>{field.label}</strong>
-                  <div className="inline-badges">
-                    <span className="pill">{field.type}</span>
-                    <StatusBadge tone={field.required ? "info" : "warning"}>
-                      {field.required ? "Required" : "Optional"}
-                    </StatusBadge>
-                    {field.citation_required ? (
-                      <span className="pill">Citation</span>
-                    ) : null}
+          <div className="builder-list parameter-list">
+            {definition.extracted_fields.map((field, index) => (
+              <div key={field.name} className="builder-item parameter-card">
+                <div className="parameter-card-header">
+                  <div className="parameter-index">{index + 1}</div>
+                  <div className="parameter-copy">
+                    <div className="builder-item-topline">
+                      <strong>{field.label}</strong>
+                      <div className="inline-badges">
+                        <span className="pill">{field.type}</span>
+                        <StatusBadge tone={field.required ? "info" : "warning"}>
+                          {field.required ? "Required" : "Optional"}
+                        </StatusBadge>
+                        {field.citation_required ? (
+                          <span className="pill">Evidence required</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <p>
+                      {field.instructions ??
+                        field.description ??
+                        "Field instructions not defined."}
+                    </p>
                   </div>
                 </div>
-                <p>
-                  {field.instructions ??
-                    field.description ??
-                    "Field instructions not defined."}
-                </p>
-                <div className="builder-meta">
-                  <span>Field name: {field.name}</span>
-                  <span>Allow null: {field.required ? "No" : "Yes"}</span>
+                <div className="parameter-meta-grid">
+                  <div className="parameter-meta-cell">
+                    <span className="metric-label">Field key</span>
+                    <strong>{field.name}</strong>
+                  </div>
+                  <div className="parameter-meta-cell">
+                    <span className="metric-label">Output type</span>
+                    <strong>{field.type}</strong>
+                  </div>
+                  <div className="parameter-meta-cell">
+                    <span className="metric-label">Null handling</span>
+                    <strong>
+                      {field.required
+                        ? "Do not allow missing values"
+                        : "Allow null when absent"}
+                    </strong>
+                  </div>
+                  <div className="parameter-meta-cell">
+                    <span className="metric-label">Review posture</span>
+                    <strong>
+                      {field.citation_required
+                        ? "Operator should confirm source evidence"
+                        : "Evidence optional for this field"}
+                    </strong>
+                  </div>
                 </div>
               </div>
             ))}
@@ -1616,15 +1804,63 @@ function SchemaPage({
 
         <section className="surface span-5">
           <CardHeader
-            title="Calculated fields"
-            subtitle="Deterministic formulas should stay in the product, not in the model prompt."
+            title="4. Review output and trust rules"
+            subtitle="Keep deterministic logic and export behavior visible before the schema is saved."
           />
-          <div className="formula-editor-shell">
-            {definition.calculated_fields.map((field) => (
-              <div key={field.name} className="formula-chip">
-                {field.label} = {field.formula}
+          <div className="schema-guidance-stack">
+            <div className="schema-policy-card">
+              <span className="metric-label">Provider</span>
+              <strong>{definition.llm_provider_settings.provider_type}</strong>
+              <p>
+                Chunk size{" "}
+                {definition.llm_provider_settings.chunk_size ?? 16000}{" "}
+                characters ·{" "}
+                {draft.local_only
+                  ? "local-first boundary"
+                  : "external processing allowed"}
+              </p>
+            </div>
+            <div className="schema-policy-card">
+              <span className="metric-label">Review threshold</span>
+              <strong>
+                {citationFieldCount
+                  ? "Evidence-backed review expected"
+                  : "Light review posture"}
+              </strong>
+              <p>
+                Required fields and low-confidence values should be reviewed
+                before the export is treated as final.
+              </p>
+            </div>
+          </div>
+
+          <div className="formula-editor-shell top-gap">
+            <div className="hint-box">
+              <strong>Calculated outputs stay deterministic.</strong>
+              <p>
+                Keep formulas in the product so the model only extracts source
+                values and the application owns the final math.
+              </p>
+            </div>
+            {definition.calculated_fields.length ? (
+              definition.calculated_fields.map((field) => (
+                <div key={field.name} className="formula-chip">
+                  {field.label} = {field.formula}
+                </div>
+              ))
+            ) : (
+              <div className="hint-box">
+                <strong>No calculated outputs yet.</strong>
+                <p>
+                  Add formulas only when the workflow needs deterministic values
+                  after extraction.
+                </p>
               </div>
-            ))}
+            )}
+            <div className="hint-box">
+              <strong>Export formats</strong>
+              <p>{exportFormatsLabel}</p>
+            </div>
           </div>
         </section>
       </div>
@@ -1975,6 +2211,7 @@ function ExtractionWorkspacePage({
                       <input
                         ref={uploadInputRef}
                         type="file"
+                        aria-label="Choose document file"
                         className="hidden-input"
                         onChange={(event) => {
                           const file = event.target.files?.[0];
@@ -2643,6 +2880,7 @@ function SettingsPage({
   customProviderDraft,
   selectedCustomProfileId,
   customProfiles,
+  providerControls,
   onCustomProviderDraftChange,
   onSetProvider,
   onProbeProvider,
@@ -2650,6 +2888,7 @@ function SettingsPage({
   onProbeCustomProvider,
   onSaveCustomProfile,
   onLoadCustomProfile,
+  onReverifyCustomProfile,
   onActivateCustomProfile,
   onDeleteCustomProfile,
   probeResults,
@@ -2670,6 +2909,7 @@ function SettingsPage({
   customProviderDraft: CustomProviderDraft;
   selectedCustomProfileId: string | null;
   customProfiles: CustomProviderProfile[];
+  providerControls: ProviderControls;
   onCustomProviderDraftChange: Dispatch<SetStateAction<CustomProviderDraft>>;
   onSetProvider: (provider: ProviderSettings) => Promise<void>;
   onProbeProvider: (provider: ProviderCatalogEntry) => Promise<void>;
@@ -2677,6 +2917,7 @@ function SettingsPage({
   onProbeCustomProvider: () => Promise<void>;
   onSaveCustomProfile: () => Promise<void>;
   onLoadCustomProfile: (profile: CustomProviderProfile) => void;
+  onReverifyCustomProfile: (profile: CustomProviderProfile) => Promise<void>;
   onActivateCustomProfile: (profile: CustomProviderProfile) => Promise<void>;
   onDeleteCustomProfile: (profile: CustomProviderProfile) => Promise<void>;
   probeResults: Record<string, ProviderProbe>;
@@ -2692,6 +2933,9 @@ function SettingsPage({
   desktopLogs: DesktopLogs | null;
 }) {
   const savedCustomProfiles = customProfiles ?? [];
+  const probeMaxAgeHours =
+    providerControls.custom_provider_probe_max_age_hours ||
+    DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS;
 
   return (
     <div className="page-stack">
@@ -2850,6 +3094,7 @@ function SettingsPage({
             ["Storage location", "/data"],
             ["OCR settings", "Enabled for scanned PDFs"],
             ["Export defaults", "JSON + CSV + Excel"],
+            ["Profile reverify threshold", `${probeMaxAgeHours} hours`],
             ["Logging preference", "Minimal document text logging"],
             [
               "Privacy mode",
@@ -3118,79 +3363,119 @@ function SettingsPage({
         </div>
         {savedCustomProfiles.length ? (
           <div className="provider-grid top-gap">
-            {savedCustomProfiles.map((profile) => (
-              <section key={profile.id} className="provider-card">
-                <div className="provider-header">
-                  <div>
-                    <span
-                      className={classNames(
-                        "provider-mode",
-                        profile.settings.mode === "local" ? "local" : "cloud",
-                      )}
+            {savedCustomProfiles.map((profile) => {
+              const profileProbeIsStale = customProviderProfileProbeIsStale(
+                profile,
+                probeMaxAgeHours,
+              );
+              return (
+                <section key={profile.id} className="provider-card">
+                  <div className="provider-header">
+                    <div>
+                      <span
+                        className={classNames(
+                          "provider-mode",
+                          profile.settings.mode === "local" ? "local" : "cloud",
+                        )}
+                      >
+                        {profile.settings.mode === "local" ? "Local" : "Cloud"}
+                      </span>
+                      <h3>{profile.name}</h3>
+                    </div>
+                    <StatusBadge
+                      tone={
+                        selectedCustomProfileId === profile.id
+                          ? "info"
+                          : profile.last_probe_at && !profileProbeIsStale
+                            ? "success"
+                            : profile.last_probe_at
+                              ? "warning"
+                              : "neutral"
+                      }
                     >
-                      {profile.settings.mode === "local" ? "Local" : "Cloud"}
-                    </span>
-                    <h3>{profile.name}</h3>
+                      {selectedCustomProfileId === profile.id
+                        ? "Loaded"
+                        : profile.last_probe_at && !profileProbeIsStale
+                          ? "Verified"
+                          : profile.last_probe_at
+                            ? "Stale"
+                            : "Saved"}
+                    </StatusBadge>
                   </div>
-                  <StatusBadge
-                    tone={
-                      selectedCustomProfileId === profile.id
-                        ? "info"
-                        : "neutral"
-                    }
-                  >
-                    {selectedCustomProfileId === profile.id
-                      ? "Loaded"
-                      : "Saved"}
-                  </StatusBadge>
-                </div>
-                <div className="provider-body">
-                  <div className="provider-item">
-                    <span>Provider type</span>
-                    <strong>{profile.settings.provider_type}</strong>
+                  <div className="provider-body">
+                    <div className="provider-item">
+                      <span>Provider type</span>
+                      <strong>{profile.settings.provider_type}</strong>
+                    </div>
+                    <div className="provider-item">
+                      <span>Model</span>
+                      <strong>{profile.settings.model}</strong>
+                    </div>
+                    <div className="provider-item">
+                      <span>Updated</span>
+                      <strong>
+                        {new Date(profile.updated_at).toLocaleString()}
+                      </strong>
+                    </div>
+                    <div className="provider-item">
+                      <span>Last verified</span>
+                      <strong>
+                        {profile.last_probe_at
+                          ? `${formatTimestamp(profile.last_probe_at)}${profileProbeIsStale ? ` (${probeMaxAgeHours}h threshold exceeded)` : ""}`
+                          : "No successful probe recorded"}
+                      </strong>
+                    </div>
+                    <div className="provider-item">
+                      <span>Probe status</span>
+                      <strong>
+                        {profile.last_probe_status && profile.last_probe_detail
+                          ? `${profile.last_probe_status}: ${profile.last_probe_detail}`
+                          : "No successful probe recorded"}
+                      </strong>
+                    </div>
                   </div>
-                  <div className="provider-item">
-                    <span>Model</span>
-                    <strong>{profile.settings.model}</strong>
+                  <div className="inline-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => onLoadCustomProfile(profile)}
+                    >
+                      Load into form
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void onReverifyCustomProfile(profile)}
+                      disabled={busyAction === `reverify-${profile.id}`}
+                    >
+                      {busyAction === `reverify-${profile.id}`
+                        ? "Reverifying..."
+                        : "Reverify"}
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => void onActivateCustomProfile(profile)}
+                      disabled={busyAction === `activate-${profile.id}`}
+                    >
+                      {busyAction === `activate-${profile.id}`
+                        ? "Activating..."
+                        : "Activate default"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void onDeleteCustomProfile(profile)}
+                      disabled={busyAction === `delete-${profile.id}`}
+                    >
+                      {busyAction === `delete-${profile.id}`
+                        ? "Deleting..."
+                        : "Delete"}
+                    </button>
                   </div>
-                  <div className="provider-item">
-                    <span>Updated</span>
-                    <strong>
-                      {new Date(profile.updated_at).toLocaleString()}
-                    </strong>
-                  </div>
-                </div>
-                <div className="inline-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => onLoadCustomProfile(profile)}
-                  >
-                    Load into form
-                  </button>
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() => void onActivateCustomProfile(profile)}
-                    disabled={busyAction === `activate-${profile.id}`}
-                  >
-                    {busyAction === `activate-${profile.id}`
-                      ? "Activating..."
-                      : "Activate default"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => void onDeleteCustomProfile(profile)}
-                    disabled={busyAction === `delete-${profile.id}`}
-                  >
-                    {busyAction === `delete-${profile.id}`
-                      ? "Deleting..."
-                      : "Delete"}
-                  </button>
-                </div>
-              </section>
-            ))}
+                </section>
+              );
+            })}
           </div>
         ) : null}
       </section>
@@ -3345,6 +3630,10 @@ export function App() {
   const [selectedCustomProfileId, setSelectedCustomProfileId] = useState<
     string | null
   >(null);
+  const [providerControls, setProviderControls] = useState<ProviderControls>({
+    custom_provider_probe_max_age_hours:
+      DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS,
+  });
   const [devStatus, setDevStatus] = useState<DevStatus | null>(null);
   const [resultsByJob, setResultsByJob] = useState<
     Record<number, ResultEnvelope>
@@ -3415,6 +3704,10 @@ export function App() {
       setProviderHealth({});
       setProbeResults({});
       setCustomProfiles([]);
+      setProviderControls({
+        custom_provider_probe_max_age_hours:
+          DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS,
+      });
       setSelectedCustomProfileId(null);
       setDevStatus(null);
       setResultsByJob({});
@@ -3429,6 +3722,7 @@ export function App() {
       providerData,
       providerCatalogData,
       providerHealthData,
+      providerControlsData,
       customProfilesData,
       statusData,
     ] = await Promise.allSettled([
@@ -3439,6 +3733,7 @@ export function App() {
       readJson<ProviderSettings | null>("/settings/provider"),
       readJson<{ providers: ProviderCatalogEntry[] }>("/settings/providers"),
       readJson<ProviderHealth[]>("/settings/providers/health"),
+      readJson<ProviderControls>("/settings/providers/controls"),
       readJson<{ profiles: CustomProviderProfile[] }>(
         "/settings/providers/custom",
       ),
@@ -3470,6 +3765,14 @@ export function App() {
             providerHealthData.value.map((item) => [item.provider_key, item]),
           )
         : {},
+    );
+    setProviderControls(
+      providerControlsData.status === "fulfilled"
+        ? providerControlsData.value
+        : {
+            custom_provider_probe_max_age_hours:
+              DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS,
+          },
     );
     setCustomProfiles(
       customProfilesData.status === "fulfilled" &&
@@ -3959,7 +4262,7 @@ export function App() {
     probeKey: string,
     label: string,
     settings: ProviderSettings,
-  ) {
+  ): Promise<ProviderProbe | null> {
     try {
       setBusyAction(`probe-${probeKey}`);
       const result = await readJson<ProviderProbe>(
@@ -3978,15 +4281,34 @@ export function App() {
         tone: result.reachable ? "success" : "error",
         message: `${label}: ${result.detail}`,
       });
+      return result;
     } catch (error) {
       setBanner({
         tone: "error",
         message:
           error instanceof Error ? error.message : "Could not probe provider.",
       });
+      return null;
     } finally {
       setBusyAction(null);
     }
+  }
+
+  async function ensureProviderProbeReachable(
+    probeKey: string,
+    label: string,
+    settings: ProviderSettings,
+    blockedAction: string,
+  ): Promise<boolean> {
+    const result = await runProviderProbe(probeKey, label, settings);
+    if (result?.reachable) {
+      return true;
+    }
+    setBanner({
+      tone: "error",
+      message: `${blockedAction} blocked until provider probe succeeds.${result ? ` ${result.detail}` : ""}`,
+    });
+    return false;
   }
 
   async function handleProbeProvider(nextProvider: ProviderCatalogEntry) {
@@ -4032,6 +4354,16 @@ export function App() {
       name: customProviderDraft.label.trim(),
       settings,
     };
+
+    const probePassed = await ensureProviderProbeReachable(
+      selectedCustomProfileId ?? CUSTOM_PROVIDER_KEY,
+      payload.name || "Custom provider",
+      settings,
+      "Custom provider save",
+    );
+    if (!probePassed) {
+      return;
+    }
 
     try {
       setBusyAction("save-custom-profile");
@@ -4084,7 +4416,67 @@ export function App() {
     });
   }
 
+  async function handleReverifyCustomProfile(profile: CustomProviderProfile) {
+    try {
+      setBusyAction(`reverify-${profile.id}`);
+      const updated = await readJson<CustomProviderProfile>(
+        `/settings/providers/custom/${profile.id}/reverify`,
+        {
+          method: "POST",
+        },
+      );
+      setProbeResults((current) => ({
+        ...current,
+        [`profile-${profile.id}`]: {
+          provider_type: updated.settings.provider_type,
+          reachable: true,
+          status: updated.last_probe_status ?? "reachable",
+          detail:
+            updated.last_probe_detail ?? "Endpoint responded with HTTP 200.",
+          endpoint: null,
+          status_code: null,
+        },
+      }));
+      await refreshCoreData();
+      setBanner({
+        tone: "success",
+        message: `Reverified custom provider profile "${profile.name}".`,
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not reverify custom provider profile.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function handleActivateCustomProfile(profile: CustomProviderProfile) {
+    const probeMaxAgeHours =
+      providerControls.custom_provider_probe_max_age_hours ||
+      DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS;
+    if (customProviderProfileProbeIsStale(profile, probeMaxAgeHours)) {
+      setBanner({
+        tone: "error",
+        message: `Custom provider activation blocked until "${profile.name}" is reverified. The last successful probe is missing or older than ${probeMaxAgeHours} hours.`,
+      });
+      return;
+    }
+
+    const probePassed = await ensureProviderProbeReachable(
+      `profile-${profile.id}`,
+      profile.name,
+      profile.settings,
+      "Custom provider activation",
+    );
+    if (!probePassed) {
+      return;
+    }
+
     try {
       setBusyAction(`activate-${profile.id}`);
       const activated = await readJson<ProviderSettings>(
@@ -4433,6 +4825,7 @@ export function App() {
               customProviderDraft={customProviderDraft}
               selectedCustomProfileId={selectedCustomProfileId}
               customProfiles={customProfiles}
+              providerControls={providerControls}
               onCustomProviderDraftChange={setCustomProviderDraft}
               onSetProvider={handleSetProvider}
               onProbeProvider={handleProbeProvider}
@@ -4440,6 +4833,7 @@ export function App() {
               onProbeCustomProvider={handleProbeCustomProvider}
               onSaveCustomProfile={handleSaveCustomProfile}
               onLoadCustomProfile={handleLoadCustomProfile}
+              onReverifyCustomProfile={handleReverifyCustomProfile}
               onActivateCustomProfile={handleActivateCustomProfile}
               onDeleteCustomProfile={handleDeleteCustomProfile}
               probeResults={probeResults}
