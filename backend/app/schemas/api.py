@@ -96,10 +96,17 @@ class ProviderProbeResponse(BaseModel):
     status_code: int | None = None
 
 
+class ProviderControlsResponse(BaseModel):
+    custom_provider_probe_max_age_hours: int
+
+
 class CustomProviderProfile(BaseModel):
     id: str
     name: str
     settings: LLMProviderSettings
+    last_probe_at: datetime | None = None
+    last_probe_status: str | None = None
+    last_probe_detail: str | None = None
     created_at: datetime
     updated_at: datetime
 

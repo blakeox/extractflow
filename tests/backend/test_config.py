@@ -38,3 +38,14 @@ def test_settings_normalize_api_prefix_and_base_urls(tmp_path) -> None:
 
     assert settings.api_prefix == "/api"
     assert settings.default_openai_base_url == "https://api.openai.com/v1"
+
+
+def test_settings_allow_configurable_custom_provider_probe_max_age_hours(tmp_path) -> None:
+    settings = Settings(
+        **build_backend_settings(
+            tmp_path,
+            custom_provider_probe_max_age_hours=12,
+        )
+    )
+
+    assert settings.custom_provider_probe_max_age_hours == 12

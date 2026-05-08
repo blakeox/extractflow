@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -19,6 +20,7 @@ from app.schemas.api import (
     JobCreateRequest,
     JobResponse,
     ProviderCatalogResponse,
+    ProviderControlsResponse,
     ProviderHealthResponse,
     ProviderProbeRequest,
     ProviderProbeResponse,
@@ -31,12 +33,14 @@ from app.schemas.api import (
 )
 from app.services.provider_catalog import list_provider_catalog
 from app.services.provider_health import get_provider_health
-from app.services.provider_probe import probe_provider
+from app.services.provider_probe import probe_provider, require_reachable_provider
 from app.services.provider_profiles import (
     create_custom_provider_profile,
     delete_custom_provider_profile,
     get_custom_provider_profile,
     list_custom_provider_profiles,
+    record_custom_provider_profile_probe,
+    require_fresh_custom_provider_profile_probe,
     update_custom_provider_profile,
 )
 from app.services.result_service import apply_review_edits, export_result
@@ -130,11 +134,15 @@ def list_template_versions(template_id: int, db: Session = Depends(get_db)):
 
 @router.post("/documents", response_model=DocumentResponse)
 def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    target = Path(settings.uploads_dir) / file.filename
+    original_filename = Path(file.filename or "").name
+    if not original_filename:
+        raise HTTPException(status_code=400, detail="Uploaded file must include a filename.")
+
+    target = Path(settings.uploads_dir) / f"{uuid4().hex}-{original_filename}"
     with target.open("wb") as handle:
         shutil.copyfileobj(file.file, handle)
     document = Document(
-        original_filename=file.filename,
+        original_filename=original_filename,
         content_type=file.content_type or "application/octet-stream",
         stored_path=str(target),
     )
@@ -285,6 +293,11 @@ def get_provider_catalog_health():
     ]
 
 
+@router.get("/settings/providers/controls", response_model=ProviderControlsResponse)
+def get_provider_controls():
+    return ProviderControlsResponse(custom_provider_probe_max_age_hours=settings.custom_provider_probe_max_age_hours)
+
+
 @router.post("/settings/providers/probe", response_model=ProviderProbeResponse)
 def probe_provider_endpoint(payload: ProviderProbeRequest):
     return ProviderProbeResponse.model_validate(probe_provider(payload.settings))
@@ -297,14 +310,28 @@ def list_custom_provider_profiles_endpoint(db: Session = Depends(get_db)):
 
 @router.post("/settings/providers/custom")
 def create_custom_provider_profile_endpoint(payload: CustomProviderProfileRequest, db: Session = Depends(get_db)):
-    return create_custom_provider_profile(db, payload.name, payload.settings)
+    probe_result = require_reachable_provider(payload.settings, "Custom provider save")
+    profile = create_custom_provider_profile(db, payload.name, payload.settings)
+    return record_custom_provider_profile_probe(
+        db,
+        profile.id,
+        status=str(probe_result["status"]),
+        detail=str(probe_result["detail"]),
+    )
 
 
 @router.put("/settings/providers/custom/{profile_id}")
 def update_custom_provider_profile_endpoint(
     profile_id: str, payload: CustomProviderProfileRequest, db: Session = Depends(get_db)
 ):
-    return update_custom_provider_profile(db, profile_id, payload.name, payload.settings)
+    probe_result = require_reachable_provider(payload.settings, "Custom provider save")
+    update_custom_provider_profile(db, profile_id, payload.name, payload.settings)
+    return record_custom_provider_profile_probe(
+        db,
+        profile_id,
+        status=str(probe_result["status"]),
+        detail=str(probe_result["detail"]),
+    )
 
 
 @router.delete("/settings/providers/custom/{profile_id}")
@@ -313,9 +340,23 @@ def delete_custom_provider_profile_endpoint(profile_id: str, db: Session = Depen
     return {"deleted": True}
 
 
+@router.post("/settings/providers/custom/{profile_id}/reverify")
+def reverify_custom_provider_profile_endpoint(profile_id: str, db: Session = Depends(get_db)):
+    profile = get_custom_provider_profile(db, profile_id)
+    probe_result = require_reachable_provider(profile.settings, "Custom provider reverification")
+    return record_custom_provider_profile_probe(
+        db,
+        profile_id,
+        status=str(probe_result["status"]),
+        detail=str(probe_result["detail"]),
+    )
+
+
 @router.post("/settings/providers/custom/{profile_id}/activate")
 def activate_custom_provider_profile_endpoint(profile_id: str, db: Session = Depends(get_db)):
     profile = get_custom_provider_profile(db, profile_id)
+    require_fresh_custom_provider_profile_probe(profile)
+    probe_result = require_reachable_provider(profile.settings, "Custom provider activation")
     setting = db.query(Setting).filter(Setting.key == "default_provider").first()
     data = profile.settings.model_dump(mode="json")
     if setting:
@@ -324,6 +365,12 @@ def activate_custom_provider_profile_endpoint(profile_id: str, db: Session = Dep
         setting = Setting(key="default_provider", value=data)
         db.add(setting)
     db.commit()
+    record_custom_provider_profile_probe(
+        db,
+        profile_id,
+        status=str(probe_result["status"]),
+        detail=str(probe_result["detail"]),
+    )
     return data
 
 

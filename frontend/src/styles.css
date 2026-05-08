@@ -1282,6 +1282,10 @@ tbody tr:hover {
   grid-column: span 8;
 }
 
+.span-12 {
+  grid-column: span 12;
+}
+
 .span-7 {
   grid-column: span 7;
 }
@@ -1443,6 +1447,107 @@ tbody tr:hover {
   padding: 1rem;
 }
 
+.schema-selector-surface {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(248, 250, 255, 0.96),
+      rgba(255, 255, 255, 0.96)
+    ),
+    white;
+}
+
+.schema-selector-grid,
+.schema-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.schema-brief-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);
+}
+
+.schema-active-card,
+.schema-guidance-card,
+.schema-policy-card,
+.schema-step-card,
+.parameter-meta-cell {
+  border: 1px solid rgba(122, 138, 179, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-soft);
+}
+
+.schema-active-card,
+.schema-guidance-card,
+.schema-policy-card {
+  padding: 1rem 1.05rem;
+}
+
+.schema-active-card strong,
+.schema-guidance-card strong,
+.schema-policy-card strong,
+.parameter-meta-cell strong,
+.schema-step-card strong {
+  display: block;
+}
+
+.schema-active-card p,
+.schema-guidance-card p,
+.schema-policy-card p,
+.schema-step-card p {
+  margin: 0.45rem 0 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.schema-guidance-stack,
+.schema-step-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.schema-guidance-card.muted {
+  background: rgba(248, 250, 255, 0.88);
+}
+
+.schema-checklist {
+  margin: 0.65rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--text);
+}
+
+.schema-checklist li + li {
+  margin-top: 0.4rem;
+}
+
+.schema-step-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 0.85rem;
+  padding: 0.95rem 1rem;
+}
+
+.schema-step-card.active {
+  border-color: rgba(var(--accent-rgb), 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.schema-step-number,
+.parameter-index {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
 .builder-item-topline {
   display: flex;
   align-items: center;
@@ -1455,6 +1560,41 @@ tbody tr:hover {
   gap: 0.8rem;
   flex-wrap: wrap;
   margin-top: 0.7rem;
+}
+
+.parameter-list {
+  gap: 1rem;
+}
+
+.parameter-card {
+  padding: 1.05rem;
+}
+
+.parameter-card-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.parameter-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.parameter-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.parameter-meta-cell {
+  padding: 0.85rem 0.9rem;
+}
+
+.parameter-meta-cell .metric-label {
+  margin-bottom: 0.28rem;
 }
 
 .formula-editor-shell {
@@ -1911,12 +2051,15 @@ tbody tr:hover {
   .desktop-launch-grid,
   .desktop-launch-metrics,
   .desktop-setup-grid,
-  .desktop-onboarding-grid {
+  .desktop-onboarding-grid,
+  .schema-selector-grid,
+  .schema-brief-grid {
     grid-template-columns: 1fr;
   }
 
   .wide-span,
   .span-8,
+  .span-12,
   .span-7,
   .span-6,
   .span-5,
@@ -1961,7 +2104,10 @@ tbody tr:hover {
   .settings-grid,
   .settings-grid-wide,
   .summary-grid,
-  .table-toolbar {
+  .table-toolbar,
+  .schema-selector-grid,
+  .schema-brief-grid,
+  .parameter-meta-grid {
     grid-template-columns: 1fr;
   }
 

@@ -18,6 +18,12 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def recompute_fields_requiring_review(summary: ExtractionValidationSummary) -> None:
+    summary.fields_requiring_review = [
+        field.field_name for field in summary.extracted_fields if field.requires_review
+    ] + [field.field_name for field in summary.calculated_fields if field.requires_review]
+
+
 def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEditPayload) -> ExtractionResult:
     summary = ExtractionValidationSummary.model_validate(result.result_json)
     field_index = {field.field_name: field for field in summary.extracted_fields}
@@ -56,6 +62,7 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
                 calc.validation_status = "reviewed"
                 context[calc.field_name] = calc.calculated_value
 
+    recompute_fields_requiring_review(summary)
     summary.reviewed_at = utc_now()
     result.result_json = summary.model_dump(mode="json")
     result.review_status = "reviewed"
