@@ -7,8 +7,8 @@ from extraction_core.models import LLMProviderSettings
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Setting
 from app.core.config import settings
+from app.models import Setting
 from app.schemas.api import CustomProviderProfile
 
 CUSTOM_PROVIDER_PROFILES_KEY = "custom_provider_profiles"

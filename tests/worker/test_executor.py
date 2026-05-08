@@ -5,8 +5,8 @@ from unittest.mock import Mock
 import httpx
 import pandas as pd
 import pytest
-from app.services.executor import execute_extraction
 from app.services import parser as parser_service
+from app.services.executor import execute_extraction
 from app.services.parser import parse_document
 from app.services.provider import AzureOpenAIAdapter, ExtractionProvider, OpenAICompatibleAdapter
 from app.services.validator import validate_extracted_field

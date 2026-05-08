@@ -29,6 +29,10 @@ function textResponse(body: string, status: number) {
   });
 }
 
+function isoHoursAgo(hours: number) {
+  return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+}
+
 function makeDesktopStatus(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     tauriMode: true,
@@ -822,10 +826,10 @@ describe("App", () => {
     const profile = {
       id: "profile-1",
       name: "Finance Gateway",
-      last_probe_at: "2026-05-07T12:00:00Z",
+      last_probe_at: isoHoursAgo(1),
       last_probe_status: "reachable",
       last_probe_detail: "Endpoint responded with HTTP 200.",
-      updated_at: "2026-05-03T12:00:00Z",
+      updated_at: isoHoursAgo(120),
       settings: {
         mode: "cloud",
         provider_type: "finance_gateway",
@@ -928,10 +932,10 @@ describe("App", () => {
     const staleProfile = {
       id: "profile-stale",
       name: "Stale Gateway",
-      last_probe_at: "2026-05-05T12:00:00Z",
+      last_probe_at: isoHoursAgo(48),
       last_probe_status: "reachable",
       last_probe_detail: "Endpoint responded with HTTP 200.",
-      updated_at: "2026-05-05T12:00:00Z",
+      updated_at: isoHoursAgo(48),
       settings: {
         mode: "cloud",
         provider_type: "stale_gateway",
@@ -1022,10 +1026,10 @@ describe("App", () => {
     const staleProfile = {
       id: "profile-stale",
       name: "Stale Gateway",
-      last_probe_at: "2026-05-05T12:00:00Z",
+      last_probe_at: isoHoursAgo(48),
       last_probe_status: "reachable",
       last_probe_detail: "Endpoint responded with HTTP 200.",
-      updated_at: "2026-05-05T12:00:00Z",
+      updated_at: isoHoursAgo(48),
       settings: {
         mode: "cloud",
         provider_type: "stale_gateway",
@@ -1046,7 +1050,7 @@ describe("App", () => {
     };
     const verifiedProfile = {
       ...staleProfile,
-      last_probe_at: "2026-05-07T12:00:00Z",
+      last_probe_at: isoHoursAgo(1),
       last_probe_status: "reachable",
       last_probe_detail: "Endpoint responded with HTTP 200.",
     };
