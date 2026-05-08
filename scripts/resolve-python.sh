@@ -11,7 +11,10 @@ is_supported_python() {
     return 1
   fi
 
-  version="$("$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  if ! version="$("$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)"; then
+    return 1
+  fi
+
   case "$version" in
     3.11|3.12|3.13)
       return 0
