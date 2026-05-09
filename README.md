@@ -173,7 +173,7 @@ Failure-path expectations:
 
 The app now separates three concerns:
 
-- Provider family: `openai`, `deepseek`, `kimi`, `ollama`, `lm_studio`, `mock`, or your own registered type
+- Provider family: `openai`, `deepseek`, `kimi`, `ollama`, `lm_studio`, `langextract`, `mock`, or your own registered type
 - Runtime endpoint: the `base_url` and any environment-backed API key
 - Selected model: the deployment or model string used for extraction
 
@@ -204,6 +204,7 @@ Readiness and control surfaces:
 - the Settings page now includes a custom provider form for private OpenAI-compatible and Azure endpoints, with save and probe actions
 - saved custom provider profiles move between `Saved`, `Verified`, and `Stale` based on the configured `CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS` window
 - Azure readiness requires `base_url`, `deployment`, `api_version`, and `AZURE_OPENAI_API_KEY`
+- `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples and probes Ollama through `/api/tags`
 
 Example custom provider catalog entry:
 

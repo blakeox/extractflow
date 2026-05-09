@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -11,8 +12,13 @@ from extraction_core.models import (
     ExtractionFieldDefinition,
     ExtractionFieldResult,
     ExtractionTemplate,
+    LangExtractConfig,
     LLMProviderSettings,
 )
+
+PAGE_MARKER_PATTERN = re.compile(r"\[Page (?P<page>\d+)\]")
+CURRENCY_PATTERN = re.compile(r"[-+]?\$?\s?(\d[\d,]*(?:\.\d{1,2})?)")
+NUMBER_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
 
 class ProviderAdapter(Protocol):
@@ -27,6 +33,7 @@ class ExtractionProvider:
     def __init__(self) -> None:
         self._adapters: list[ProviderAdapter] = [
             MockProviderAdapter(),
+            LangExtractAdapter(),
             AzureOpenAIAdapter(),
             OpenAICompatibleAdapter(),
         ]
@@ -36,7 +43,8 @@ class ExtractionProvider:
     ) -> list[ExtractionFieldResult]:
         for adapter in self._adapters:
             if adapter.supports(settings):
-                chunks = split_text_into_chunks(text, settings.chunk_size)
+                use_outer_chunking = settings.api_style != "langextract"
+                chunks = split_text_into_chunks(text, settings.chunk_size) if use_outer_chunking else [text]
                 results: list[ExtractionFieldResult] = []
                 for index, chunk in enumerate(chunks, start=1):
                     chunk_results = adapter.extract(
@@ -44,11 +52,12 @@ class ExtractionProvider:
                         template,
                         settings,
                     )
-                    for item in chunk_results:
-                        if item.extraction_notes:
-                            item.extraction_notes = f"{item.extraction_notes} Chunk {index}/{len(chunks)}."
-                        else:
-                            item.extraction_notes = f"Chunk {index}/{len(chunks)}."
+                    if use_outer_chunking:
+                        for item in chunk_results:
+                            if item.extraction_notes:
+                                item.extraction_notes = f"{item.extraction_notes} Chunk {index}/{len(chunks)}."
+                            else:
+                                item.extraction_notes = f"Chunk {index}/{len(chunks)}."
                     results.extend(chunk_results)
                 return results
         raise ValueError(f"Unsupported provider configuration: {settings.provider_type} ({settings.api_style})")
@@ -123,6 +132,47 @@ class MockProviderAdapter:
             extraction_notes="Mock extraction used." if source else "No value identified by mock extractor.",
             requires_review=confidence < 0.75,
         )
+
+
+class LangExtractAdapter:
+    def supports(self, settings: LLMProviderSettings) -> bool:
+        return settings.provider_type == "langextract" or settings.api_style == "langextract"
+
+    def extract(
+        self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
+    ) -> list[ExtractionFieldResult]:
+        if settings.mode != "local":
+            raise ValueError("LangExtract is only supported in local mode.")
+        if settings.allow_external_processing:
+            raise ValueError("LangExtract v1 requires allow_external_processing to stay disabled.")
+        if not settings.base_url:
+            raise ValueError("LangExtract provider requires an Ollama base URL.")
+        if not template.langextract_config or not template.langextract_config.examples:
+            raise ValueError("LangExtract provider requires template.langextract_config with at least one example.")
+
+        lx_module, example_data_cls, extraction_cls, ollama_model_cls = _import_langextract()
+        prompt_config = template.langextract_config
+        model = ollama_model_cls(
+            model_id=settings.model,
+            model_url=normalize_langextract_base_url(settings.base_url),
+            timeout=settings.timeout_seconds,
+        )
+        annotated = lx_module.extract(
+            text_or_documents=text,
+            model=model,
+            prompt_description=prompt_config.prompt_description,
+            examples=build_langextract_examples(prompt_config, example_data_cls, extraction_cls),
+            max_char_buffer=settings.chunk_size,
+            temperature=settings.temperature,
+            show_progress=False,
+        )
+
+        field_by_name = {field.name: field for field in template.extracted_fields}
+        results: list[ExtractionFieldResult] = []
+        for extraction in annotated.extractions or []:
+            definition = field_by_name.get(extraction.extraction_class)
+            results.append(build_langextract_result(definition, extraction, text))
+        return results
 
 
 class OpenAICompatibleAdapter:
@@ -209,6 +259,194 @@ class AzureOpenAIAdapter:
                 except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
                     last_error = exc
             raise RuntimeError(f"Provider call failed for {settings.provider_type}: {last_error}") from last_error
+
+
+def _import_langextract() -> tuple[Any, Any, Any, Any]:
+    try:
+        lx_module = importlib.import_module("langextract")
+        data_module = importlib.import_module("langextract.core.data")
+        ollama_module = importlib.import_module("langextract.providers.ollama")
+    except ImportError as exc:
+        raise RuntimeError(
+            "LangExtract provider requires langextract to be installed in the worker environment."
+        ) from exc
+    return (
+        lx_module,
+        data_module.ExampleData,
+        data_module.Extraction,
+        ollama_module.OllamaLanguageModel,
+    )
+
+
+def build_langextract_examples(config: LangExtractConfig, example_data_cls: Any, extraction_cls: Any) -> list[Any]:
+    examples: list[Any] = []
+    for example in config.examples:
+        examples.append(
+            example_data_cls(
+                text=example.text,
+                extractions=[
+                    extraction_cls(
+                        extraction_class=item.extraction_class,
+                        extraction_text=item.extraction_text,
+                        attributes=item.attributes or None,
+                    )
+                    for item in example.extractions
+                ],
+            )
+        )
+    return examples
+
+
+def build_langextract_result(
+    definition: ExtractionFieldDefinition | None, extraction: Any, text: str
+) -> ExtractionFieldResult:
+    start = getattr(getattr(extraction, "char_interval", None), "start_pos", None)
+    end = getattr(getattr(extraction, "char_interval", None), "end_pos", None)
+    grounded = isinstance(start, int) and isinstance(end, int) and start >= 0 and end >= start
+    source_text = text[start:end] if grounded else ""
+    page_number, location_reference = infer_page_reference(text, start if grounded else None)
+    extracted_text = extraction.extraction_text.strip()
+    attributes = extraction.attributes or {}
+    normalized_value = normalize_langextract_value(definition, extracted_text, attributes)
+    notes = (
+        f"LangExtract grounded chars {start}-{end}." if grounded else "LangExtract returned an ungrounded extraction."
+    )
+
+    if definition is None:
+        return ExtractionFieldResult(
+            field_name=extraction.extraction_class,
+            label=extraction.extraction_class,
+            data_type="text",
+            extracted_value=extracted_text,
+            normalized_value={"value": extracted_text} if extracted_text else None,
+            confidence_score=1.0 if grounded else 0.0,
+            source_text=source_text,
+            char_start=start if grounded else None,
+            char_end=end if grounded else None,
+            page_number=page_number,
+            location_reference=location_reference,
+            extraction_notes=notes,
+            requires_review=not grounded,
+        )
+
+    return ExtractionFieldResult(
+        field_name=definition.name,
+        label=definition.label,
+        data_type=definition.type,
+        extracted_value=extracted_text or None,
+        normalized_value=normalized_value,
+        confidence_score=1.0 if grounded and normalized_value is not None else 0.0,
+        source_text=source_text,
+        char_start=start if grounded else None,
+        char_end=end if grounded else None,
+        page_number=page_number,
+        location_reference=location_reference,
+        extraction_notes=notes,
+        requires_review=not grounded,
+    )
+
+
+def normalize_langextract_value(
+    definition: ExtractionFieldDefinition | None, extracted_text: str, attributes: dict[str, Any]
+) -> Any:
+    raw_value = attributes.get("value", extracted_text)
+    if definition is None:
+        return {"value": extracted_text} if extracted_text else None
+
+    field_type = definition.type.value
+    if field_type in {"text", "paragraph", "category", "citation_backed_answer"}:
+        value = stringify_langextract_value(raw_value)
+        return {"value": value} if value else None
+
+    if field_type == "date":
+        value = stringify_langextract_value(raw_value)
+        return {"value": value, "display_value": value} if value else None
+
+    if field_type == "number":
+        number = parse_number(raw_value)
+        return {"value": number} if number is not None else None
+
+    if field_type == "currency":
+        amount = parse_currency_amount(raw_value if raw_value else extracted_text)
+        if amount is None:
+            return None
+        currency = stringify_langextract_value(attributes.get("currency")) or definition.validation.currency or "USD"
+        display_value = extracted_text or f"{currency} {amount:,.2f}"
+        return {
+            "amount": amount,
+            "currency": currency,
+            "display_value": display_value,
+        }
+
+    if field_type == "boolean":
+        boolean = parse_boolean(raw_value)
+        return boolean
+
+    if field_type in {"list", "multi_select"}:
+        if isinstance(raw_value, list):
+            values = [str(item).strip() for item in raw_value if str(item).strip()]
+        else:
+            values = [part.strip() for part in str(raw_value).split(",") if part.strip()]
+        return {"value": values} if values else None
+
+    if field_type in {"json_object", "structured_object", "table"}:
+        if attributes:
+            return attributes
+        return {"value": extracted_text} if extracted_text else None
+
+    return {"value": stringify_langextract_value(raw_value)} if stringify_langextract_value(raw_value) else None
+
+
+def infer_page_reference(text: str, start_pos: int | None) -> tuple[int | None, str]:
+    if start_pos is None:
+        return None, ""
+    marker = None
+    for match in PAGE_MARKER_PATTERN.finditer(text):
+        if match.start() > start_pos:
+            break
+        marker = match
+    if marker is None:
+        return None, ""
+    page = int(marker.group("page"))
+    return page, f"Page {page}"
+
+
+def stringify_langextract_value(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value if str(item).strip()).strip()
+    return str(value).strip() if value is not None else ""
+
+
+def parse_currency_amount(value: Any) -> float | None:
+    candidate = stringify_langextract_value(value)
+    match = CURRENCY_PATTERN.search(candidate)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def parse_number(value: Any) -> float | None:
+    candidate = stringify_langextract_value(value)
+    match = NUMBER_PATTERN.search(candidate)
+    if not match:
+        return None
+    return float(match.group(0))
+
+
+def parse_boolean(value: Any) -> bool | None:
+    candidate = stringify_langextract_value(value).lower()
+    if candidate in {"true", "yes", "y", "1"}:
+        return True
+    if candidate in {"false", "no", "n", "0"}:
+        return False
+    return None
+
+
+def normalize_langextract_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized[:-3]
+    return normalized
 
 
 def read_api_key(settings: LLMProviderSettings) -> str:

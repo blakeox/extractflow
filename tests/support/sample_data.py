@@ -20,6 +20,29 @@ def build_template_definition() -> dict:
             "retry_count": 2,
             "chunk_size": 16000,
         },
+        "langextract_config": {
+            "prompt_description": (
+                "Extract the vendor name and total invoice amount exactly as they appear in the document. "
+                "Keep extractions grounded to verbatim source text and preserve order of appearance."
+            ),
+            "examples": [
+                {
+                    "text": "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00",
+                    "extractions": [
+                        {
+                            "extraction_class": "vendor_name",
+                            "extraction_text": "Acme Corp",
+                            "attributes": {"value": "Acme Corp"},
+                        },
+                        {
+                            "extraction_class": "total_amount",
+                            "extraction_text": "$1,200.00",
+                            "attributes": {"currency": "USD"},
+                        },
+                    ],
+                }
+            ],
+        },
         "extracted_fields": [
             {
                 "name": "vendor_name",

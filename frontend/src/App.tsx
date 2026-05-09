@@ -51,7 +51,7 @@ type ProviderSettings = {
   mode: "local" | "cloud";
   provider_type: string;
   provider_label?: string | null;
-  api_style?: "mock" | "openai_compatible" | "azure_openai";
+  api_style?: "mock" | "openai_compatible" | "azure_openai" | "langextract";
   base_url?: string | null;
   api_key_env_var?: string | null;
   api_key_required?: boolean;
@@ -73,7 +73,7 @@ type ProviderCatalogEntry = {
   description: string;
   mode: "local" | "cloud";
   provider_type: string;
-  api_style: "mock" | "openai_compatible" | "azure_openai";
+  api_style: "mock" | "openai_compatible" | "azure_openai" | "langextract";
   base_url?: string | null;
   model: string;
   enabled: boolean;
@@ -149,6 +149,17 @@ type TemplateDefinition = {
   document_type: string;
   description: string;
   llm_provider_settings: ProviderSettings;
+  langextract_config?: {
+    prompt_description: string;
+    examples: Array<{
+      text: string;
+      extractions: Array<{
+        extraction_class: string;
+        extraction_text: string;
+        attributes: Record<string, string | string[]>;
+      }>;
+    }>;
+  } | null;
   extracted_fields: TemplateDefinitionField[];
   calculated_fields: TemplateDefinitionCalculated[];
   output_settings: {
@@ -193,6 +204,8 @@ type ReviewFieldResult = {
   calculated_value?: unknown;
   confidence_score?: number;
   source_text?: string;
+  char_start?: number | null;
+  char_end?: number | null;
   page_number?: number | null;
   location_reference?: string;
   validation_status: string;
@@ -262,6 +275,8 @@ type DraftTemplate = {
   description: string;
   template_version: string;
   local_only: boolean;
+  langextract_prompt_description: string;
+  langextract_examples_json: string;
 };
 
 type WorkspaceStage = "draft" | "processing" | "review" | "ready" | "failed";
@@ -353,6 +368,32 @@ const starterTemplateDefinition: TemplateDefinition = {
     timeout_seconds: 120,
     retry_count: 2,
     chunk_size: 16000,
+  },
+  langextract_config: {
+    prompt_description:
+      "Extract the primary subject, effective date, and total amount exactly as they appear in the document. Keep extractions grounded to verbatim source spans and in order of appearance.",
+    examples: [
+      {
+        text: "Client: Willow Creek HOA\nEffective Date: 2025-01-15\nTotal Amount Due: $4,250.00",
+        extractions: [
+          {
+            extraction_class: "primary_subject",
+            extraction_text: "Willow Creek HOA",
+            attributes: { value: "Willow Creek HOA" },
+          },
+          {
+            extraction_class: "effective_date",
+            extraction_text: "2025-01-15",
+            attributes: { value: "2025-01-15" },
+          },
+          {
+            extraction_class: "total_amount",
+            extraction_text: "$4,250.00",
+            attributes: { currency: "USD" },
+          },
+        ],
+      },
+    ],
   },
   extracted_fields: [
     {
@@ -555,6 +596,14 @@ function formatConfidence(score?: number) {
   return score == null ? "—" : `${Math.round(score * 100)}%`;
 }
 
+function formatCharInterval(
+  field: Pick<ReviewFieldResult, "char_start" | "char_end">,
+) {
+  return field.char_start != null && field.char_end != null
+    ? `Chars ${field.char_start}-${field.char_end}`
+    : "Chars —";
+}
+
 function formatValue(value: unknown): string {
   if (value == null) {
     return "—";
@@ -688,12 +737,45 @@ function parseReviewDraft(
   }
 }
 
+function stringifyLangExtractExamples(
+  config?: TemplateDefinition["langextract_config"],
+) {
+  return JSON.stringify(config?.examples ?? [], null, 2);
+}
+
+function parseLangExtractExamplesJson(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("LangExtract examples must be a JSON array.");
+  }
+  return parsed as NonNullable<
+    TemplateDefinition["langextract_config"]
+  >["examples"];
+}
+
 function buildTemplatePayload(
   draft: DraftTemplate,
   provider: ProviderSettings | null,
   base?: TemplateDefinition,
 ): TemplateDefinition {
   const seed = base ?? starterTemplateDefinition;
+  const langextractPromptDescription =
+    draft.langextract_prompt_description.trim();
+  const parsedLangExtractExamples = parseLangExtractExamplesJson(
+    draft.langextract_examples_json,
+  );
+  const langextractConfig =
+    langextractPromptDescription || parsedLangExtractExamples.length
+      ? {
+          prompt_description: langextractPromptDescription,
+          examples: parsedLangExtractExamples,
+        }
+      : null;
+
   return {
     ...seed,
     template_name: draft.template_name,
@@ -701,6 +783,7 @@ function buildTemplatePayload(
     document_type: draft.document_type,
     description: draft.description,
     llm_provider_settings: provider ?? seed.llm_provider_settings,
+    langextract_config: langextractConfig,
   };
 }
 
@@ -1447,6 +1530,7 @@ function SchemaPage({
   selectedTemplateVersionId,
   setSelectedTemplateVersionId,
   currentTemplateDefinition,
+  provider,
   draft,
   setDraft,
   onCreateTemplate,
@@ -1459,12 +1543,17 @@ function SchemaPage({
   selectedTemplateVersionId: number | null;
   setSelectedTemplateVersionId: (id: number | null) => void;
   currentTemplateDefinition: TemplateDefinition | null;
+  provider: ProviderSettings | null;
   draft: DraftTemplate;
   setDraft: Dispatch<SetStateAction<DraftTemplate>>;
   onCreateTemplate: () => Promise<void>;
   busyAction: string | null;
 }) {
   const definition = currentTemplateDefinition ?? starterTemplateDefinition;
+  const effectiveProvider = provider ?? definition.llm_provider_settings;
+  const showLangExtractEditor =
+    effectiveProvider.api_style === "langextract" ||
+    Boolean(definition.langextract_config);
   const selectedSchema =
     templates.find((item) => item.id === selectedTemplateId) ?? null;
   const selectedVersions = templateVersions.filter(
@@ -1642,6 +1731,38 @@ function SchemaPage({
                   }))
                 }
               />
+              {showLangExtractEditor ? (
+                <>
+                  <label className="full-line">
+                    <span>LangExtract prompt</span>
+                    <textarea
+                      rows={5}
+                      value={draft.langextract_prompt_description}
+                      placeholder="Describe exactly what LangExtract should extract and how grounded spans should behave."
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          langextract_prompt_description: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="full-line">
+                    <span>LangExtract examples (JSON array)</span>
+                    <textarea
+                      rows={12}
+                      value={draft.langextract_examples_json}
+                      placeholder='[{"text":"...","extractions":[{"extraction_class":"field_name","extraction_text":"...","attributes":{"value":"..."}}]}]'
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          langextract_examples_json: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </>
+              ) : null}
             </div>
             <div className="schema-guidance-stack">
               <div className="schema-guidance-card">
@@ -1819,6 +1940,12 @@ function SchemaPage({
                   ? "local-first boundary"
                   : "external processing allowed"}
               </p>
+              {definition.langextract_config?.examples?.length ? (
+                <p>
+                  LangExtract examples{" "}
+                  {definition.langextract_config.examples.length}
+                </p>
+              ) : null}
             </div>
             <div className="schema-policy-card">
               <span className="metric-label">Review threshold</span>
@@ -2351,6 +2478,9 @@ function ExtractionWorkspacePage({
                               "Unknown location"}
                           </span>
                           <span className="pill">
+                            {formatCharInterval(focusedField)}
+                          </span>
+                          <span className="pill">
                             Confidence{" "}
                             {formatConfidence(focusedField.confidence_score)}
                           </span>
@@ -2722,6 +2852,7 @@ function ExtractionWorkspacePage({
                                     {field.location_reference ||
                                       "Unknown location"}
                                   </span>
+                                  <span>{formatCharInterval(field)}</span>
                                   <span>
                                     Confidence{" "}
                                     {formatConfidence(field.confidence_score)}
@@ -3656,6 +3787,11 @@ export function App() {
     description: starterTemplateDefinition.description,
     template_version: starterTemplateDefinition.template_version,
     local_only: true,
+    langextract_prompt_description:
+      starterTemplateDefinition.langextract_config?.prompt_description ?? "",
+    langextract_examples_json: stringifyLangExtractExamples(
+      starterTemplateDefinition.langextract_config,
+    ),
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [banner, setBanner] = useState<{
@@ -3914,6 +4050,11 @@ export function App() {
       local_only:
         !currentTemplateDefinition.llm_provider_settings
           .allow_external_processing,
+      langextract_prompt_description:
+        currentTemplateDefinition.langextract_config?.prompt_description ?? "",
+      langextract_examples_json: stringifyLangExtractExamples(
+        currentTemplateDefinition.langextract_config,
+      ),
     });
   }, [currentTemplateDefinition]);
 
@@ -4810,6 +4951,7 @@ export function App() {
               selectedTemplateVersionId={selectedTemplateVersionId}
               setSelectedTemplateVersionId={setSelectedTemplateVersionId}
               currentTemplateDefinition={currentTemplateDefinition}
+              provider={provider}
               draft={draftTemplate}
               setDraft={setDraftTemplate}
               onCreateTemplate={handleCreateTemplate}

@@ -95,7 +95,7 @@ class LLMProviderSettings(BaseModel):
     mode: Literal["local", "cloud"] = "local"
     provider_type: str = "mock"
     provider_label: str | None = None
-    api_style: Literal["mock", "openai_compatible", "azure_openai"] = "mock"
+    api_style: Literal["mock", "openai_compatible", "azure_openai", "langextract"] = "mock"
     base_url: str | None = None
     api_key_env_var: str | None = None
     api_key_required: bool = False
@@ -109,6 +109,16 @@ class LLMProviderSettings(BaseModel):
     timeout_seconds: int = 120
     retry_count: int = 2
     chunk_size: int = 16000
+
+    @model_validator(mode="after")
+    def validate_langextract_constraints(self) -> LLMProviderSettings:
+        if self.api_style != "langextract":
+            return self
+        if self.mode != "local":
+            raise ValueError("LangExtract only supports local mode.")
+        if self.allow_external_processing:
+            raise ValueError("LangExtract must keep allow_external_processing disabled.")
+        return self
 
 
 class LLMProviderCapabilities(BaseModel):
@@ -126,7 +136,7 @@ class LLMProviderCatalogEntry(BaseModel):
     description: str
     mode: Literal["local", "cloud"]
     provider_type: str
-    api_style: Literal["mock", "openai_compatible", "azure_openai"] = "openai_compatible"
+    api_style: Literal["mock", "openai_compatible", "azure_openai", "langextract"] = "openai_compatible"
     base_url: str | None = None
     model: str
     enabled: bool = True
@@ -144,6 +154,7 @@ class ExtractionTemplate(BaseModel):
     document_type: str
     description: str = ""
     llm_provider_settings: LLMProviderSettings = Field(default_factory=LLMProviderSettings)
+    langextract_config: LangExtractConfig | None = None
     extracted_fields: list[ExtractionFieldDefinition] = Field(default_factory=list)
     calculated_fields: list[CalculatedFieldDefinition] = Field(default_factory=list)
     output_settings: OutputSettings = Field(default_factory=OutputSettings)
@@ -158,6 +169,18 @@ class ExtractionTemplate(BaseModel):
             raise ValueError("Field names must be unique across extracted and calculated fields.")
         return self
 
+    @model_validator(mode="after")
+    def validate_langextract_contract(self) -> ExtractionTemplate:
+        if self.llm_provider_settings.api_style != "langextract":
+            return self
+        if self.langextract_config is None:
+            raise ValueError("LangExtract templates require langextract_config.")
+        if not self.langextract_config.prompt_description.strip():
+            raise ValueError("LangExtract templates require a non-empty prompt_description.")
+        if not self.langextract_config.examples:
+            raise ValueError("LangExtract templates require at least one example.")
+        return self
+
 
 class ExtractionFieldResult(BaseModel):
     field_name: str
@@ -168,6 +191,8 @@ class ExtractionFieldResult(BaseModel):
     normalized_value: Any = None
     confidence_score: float = 0.0
     source_text: str = ""
+    char_start: int | None = None
+    char_end: int | None = None
     page_number: int | None = None
     location_reference: str = ""
     validation_status: str = "pending"
@@ -203,6 +228,22 @@ class ExtractionValidationSummary(BaseModel):
     document_level_notes: list[str] = Field(default_factory=list)
     fields_requiring_review: list[str] = Field(default_factory=list)
     reviewed_at: datetime | None = None
+
+
+class LangExtractExampleExtraction(BaseModel):
+    extraction_class: str
+    extraction_text: str
+    attributes: dict[str, str | list[str]] = Field(default_factory=dict)
+
+
+class LangExtractExample(BaseModel):
+    text: str
+    extractions: list[LangExtractExampleExtraction] = Field(default_factory=list)
+
+
+class LangExtractConfig(BaseModel):
+    prompt_description: str
+    examples: list[LangExtractExample] = Field(default_factory=list)
 
 
 class JobRequest(BaseModel):

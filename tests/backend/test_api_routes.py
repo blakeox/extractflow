@@ -83,6 +83,32 @@ def test_template_creation_rejects_duplicate_names(client) -> None:
     assert second.json()["detail"] == "Template name already exists."
 
 
+def test_template_creation_rejects_langextract_without_examples(client) -> None:
+    definition = build_template_definition()
+    definition["llm_provider_settings"] = {
+        **definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+    definition["langextract_config"] = None
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid LangExtract Schema",
+            "description": "Invalid config",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "langextract_config" in response.text
+
+
 def test_document_upload_and_job_creation(client) -> None:
     template_payload = {
         "name": "Invoice Schema",
@@ -575,6 +601,32 @@ def test_provider_settings_defaults_to_mock_when_unset(client) -> None:
     assert payload["allow_external_processing"] is False
 
 
+def test_provider_settings_reject_invalid_langextract_policy(client) -> None:
+    response = client.put(
+        "/api/settings/provider",
+        json={
+            "settings": {
+                "mode": "cloud",
+                "provider_type": "langextract",
+                "provider_label": "LangExtract (Ollama)",
+                "api_style": "langextract",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": False,
+                "allow_external_processing": True,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "LangExtract only supports local mode." in response.text
+
+
 def test_readyz_reports_database_and_storage_checks(client) -> None:
     response = client.get("/readyz")
 
@@ -606,7 +658,16 @@ def test_provider_catalog_lists_remote_and_local_options(client) -> None:
     payload = response.json()
     provider_types = {item["provider_type"] for item in payload["providers"]}
 
-    assert {"mock", "ollama", "lm_studio", "openai", "azure_openai", "deepseek", "kimi"}.issubset(provider_types)
+    assert {
+        "mock",
+        "langextract",
+        "ollama",
+        "lm_studio",
+        "openai",
+        "azure_openai",
+        "deepseek",
+        "kimi",
+    }.issubset(provider_types)
 
 
 def test_provider_health_reports_missing_cloud_credentials(client) -> None:
@@ -616,6 +677,8 @@ def test_provider_health_reports_missing_cloud_credentials(client) -> None:
     health_by_type = {item["provider_type"]: item for item in payload}
 
     assert health_by_type["mock"]["ready"] is True
+    assert health_by_type["langextract"]["ready"] is True
+    assert "Requires a reachable Ollama runtime" in health_by_type["langextract"]["checks"]
     assert health_by_type["azure_openai"]["ready"] is False
     assert "Missing environment variable AZURE_OPENAI_API_KEY" in health_by_type["azure_openai"]["checks"]
 
@@ -737,6 +800,57 @@ def test_provider_probe_reports_timeout_errors(client, monkeypatch) -> None:
     assert response.json()["reachable"] is False
     assert response.json()["status"] == "error"
     assert "timed out" in response.json()["detail"]
+
+
+def test_provider_probe_uses_ollama_tags_endpoint_for_langextract(client, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            captured["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url: str, headers: dict):
+            captured["url"] = url
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.provider_probe.httpx.Client", FakeClient)
+
+    response = client.post(
+        "/api/settings/providers/probe",
+        json={
+            "settings": {
+                "mode": "local",
+                "provider_type": "langextract",
+                "provider_label": "LangExtract (Ollama)",
+                "api_style": "langextract",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "api_key_required": False,
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": False,
+                "allow_external_processing": False,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reachable"] is True
+    assert captured["url"] == "http://host.docker.internal:11434/api/tags"
+    assert captured["headers"] == {}
 
 
 def test_custom_provider_profile_crud_and_activation(client, monkeypatch) -> None:

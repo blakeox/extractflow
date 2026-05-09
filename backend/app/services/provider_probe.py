@@ -19,6 +19,16 @@ def probe_provider(settings: LLMProviderSettings) -> dict[str, object]:
             "status_code": None,
         }
 
+    if settings.api_style == "langextract":
+        if settings.mode != "local":
+            return _failure(settings, "LangExtract is only supported in local mode.")
+        if settings.allow_external_processing:
+            return _failure(settings, "LangExtract v1 requires allow_external_processing to stay disabled.")
+        if not settings.base_url:
+            return _failure(settings, "Base URL is required before probing.")
+        endpoint = f"{normalize_langextract_base_url(settings.base_url).rstrip('/')}/api/tags"
+        return _probe_endpoint(settings, endpoint, {})
+
     if not settings.base_url:
         return _failure(settings, "Base URL is required before probing.")
 
@@ -110,3 +120,10 @@ def _failure(settings: LLMProviderSettings, detail: str) -> dict[str, object]:
         "endpoint": None,
         "status_code": None,
     }
+
+
+def normalize_langextract_base_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized[:-3]
+    return normalized
