@@ -8,6 +8,10 @@ from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import httpx
+from extraction_core.langextract import (
+    normalize_langextract_base_url,
+    uses_langextract_provider,
+)
 from extraction_core.models import (
     ExtractionFieldDefinition,
     ExtractionFieldResult,
@@ -43,7 +47,10 @@ class ExtractionProvider:
     ) -> list[ExtractionFieldResult]:
         for adapter in self._adapters:
             if adapter.supports(settings):
-                use_outer_chunking = settings.api_style != "langextract"
+                use_outer_chunking = not uses_langextract_provider(
+                    settings.provider_type,
+                    settings.api_style,
+                )
                 chunks = split_text_into_chunks(text, settings.chunk_size) if use_outer_chunking else [text]
                 results: list[ExtractionFieldResult] = []
                 for index, chunk in enumerate(chunks, start=1):
@@ -136,7 +143,7 @@ class MockProviderAdapter:
 
 class LangExtractAdapter:
     def supports(self, settings: LLMProviderSettings) -> bool:
-        return settings.provider_type == "langextract" or settings.api_style == "langextract"
+        return uses_langextract_provider(settings.provider_type, settings.api_style)
 
     def extract(
         self, text: str, template: ExtractionTemplate, settings: LLMProviderSettings
@@ -440,13 +447,6 @@ def parse_boolean(value: Any) -> bool | None:
     if candidate in {"false", "no", "n", "0"}:
         return False
     return None
-
-
-def normalize_langextract_base_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/v1"):
-        return normalized[:-3]
-    return normalized
 
 
 def read_api_key(settings: LLMProviderSettings) -> str:

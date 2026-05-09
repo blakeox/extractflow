@@ -4,6 +4,10 @@ import os
 from urllib.parse import urlencode
 
 import httpx
+from extraction_core.langextract import (
+    normalize_langextract_base_url,
+    uses_langextract_provider,
+)
 from extraction_core.models import LLMProviderSettings
 from fastapi import HTTPException
 
@@ -19,7 +23,7 @@ def probe_provider(settings: LLMProviderSettings) -> dict[str, object]:
             "status_code": None,
         }
 
-    if settings.api_style == "langextract":
+    if uses_langextract_provider(settings.provider_type, settings.api_style):
         if settings.mode != "local":
             return _failure(settings, "LangExtract is only supported in local mode.")
         if settings.allow_external_processing:
@@ -120,10 +124,3 @@ def _failure(settings: LLMProviderSettings, detail: str) -> dict[str, object]:
         "endpoint": None,
         "status_code": None,
     }
-
-
-def normalize_langextract_base_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/v1"):
-        return normalized[:-3]
-    return normalized

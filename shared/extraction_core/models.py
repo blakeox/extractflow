@@ -6,6 +6,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .langextract import (
+    LANGEXTRACT_API_STYLE,
+    LANGEXTRACT_PROVIDER_TYPE,
+    uses_langextract_provider,
+)
+
 
 class DataType(str, Enum):
     TEXT = "text"
@@ -112,8 +118,10 @@ class LLMProviderSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_langextract_constraints(self) -> LLMProviderSettings:
-        if self.api_style != "langextract":
+        if not uses_langextract_provider(self.provider_type, self.api_style):
             return self
+        if self.provider_type != LANGEXTRACT_PROVIDER_TYPE or self.api_style != LANGEXTRACT_API_STYLE:
+            raise ValueError("LangExtract requires provider_type and api_style to both be set to 'langextract'.")
         if self.mode != "local":
             raise ValueError("LangExtract only supports local mode.")
         if self.allow_external_processing:
@@ -171,7 +179,10 @@ class ExtractionTemplate(BaseModel):
 
     @model_validator(mode="after")
     def validate_langextract_contract(self) -> ExtractionTemplate:
-        if self.llm_provider_settings.api_style != "langextract":
+        if not uses_langextract_provider(
+            self.llm_provider_settings.provider_type,
+            self.llm_provider_settings.api_style,
+        ):
             return self
         if self.langextract_config is None:
             raise ValueError("LangExtract templates require langextract_config.")

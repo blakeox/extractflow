@@ -4,6 +4,7 @@ from .formulas import (
     detect_formula_cycles,
     topologically_sort_calculated_fields,
 )
+from .langextract import normalize_langextract_base_url, uses_langextract_provider
 from .models import (
     CalculatedFieldDefinition,
     CalculatedFieldResult,
@@ -38,6 +39,7 @@ __all__ = [
     "LangExtractConfig",
     "LangExtractExample",
     "LangExtractExampleExtraction",
+    "normalize_langextract_base_url",
     "LLMProviderCapabilities",
     "LLMProviderCatalogEntry",
     "LLMProviderSettings",
@@ -45,4 +47,5 @@ __all__ = [
     "ReviewEditPayload",
     "detect_formula_cycles",
     "topologically_sort_calculated_fields",
+    "uses_langextract_provider",
 ]

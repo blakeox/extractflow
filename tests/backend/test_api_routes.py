@@ -627,6 +627,32 @@ def test_provider_settings_reject_invalid_langextract_policy(client) -> None:
     assert "LangExtract only supports local mode." in response.text
 
 
+def test_provider_settings_reject_mismatched_langextract_identity(client) -> None:
+    response = client.put(
+        "/api/settings/provider",
+        json={
+            "settings": {
+                "mode": "local",
+                "provider_type": "langextract",
+                "provider_label": "LangExtract (Ollama)",
+                "api_style": "openai_compatible",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": False,
+                "allow_external_processing": False,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "provider_type and api_style" in response.text
+
+
 def test_readyz_reports_database_and_storage_checks(client) -> None:
     response = client.get("/readyz")
 
@@ -851,6 +877,31 @@ def test_provider_probe_uses_ollama_tags_endpoint_for_langextract(client, monkey
     assert response.json()["reachable"] is True
     assert captured["url"] == "http://host.docker.internal:11434/api/tags"
     assert captured["headers"] == {}
+
+
+def test_template_creation_rejects_mismatched_langextract_identity(client) -> None:
+    definition = build_template_definition()
+    definition["llm_provider_settings"] = {
+        **definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "openai_compatible",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Mismatched LangExtract Schema",
+            "description": "Invalid provider identity",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "provider_type and api_style" in response.text
 
 
 def test_custom_provider_profile_crud_and_activation(client, monkeypatch) -> None:

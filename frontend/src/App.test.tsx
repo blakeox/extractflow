@@ -269,6 +269,82 @@ describe("App", () => {
     ]);
   });
 
+  it("shows a targeted error when LangExtract examples are invalid JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    const examplesField = await screen.findByLabelText(
+      "LangExtract examples (JSON array)",
+    );
+
+    fireEvent.change(examplesField, {
+      target: { value: "[{" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    await screen.findByText("LangExtract examples must be valid JSON.");
+  });
+
   it("opens the most urgent reviewable job with typed review inputs", async () => {
     vi.stubGlobal(
       "fetch",

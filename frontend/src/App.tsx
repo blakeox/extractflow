@@ -748,7 +748,12 @@ function parseLangExtractExamplesJson(raw: string) {
   if (!trimmed) {
     return [];
   }
-  const parsed = JSON.parse(trimmed) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed) as unknown;
+  } catch {
+    throw new Error("LangExtract examples must be valid JSON.");
+  }
   if (!Array.isArray(parsed)) {
     throw new Error("LangExtract examples must be a JSON array.");
   }
