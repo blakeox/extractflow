@@ -16,6 +16,7 @@ from extraction_core.models import (
     ExtractionTemplate,
     LLMProviderSettings,
 )
+from pydantic import ValidationError
 
 from tests.support.sample_data import build_template_definition
 
@@ -135,6 +136,133 @@ def test_parse_pdf_uses_ocr_when_embedded_text_is_missing(monkeypatch, tmp_path)
     parsed = parse_document(str(pdf_path))
 
     assert "Detected account number" in parsed
+
+
+def test_langextract_adapter_maps_grounded_extractions(monkeypatch) -> None:
+    provider = ExtractionProvider()
+    template = ExtractionTemplate.model_validate(build_template_definition())
+    template.llm_provider_settings = LLMProviderSettings(
+        mode="local",
+        provider_type="langextract",
+        provider_label="LangExtract (Ollama)",
+        api_style="langextract",
+        base_url="http://host.docker.internal:11434/v1",
+        model="qwen3.5:27b",
+        supports_json_mode=False,
+        allow_external_processing=False,
+    )
+    settings = template.llm_provider_settings
+    source_text = "[Page 1]\nVendor Name: Acme Corp\n\n[Page 2]\nTotal Due: $1,200.00"
+    captured: dict[str, object] = {}
+
+    class FakeCharInterval:
+        def __init__(self, start_pos: int, end_pos: int):
+            self.start_pos = start_pos
+            self.end_pos = end_pos
+
+    class FakeExtraction:
+        def __init__(self, extraction_class: str, extraction_text: str, start_pos: int, end_pos: int, attributes=None):
+            self.extraction_class = extraction_class
+            self.extraction_text = extraction_text
+            self.char_interval = FakeCharInterval(start_pos, end_pos)
+            self.attributes = attributes or {}
+
+    class FakeAnnotatedDocument:
+        def __init__(self, extractions):
+            self.extractions = extractions
+
+    class FakeLangExtractModule:
+        @staticmethod
+        def extract(**kwargs):
+            captured["text"] = kwargs["text_or_documents"]
+            vendor_start = source_text.index("Acme Corp")
+            amount_start = source_text.index("$1,200.00")
+            return FakeAnnotatedDocument(
+                [
+                    FakeExtraction("vendor_name", "Acme Corp", vendor_start, vendor_start + len("Acme Corp")),
+                    FakeExtraction("total_amount", "$1,200.00", amount_start, amount_start + len("$1,200.00")),
+                ]
+            )
+
+    class FakeExampleData:
+        def __init__(self, text: str, extractions):
+            self.text = text
+            self.extractions = extractions
+
+    class FakeExampleExtraction:
+        def __init__(self, extraction_class: str, extraction_text: str, attributes=None):
+            self.extraction_class = extraction_class
+            self.extraction_text = extraction_text
+            self.attributes = attributes
+
+    class FakeOllamaLanguageModel:
+        def __init__(self, **kwargs):
+            captured["model_kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        "app.services.provider._import_langextract",
+        lambda: (
+            FakeLangExtractModule,
+            FakeExampleData,
+            FakeExampleExtraction,
+            FakeOllamaLanguageModel,
+        ),
+    )
+
+    results = provider.extract(source_text, template, settings)
+
+    assert captured["text"] == source_text
+    assert captured["model_kwargs"]["model_url"] == "http://host.docker.internal:11434"
+    assert {item.field_name for item in results} == {"vendor_name", "total_amount"}
+    vendor = next(item for item in results if item.field_name == "vendor_name")
+    amount = next(item for item in results if item.field_name == "total_amount")
+    assert vendor.source_text == "Acme Corp"
+    assert vendor.char_start == source_text.index("Acme Corp")
+    assert vendor.char_end == source_text.index("Acme Corp") + len("Acme Corp")
+    assert vendor.page_number == 1
+    assert amount.page_number == 2
+    assert amount.char_start == source_text.index("$1,200.00")
+    assert amount.char_end == source_text.index("$1,200.00") + len("$1,200.00")
+    assert amount.normalized_value == {
+        "amount": 1200.0,
+        "currency": "USD",
+        "display_value": "$1,200.00",
+    }
+    assert "grounded chars" in amount.extraction_notes
+
+
+def test_langextract_adapter_requires_template_examples() -> None:
+    provider = ExtractionProvider()
+    definition = build_template_definition()
+    definition["langextract_config"] = None
+    template = ExtractionTemplate.model_validate(definition)
+    settings = LLMProviderSettings(
+        mode="local",
+        provider_type="langextract",
+        provider_label="LangExtract (Ollama)",
+        api_style="langextract",
+        base_url="http://host.docker.internal:11434/v1",
+        model="qwen3.5:27b",
+        supports_json_mode=False,
+        allow_external_processing=False,
+    )
+
+    with pytest.raises(ValueError, match="langextract_config"):
+        provider.extract("Vendor Name: Acme Corp", template, settings)
+
+
+def test_langextract_provider_settings_require_matching_identity() -> None:
+    with pytest.raises(ValidationError, match="provider_type and api_style"):
+        LLMProviderSettings(
+            mode="local",
+            provider_type="langextract",
+            provider_label="LangExtract (Ollama)",
+            api_style="openai_compatible",
+            base_url="http://host.docker.internal:11434/v1",
+            model="qwen3.5:27b",
+            supports_json_mode=False,
+            allow_external_processing=False,
+        )
 
 
 def test_llm_provider_extract_builds_request_and_parses_response(monkeypatch) -> None:

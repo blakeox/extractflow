@@ -121,6 +121,230 @@ describe("App", () => {
     expect(screen.getByText("Upload PDF or source file")).toBeInTheDocument();
   });
 
+  it("saves edited LangExtract prompt and examples into the template payload", async () => {
+    let savedTemplateBody: Record<string, unknown> | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates") && init?.method === "POST") {
+          savedTemplateBody = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          return Promise.resolve(
+            jsonResponse({
+              id: 1,
+              name: "LangExtract Schema",
+              description: "Updated prompt",
+              document_type: "General Document",
+              is_locked: false,
+              latest_version: "1.0.0",
+              created_at: "2026-05-02T00:00:00Z",
+              updated_at: "2026-05-02T00:00:00Z",
+            }),
+          );
+        }
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    const promptField = await screen.findByLabelText("LangExtract prompt");
+    const examplesField = screen.getByLabelText(
+      "LangExtract examples (JSON array)",
+    );
+
+    fireEvent.change(promptField, {
+      target: { value: "Extract contract parties exactly as written." },
+    });
+    fireEvent.change(examplesField, {
+      target: {
+        value: JSON.stringify(
+          [
+            {
+              text: "Parties: Acme Corp and River Bank",
+              extractions: [
+                {
+                  extraction_class: "primary_subject",
+                  extraction_text: "Acme Corp",
+                  attributes: { value: "Acme Corp" },
+                },
+              ],
+            },
+          ],
+          null,
+          2,
+        ),
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Schema name"), {
+      target: { value: "LangExtract Schema" },
+    });
+    fireEvent.change(screen.getByLabelText("What should this run look for?"), {
+      target: { value: "Updated prompt" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    await waitFor(() => {
+      expect(savedTemplateBody).not.toBeNull();
+    });
+
+    const definition = savedTemplateBody?.definition as Record<string, unknown>;
+    const langextractConfig = definition.langextract_config as Record<
+      string,
+      unknown
+    >;
+
+    expect(langextractConfig.prompt_description).toBe(
+      "Extract contract parties exactly as written.",
+    );
+    expect(langextractConfig.examples).toEqual([
+      {
+        text: "Parties: Acme Corp and River Bank",
+        extractions: [
+          {
+            extraction_class: "primary_subject",
+            extraction_text: "Acme Corp",
+            attributes: { value: "Acme Corp" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("shows a targeted error when LangExtract examples are invalid JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    const examplesField = await screen.findByLabelText(
+      "LangExtract examples (JSON array)",
+    );
+
+    fireEvent.change(examplesField, {
+      target: { value: "[{" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    await screen.findByText("LangExtract examples must be valid JSON.");
+  });
+
   it("opens the most urgent reviewable job with typed review inputs", async () => {
     vi.stubGlobal(
       "fetch",
@@ -263,6 +487,8 @@ describe("App", () => {
                     normalized_value: { value: "Acme Corp" },
                     confidence_score: 0.42,
                     source_text: "Acme Corp",
+                    char_start: 13,
+                    char_end: 22,
                     page_number: 1,
                     location_reference: "Page 1",
                     validation_status: "invalid",
@@ -283,6 +509,8 @@ describe("App", () => {
                     },
                     confidence_score: 0.92,
                     source_text: "$1200.00",
+                    char_start: 41,
+                    char_end: 49,
                     page_number: 1,
                     location_reference: "Page 1",
                     validation_status: "valid",
@@ -332,6 +560,7 @@ describe("App", () => {
       "Acme Corp",
     );
     expect(screen.getByText("Review only the exceptions")).toBeInTheDocument();
+    expect(screen.getAllByText("Chars 13-22").length).toBeGreaterThan(0);
   });
 
   it("shows desktop onboarding when the tauri backend is unavailable and starts the local stack", async () => {
