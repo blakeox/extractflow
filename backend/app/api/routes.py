@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import shutil
+from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
+from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -19,6 +22,9 @@ from app.schemas.api import (
     ExportResponse,
     JobCreateRequest,
     JobResponse,
+    LangExtractFeedbackSuggestionDismissalRequest,
+    LangExtractFeedbackSuggestionDismissalResponse,
+    LangExtractFeedbackSuggestionListResponse,
     ProviderCatalogResponse,
     ProviderControlsResponse,
     ProviderHealthResponse,
@@ -30,6 +36,10 @@ from app.schemas.api import (
     TemplateResponse,
     TemplateVersionCreateRequest,
     TemplateVersionResponse,
+)
+from app.services.langextract_feedback import (
+    list_langextract_feedback_suggestions,
+    set_langextract_feedback_suggestion_dismissed,
 )
 from app.services.provider_catalog import list_provider_catalog
 from app.services.provider_health import get_provider_health
@@ -132,6 +142,38 @@ def list_template_versions(template_id: int, db: Session = Depends(get_db)):
     ]
 
 
+@router.get(
+    "/template-versions/{template_version_id}/langextract-feedback-suggestions",
+    response_model=LangExtractFeedbackSuggestionListResponse,
+)
+def get_langextract_feedback_suggestions(template_version_id: int, db: Session = Depends(get_db)):
+    template_version = db.query(TemplateVersion).filter(TemplateVersion.id == template_version_id).first()
+    if not template_version:
+        raise HTTPException(status_code=404, detail="Template version not found.")
+    return list_langextract_feedback_suggestions(db, template_version)
+
+
+@router.put(
+    "/template-versions/{template_version_id}/langextract-feedback-suggestions/{suggestion_key}/dismissal",
+    response_model=LangExtractFeedbackSuggestionDismissalResponse,
+)
+def set_langextract_feedback_suggestion_dismissal(
+    template_version_id: int,
+    suggestion_key: str,
+    payload: LangExtractFeedbackSuggestionDismissalRequest,
+    db: Session = Depends(get_db),
+):
+    template_version = db.query(TemplateVersion).filter(TemplateVersion.id == template_version_id).first()
+    if not template_version:
+        raise HTTPException(status_code=404, detail="Template version not found.")
+    return set_langextract_feedback_suggestion_dismissed(
+        db,
+        template_version,
+        suggestion_key,
+        payload.dismissed,
+    )
+
+
 @router.post("/documents", response_model=DocumentResponse)
 def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
     original_filename = Path(file.filename or "").name
@@ -179,6 +221,9 @@ def create_job(payload: JobCreateRequest, db: Session = Depends(get_db)):
     template_version = db.query(TemplateVersion).filter(TemplateVersion.id == payload.template_version_id).first()
     if not document or not template_version:
         raise HTTPException(status_code=404, detail="Document or template version not found.")
+    template_definition = ExtractionTemplate.model_validate(template_version.definition)
+    effective_provider = payload.provider_override or template_definition.llm_provider_settings
+    validate_job_provider(template_definition, effective_provider)
     job = ExtractionJob(
         document_id=payload.document_id,
         template_version_id=payload.template_version_id,
@@ -192,6 +237,7 @@ def create_job(payload: JobCreateRequest, db: Session = Depends(get_db)):
         id=job.id,
         document_id=job.document_id,
         template_version_id=job.template_version_id,
+        provider_override=LLMProviderSettings.model_validate(job.provider_override) if job.provider_override else None,
         status=job.status,
         error_message=job.error_message,
         created_at=job.created_at,
@@ -207,6 +253,9 @@ def list_jobs(db: Session = Depends(get_db)):
             id=job.id,
             document_id=job.document_id,
             template_version_id=job.template_version_id,
+            provider_override=LLMProviderSettings.model_validate(job.provider_override)
+            if job.provider_override
+            else None,
             status=job.status,
             error_message=job.error_message,
             created_at=job.created_at,
@@ -273,12 +322,13 @@ def list_exports(db: Session = Depends(get_db)):
 def get_provider_settings(db: Session = Depends(get_db)):
     setting = db.query(Setting).filter(Setting.key == "default_provider").first()
     if setting:
-        return setting.value
+        return {**setting.value, "is_persisted_default": True}
 
     default_provider = next(
         (provider.settings for provider in list_provider_catalog() if provider.provider_type == "mock"), None
     )
-    return default_provider.model_dump() if default_provider else LLMProviderSettings().model_dump()
+    default_value = default_provider.model_dump() if default_provider else LLMProviderSettings().model_dump()
+    return {**default_value, "is_persisted_default": False}
 
 
 @router.get("/settings/providers", response_model=ProviderCatalogResponse)
@@ -371,7 +421,7 @@ def activate_custom_provider_profile_endpoint(profile_id: str, db: Session = Dep
         status=str(probe_result["status"]),
         detail=str(probe_result["detail"]),
     )
-    return data
+    return {**data, "is_persisted_default": True}
 
 
 @router.put("/settings/provider")
@@ -384,4 +434,16 @@ def update_provider_settings(payload: ProviderSettingsRequest, db: Session = Dep
         setting = Setting(key="default_provider", value=data)
         db.add(setting)
     db.commit()
-    return data
+    return {**data, "is_persisted_default": True}
+
+
+def validate_job_provider(template: ExtractionTemplate, effective_provider: LLMProviderSettings) -> ExtractionTemplate:
+    effective_definition = deepcopy(template.model_dump(mode="json"))
+    effective_definition["llm_provider_settings"] = effective_provider.model_dump(mode="json")
+    try:
+        effective_template = ExtractionTemplate.model_validate(effective_definition)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if uses_langextract_provider(effective_provider.provider_type, effective_provider.api_style):
+        require_reachable_provider(effective_provider, "Job queueing")
+    return effective_template

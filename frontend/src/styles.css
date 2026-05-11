@@ -1523,6 +1523,189 @@ tbody tr:hover {
   margin-top: 0.4rem;
 }
 
+.langextract-editor,
+.langextract-example-list,
+.langextract-extraction-list,
+.langextract-attribute-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.langextract-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.2rem 0 0.1rem;
+}
+
+.langextract-editor-heading,
+.langextract-editor-header-actions,
+.langextract-section,
+.langextract-panel,
+.langextract-feedback-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.langextract-editor-heading strong,
+.langextract-panel strong {
+  display: block;
+}
+
+.langextract-editor-header-actions {
+  justify-items: end;
+}
+
+.langextract-editor-copy {
+  margin: 0.35rem 0 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.langextract-panel,
+.langextract-preview-card,
+.langextract-example-card,
+.langextract-feedback-card {
+  border: 1px solid rgba(122, 138, 179, 0.16);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-soft);
+  padding: 1rem 1.05rem;
+}
+
+.langextract-panel,
+.langextract-preview-card {
+  background: rgba(248, 250, 255, 0.9);
+}
+
+.langextract-section-header,
+.langextract-feedback-section,
+.langextract-feedback-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.langextract-section-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.langextract-feedback-actions,
+.langextract-feedback-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.langextract-feedback-card {
+  background: rgba(248, 250, 255, 0.92);
+}
+
+.langextract-feedback-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.langextract-feedback-disclosure {
+  min-width: 0;
+}
+
+.langextract-feedback-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.langextract-feedback-summary::-webkit-details-marker {
+  display: none;
+}
+
+.langextract-feedback-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.langextract-feedback-body {
+  margin-top: 0.85rem;
+}
+
+.langextract-feedback-card pre {
+  margin: 0 0 0.85rem;
+  padding: 0.95rem 1rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(241, 245, 249, 0.96);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+
+.langextract-preview-card pre {
+  margin: 0.85rem 0 0;
+  padding: 0.95rem 1rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(241, 245, 249, 0.96);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+
+.langextract-preview-empty {
+  margin: 0.85rem 0 0;
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
+.langextract-example-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.langextract-extraction-list {
+  margin-top: 0.95rem;
+}
+
+.langextract-extraction-block {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.langextract-extraction-block + .langextract-extraction-block {
+  padding-top: 1rem;
+  border-top: 1px solid rgba(122, 138, 179, 0.16);
+}
+
+.langextract-attribute-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px auto;
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.8rem 0;
+  border-top: 1px solid rgba(122, 138, 179, 0.12);
+}
+
+.langextract-attribute-list .langextract-attribute-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.langextract-editor .ghost-button,
+.langextract-editor .tertiary-button {
+  margin-top: 0;
+  grid-column: auto;
+  justify-self: auto;
+}
+
 .schema-step-card {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
@@ -1903,6 +2086,21 @@ tbody tr:hover {
   font-size: 0.85rem;
 }
 
+.review-signals {
+  margin-top: 0.8rem;
+}
+
+.review-signal-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.review-signal-list li + li {
+  margin-top: 0.32rem;
+}
+
 .triage-meta {
   margin-top: 0.55rem;
 }
@@ -2132,6 +2330,26 @@ tbody tr:hover {
   }
 
   .nav-list {
+    grid-template-columns: 1fr;
+  }
+
+  .langextract-editor-header,
+  .langextract-feedback-card-header,
+  .langextract-feedback-summary,
+  .langextract-feedback-summary-meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .langextract-section-header {
+    grid-template-columns: 1fr;
+  }
+
+  .langextract-editor-header-actions {
+    justify-items: stretch;
+  }
+
+  .langextract-attribute-row {
     grid-template-columns: 1fr;
   }
 

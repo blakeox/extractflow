@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
@@ -7,7 +8,7 @@ from unittest.mock import Mock
 import httpx
 import pytest
 from app.db.database import SessionLocal
-from app.models import Document, ExtractionJob, ExtractionResult, Setting, Template, TemplateVersion
+from app.models import Document, ExtractionJob, ExtractionResult, ReviewEdit, Setting, Template, TemplateVersion
 from fastapi import HTTPException
 
 from tests.support.sample_data import build_template_definition
@@ -109,6 +110,63 @@ def test_template_creation_rejects_langextract_without_examples(client) -> None:
     assert "langextract_config" in response.text
 
 
+def test_template_creation_rejects_langextract_example_for_unknown_field(client) -> None:
+    definition = build_template_definition()
+    definition["llm_provider_settings"] = {
+        **definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+    definition["langextract_config"]["examples"][0]["extractions"][0]["extraction_class"] = "bogus_field"
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid LangExtract Schema",
+            "description": "Invalid config",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "references unknown field 'bogus_field'" in response.text
+
+
+def test_template_creation_rejects_langextract_when_required_field_lacks_example_coverage(client) -> None:
+    definition = build_template_definition()
+    definition["llm_provider_settings"] = {
+        **definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+    definition["langextract_config"]["examples"][0]["extractions"] = [
+        definition["langextract_config"]["examples"][0]["extractions"][1]
+    ]
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid LangExtract Coverage Schema",
+            "description": "Missing required coverage",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert (
+        "LangExtract examples must cover every required extracted field. Missing example coverage for: vendor_name."
+        in response.text
+    )
+
+
 def test_document_upload_and_job_creation(client) -> None:
     template_payload = {
         "name": "Invoice Schema",
@@ -135,6 +193,220 @@ def test_document_upload_and_job_creation(client) -> None:
     )
     assert job_response.status_code == 200
     assert job_response.json()["status"] == "queued"
+
+
+def test_job_creation_persists_provider_override(client) -> None:
+    template_payload = {
+        "name": "Invoice Schema",
+        "description": "Invoice extraction schema.",
+        "document_type": "invoice",
+        "definition": build_template_definition(),
+    }
+    client.post("/api/templates", json=template_payload)
+
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme\nTotal Amount: $1200.00", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document = upload_response.json()
+
+    with SessionLocal() as db:
+        version = db.query(TemplateVersion).one()
+
+    provider_override = {
+        "mode": "cloud",
+        "provider_type": "openai",
+        "provider_label": "OpenAI",
+        "api_style": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env_var": "OPENAI_API_KEY",
+        "api_key_required": True,
+        "model": "gpt-4.1",
+        "temperature": 0.1,
+        "max_tokens": 4000,
+        "supports_json_mode": True,
+        "allow_external_processing": True,
+        "timeout_seconds": 120,
+        "retry_count": 2,
+        "chunk_size": 16000,
+    }
+
+    job_response = client.post(
+        "/api/jobs",
+        json={
+            "document_id": document["id"],
+            "template_version_id": version.id,
+            "provider_override": provider_override,
+        },
+    )
+    assert job_response.status_code == 200
+    assert job_response.json()["provider_override"]["provider_type"] == "openai"
+    assert job_response.json()["provider_override"]["model"] == "gpt-4.1"
+
+    with SessionLocal() as db:
+        job = db.query(ExtractionJob).one()
+
+    assert job.provider_override is not None
+    for key, value in provider_override.items():
+        assert job.provider_override[key] == value
+    assert job.provider_override["deployment"] is None
+    assert job.provider_override["api_version"] is None
+
+
+def test_job_creation_rejects_langextract_override_without_template_examples(client) -> None:
+    definition = build_template_definition()
+    definition["langextract_config"] = None
+    template_payload = {
+        "name": "Invoice Schema",
+        "description": "Invoice extraction schema.",
+        "document_type": "invoice",
+        "definition": definition,
+    }
+    client.post("/api/templates", json=template_payload)
+
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme\nTotal Amount: $1200.00", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document = upload_response.json()
+
+    with SessionLocal() as db:
+        version = db.query(TemplateVersion).one()
+
+    response = client.post(
+        "/api/jobs",
+        json={
+            "document_id": document["id"],
+            "template_version_id": version.id,
+            "provider_override": {
+                "mode": "local",
+                "provider_type": "langextract",
+                "provider_label": "LangExtract (Ollama)",
+                "api_style": "langextract",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "api_key_required": False,
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": False,
+                "allow_external_processing": False,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "langextract_config" in response.text
+
+
+def test_job_creation_requires_successful_langextract_probe(client, monkeypatch) -> None:
+    template_payload = {
+        "name": "Invoice Schema",
+        "description": "Invoice extraction schema.",
+        "document_type": "invoice",
+        "definition": build_template_definition(),
+    }
+    client.post("/api/templates", json=template_payload)
+
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme\nTotal Amount: $1200.00", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document = upload_response.json()
+
+    with SessionLocal() as db:
+        version = db.query(TemplateVersion).one()
+
+    def fail_probe(*_args, **_kwargs):
+        raise HTTPException(
+            status_code=400,
+            detail="Job queueing blocked until provider probe succeeds. Configured Ollama model 'qwen3.5:27b' is not available.",
+        )
+
+    monkeypatch.setattr("app.api.routes.require_reachable_provider", fail_probe)
+
+    response = client.post(
+        "/api/jobs",
+        json={
+            "document_id": document["id"],
+            "template_version_id": version.id,
+            "provider_override": {
+                "mode": "local",
+                "provider_type": "langextract",
+                "provider_label": "LangExtract (Ollama)",
+                "api_style": "langextract",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "api_key_required": False,
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": False,
+                "allow_external_processing": False,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Job queueing blocked until provider probe succeeds." in response.text
+
+
+def test_job_creation_requires_successful_langextract_probe_for_template_default(client, monkeypatch) -> None:
+    definition = build_template_definition()
+    definition["llm_provider_settings"] = {
+        **definition["llm_provider_settings"],
+        "mode": "local",
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "model": "qwen3.5:27b",
+        "supports_json_mode": False,
+        "allow_external_processing": False,
+    }
+    template_payload = {
+        "name": "Invoice Schema",
+        "description": "Invoice extraction schema.",
+        "document_type": "invoice",
+        "definition": definition,
+    }
+    client.post("/api/templates", json=template_payload)
+
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme\nTotal Amount: $1200.00", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document = upload_response.json()
+
+    with SessionLocal() as db:
+        version = db.query(TemplateVersion).one()
+
+    def fail_probe(*_args, **_kwargs):
+        raise HTTPException(
+            status_code=400,
+            detail="Job queueing blocked until provider probe succeeds. Configured Ollama model 'qwen3.5:27b' is not available.",
+        )
+
+    monkeypatch.setattr("app.api.routes.require_reachable_provider", fail_probe)
+
+    response = client.post(
+        "/api/jobs",
+        json={
+            "document_id": document["id"],
+            "template_version_id": version.id,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Job queueing blocked until provider probe succeeds." in response.text
 
 
 def test_document_upload_uses_unique_storage_path_for_same_filename(client) -> None:
@@ -383,6 +655,384 @@ def test_review_recalculation_updates_calculated_fields(client) -> None:
         assert persisted.result_json["fields_requiring_review"] == ["vendor_name"]
 
 
+def test_langextract_feedback_suggestions_surface_contextual_review_examples(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["llm_provider_settings"] = {
+        **template_definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+    parsed_text = "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00\n"
+    parsed_path = Path(os.environ["PARSED_DIR"]) / "invoice-langextract-feedback.txt"
+    parsed_path.write_text(parsed_text, encoding="utf-8")
+    vendor_start = parsed_text.index("Acme Corp")
+    vendor_end = vendor_start + len("Acme Corp")
+    amount_start = parsed_text.index("$1,200.00")
+    amount_end = amount_start + len("$1,200.00")
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            parsed_text_path=str(parsed_path),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.42,
+                        "source_text": "Acme Corp",
+                        "char_start": vendor_start,
+                        "char_end": vendor_end,
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "invalid",
+                        "validation_errors": ["Required field is missing."],
+                        "extraction_notes": "LangExtract grounded chars.",
+                        "requires_review": True,
+                    },
+                    {
+                        "field_name": "total_amount",
+                        "label": "Total Amount",
+                        "field_kind": "extracted",
+                        "data_type": "currency",
+                        "extracted_value": "$1,200.00",
+                        "normalized_value": {
+                            "amount": 1200,
+                            "currency": "USD",
+                            "display_value": "$1,200.00",
+                        },
+                        "confidence_score": 1.0,
+                        "source_text": "$1,200.00",
+                        "char_start": amount_start,
+                        "char_end": amount_end,
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "extraction_notes": "LangExtract grounded chars.",
+                        "requires_review": False,
+                    },
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+        version_id = version.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "vendor_name",
+                    "normalized_value": {"value": "Acme Corporation"},
+                    "reason": "Normalized legal name.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    assert review_response.status_code == 200
+
+    suggestions_response = client.get(f"/api/template-versions/{version_id}/langextract-feedback-suggestions")
+
+    assert suggestions_response.status_code == 200
+    payload = suggestions_response.json()
+    suggestions = payload["suggestions"]
+    assert len(suggestions) == 1
+    assert payload["diagnostics"]["reviewed_result_count"] == 1
+    assert payload["diagnostics"]["reviewed_edit_count"] == 1
+    assert payload["diagnostics"]["visible_suggestion_count"] == 1
+    assert suggestions[0]["template_version_id"] == version_id
+    assert suggestions[0]["example_text"] == parsed_text.strip()
+    assert suggestions[0]["occurrence_count"] == 1
+    assert suggestions[0]["source_result_ids"] == [result_id]
+    assert suggestions[0]["source_field_names"] == ["vendor_name"]
+    assert suggestions[0]["extractions"] == [
+        {
+            "extraction_class": "vendor_name",
+            "extraction_text": "Acme Corp",
+            "attributes": {"value": "Acme Corporation"},
+        },
+        {
+            "extraction_class": "total_amount",
+            "extraction_text": "$1,200.00",
+            "attributes": {"value": "$1,200.00", "currency": "USD"},
+        },
+    ]
+    assert suggestions[0]["last_reviewed_at"] is not None
+
+
+def test_langextract_feedback_suggestions_skip_span_overrides(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["llm_provider_settings"] = {
+        **template_definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+    parsed_text = "Invoice Vendor: Acme Corp\n"
+    parsed_path = Path(os.environ["PARSED_DIR"]) / "invoice-langextract-span-override.txt"
+    parsed_path.write_text(parsed_text, encoding="utf-8")
+    vendor_start = parsed_text.index("Acme Corp")
+    vendor_end = vendor_start + len("Acme Corp")
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            parsed_text_path=str(parsed_path),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.42,
+                        "source_text": "Acme Corp",
+                        "char_start": vendor_start,
+                        "char_end": vendor_end,
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "invalid",
+                        "validation_errors": ["Required field is missing."],
+                        "extraction_notes": "LangExtract grounded chars.",
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+        version_id = version.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "vendor_name",
+                    "normalized_value": {"value": "Acme Corporation"},
+                    "extracted_value": "Acme Corporation",
+                    "reason": "Reviewer corrected the extracted span.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    assert review_response.status_code == 200
+
+    suggestions_response = client.get(f"/api/template-versions/{version_id}/langextract-feedback-suggestions")
+
+    assert suggestions_response.status_code == 200
+    payload = suggestions_response.json()
+    assert payload["suggestions"] == []
+    assert payload["diagnostics"]["skipped_span_override"] == 1
+
+
+def test_langextract_feedback_suggestion_dismissal_persists_across_fetches(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["llm_provider_settings"] = {
+        **template_definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+    }
+    parsed_text = "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00\n"
+    parsed_path = Path(os.environ["PARSED_DIR"]) / "invoice-langextract-dismissal.txt"
+    parsed_path.write_text(parsed_text, encoding="utf-8")
+    vendor_start = parsed_text.index("Acme Corp")
+    vendor_end = vendor_start + len("Acme Corp")
+    amount_start = parsed_text.index("$1,200.00")
+    amount_end = amount_start + len("$1,200.00")
+
+    with SessionLocal() as db:
+        template = Template(
+            name="Dismissible Invoice Schema", description="Invoice extraction schema.", document_type="invoice"
+        )
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            parsed_text_path=str(parsed_path),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.42,
+                        "source_text": "Acme Corp",
+                        "char_start": vendor_start,
+                        "char_end": vendor_end,
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "invalid",
+                        "validation_errors": ["Required field is missing."],
+                        "extraction_notes": "LangExtract grounded chars.",
+                        "requires_review": True,
+                    },
+                    {
+                        "field_name": "total_amount",
+                        "label": "Total Amount",
+                        "field_kind": "extracted",
+                        "data_type": "currency",
+                        "extracted_value": "$1,200.00",
+                        "normalized_value": {
+                            "amount": 1200,
+                            "currency": "USD",
+                            "display_value": "$1,200.00",
+                        },
+                        "confidence_score": 1.0,
+                        "source_text": "$1,200.00",
+                        "char_start": amount_start,
+                        "char_end": amount_end,
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "extraction_notes": "LangExtract grounded chars.",
+                        "requires_review": False,
+                    },
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.flush()
+        db.add(
+            ReviewEdit(
+                result_id=result.id,
+                reviewer="qa-user",
+                field_name="vendor_name",
+                previous_value={"value": "Acme Corp"},
+                new_value={"value": "Acme Corporation"},
+                reason="Normalized legal name.",
+            )
+        )
+        db.commit()
+        version_id = version.id
+
+    suggestions_response = client.get(f"/api/template-versions/{version_id}/langextract-feedback-suggestions")
+    assert suggestions_response.status_code == 200
+    payload = suggestions_response.json()
+    suggestions = payload["suggestions"]
+    assert len(suggestions) == 1
+    suggestion_key = suggestions[0]["key"]
+
+    dismiss_response = client.put(
+        f"/api/template-versions/{version_id}/langextract-feedback-suggestions/{suggestion_key}/dismissal",
+        json={"dismissed": True},
+    )
+
+    assert dismiss_response.status_code == 200
+    assert dismiss_response.json()["dismissed"] is True
+    assert dismiss_response.json()["suggestion_key"] == suggestion_key
+
+    refetched_response = client.get(f"/api/template-versions/{version_id}/langextract-feedback-suggestions")
+    assert refetched_response.status_code == 200
+    refetched_payload = refetched_response.json()
+    assert refetched_payload["suggestions"] == []
+    assert refetched_payload["diagnostics"]["dismissed_suggestion_count"] == 1
+
+
 def test_export_routes_cover_csv_excel_and_invalid_format(client) -> None:
     template_definition = build_template_definition()
 
@@ -599,6 +1249,7 @@ def test_provider_settings_defaults_to_mock_when_unset(client) -> None:
     assert payload["provider_type"] == "mock"
     assert payload["model"] == "mock-extractor"
     assert payload["allow_external_processing"] is False
+    assert payload["is_persisted_default"] is False
 
 
 def test_provider_settings_reject_invalid_langextract_policy(client) -> None:
@@ -703,8 +1354,11 @@ def test_provider_health_reports_missing_cloud_credentials(client) -> None:
     health_by_type = {item["provider_type"]: item for item in payload}
 
     assert health_by_type["mock"]["ready"] is True
-    assert health_by_type["langextract"]["ready"] is True
-    assert "Requires a reachable Ollama runtime" in health_by_type["langextract"]["checks"]
+    assert health_by_type["langextract"]["ready"] is False
+    assert health_by_type["langextract"]["status"] == "probe_required"
+    assert (
+        "Run a live probe to confirm Ollama runtime and model availability" in health_by_type["langextract"]["checks"]
+    )
     assert health_by_type["azure_openai"]["ready"] is False
     assert "Missing environment variable AZURE_OPENAI_API_KEY" in health_by_type["azure_openai"]["checks"]
 
@@ -844,8 +1498,9 @@ def test_provider_probe_uses_ollama_tags_endpoint_for_langextract(client, monkey
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def get(self, url: str, headers: dict):
+        def post(self, url: str, json: dict, headers: dict):
             captured["url"] = url
+            captured["json"] = json
             captured["headers"] = headers
             return FakeResponse()
 
@@ -875,8 +1530,67 @@ def test_provider_probe_uses_ollama_tags_endpoint_for_langextract(client, monkey
 
     assert response.status_code == 200
     assert response.json()["reachable"] is True
-    assert captured["url"] == "http://host.docker.internal:11434/api/tags"
-    assert captured["headers"] == {}
+    assert captured["url"] == "http://host.docker.internal:11434/api/generate"
+    assert captured["json"] == {
+        "model": "qwen3.5:27b",
+        "prompt": "ping",
+        "stream": False,
+        "options": {"num_predict": 1},
+    }
+    assert captured["headers"] == {"Content-Type": "application/json"}
+    assert "qwen3.5:27b" in response.json()["detail"]
+
+
+def test_provider_probe_rejects_missing_langextract_model(client, monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 404
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"error": "model 'qwen3.5:27b' not found"}
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url: str, json: dict, headers: dict):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.provider_probe.httpx.Client", FakeClient)
+
+    response = client.post(
+        "/api/settings/providers/probe",
+        json={
+            "settings": {
+                "mode": "local",
+                "provider_type": "langextract",
+                "provider_label": "LangExtract (Ollama)",
+                "api_style": "langextract",
+                "base_url": "http://host.docker.internal:11434/v1",
+                "api_key_required": False,
+                "model": "qwen3.5:27b",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": False,
+                "allow_external_processing": False,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reachable"] is False
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["detail"] == "model 'qwen3.5:27b' not found"
 
 
 def test_template_creation_rejects_mismatched_langextract_identity(client) -> None:

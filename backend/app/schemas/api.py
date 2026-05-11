@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from extraction_core.models import ExtractionTemplate, LLMProviderCatalogEntry, LLMProviderSettings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TemplateCreateRequest(BaseModel):
@@ -47,6 +47,7 @@ class JobResponse(BaseModel):
     id: int
     document_id: int
     template_version_id: int
+    provider_override: LLMProviderSettings | None = None
     status: str
     error_message: str | None
     created_at: datetime
@@ -98,6 +99,54 @@ class ProviderProbeResponse(BaseModel):
 
 class ProviderControlsResponse(BaseModel):
     custom_provider_probe_max_age_hours: int
+
+
+class LangExtractFeedbackSuggestionExtractionResponse(BaseModel):
+    extraction_class: str
+    extraction_text: str
+    attributes: dict[str, str | list[str]] = Field(default_factory=dict)
+
+
+class LangExtractFeedbackSuggestionResponse(BaseModel):
+    key: str
+    template_version_id: int
+    example_text: str
+    extractions: list[LangExtractFeedbackSuggestionExtractionResponse]
+    occurrence_count: int
+    source_result_ids: list[int] = Field(default_factory=list)
+    source_field_names: list[str] = Field(default_factory=list)
+    last_reviewed_at: datetime | None = None
+
+
+class LangExtractFeedbackDiagnosticsResponse(BaseModel):
+    reviewed_result_count: int = 0
+    reviewed_edit_count: int = 0
+    generated_suggestion_count: int = 0
+    dismissed_suggestion_count: int = 0
+    visible_suggestion_count: int = 0
+    skipped_missing_document_text: int = 0
+    skipped_missing_target_field: int = 0
+    skipped_missing_grounding: int = 0
+    skipped_span_override: int = 0
+    skipped_span_mismatch: int = 0
+    skipped_empty_context: int = 0
+    skipped_no_contextual_extractions: int = 0
+
+
+class LangExtractFeedbackSuggestionListResponse(BaseModel):
+    suggestions: list[LangExtractFeedbackSuggestionResponse] = Field(default_factory=list)
+    diagnostics: LangExtractFeedbackDiagnosticsResponse = Field(default_factory=LangExtractFeedbackDiagnosticsResponse)
+
+
+class LangExtractFeedbackSuggestionDismissalRequest(BaseModel):
+    dismissed: bool = True
+
+
+class LangExtractFeedbackSuggestionDismissalResponse(BaseModel):
+    template_version_id: int
+    suggestion_key: str
+    dismissed: bool
+    updated_at: datetime
 
 
 class CustomProviderProfile(BaseModel):

@@ -206,33 +206,46 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
     const promptField = await screen.findByLabelText("LangExtract prompt");
-    const examplesField = screen.getByLabelText(
-      "LangExtract examples (JSON array)",
-    );
-
     fireEvent.change(promptField, {
       target: { value: "Extract contract parties exactly as written." },
     });
-    fireEvent.change(examplesField, {
-      target: {
-        value: JSON.stringify(
-          [
-            {
-              text: "Parties: Acme Corp and River Bank",
-              extractions: [
-                {
-                  extraction_class: "primary_subject",
-                  extraction_text: "Acme Corp",
-                  attributes: { value: "Acme Corp" },
-                },
-              ],
-            },
-          ],
-          null,
-          2,
-        ),
+    fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+    fireEvent.change(
+      screen.getByLabelText("LangExtract example 2 source text"),
+      {
+        target: { value: "Parties: Acme Corp and River Bank" },
       },
-    });
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 field name"),
+      {
+        target: { value: "primary_subject" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 source span"),
+      {
+        target: { value: "Acme Corp" },
+      },
+    );
+    const exampleTwoSection = screen.getByTestId("langextract-example-2");
+    fireEvent.click(
+      within(exampleTwoSection).getByRole("button", {
+        name: "Add attribute",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 name"),
+      {
+        target: { value: "value" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 value"),
+      {
+        target: { value: "Acme Corp" },
+      },
+    );
     fireEvent.change(screen.getByLabelText("Schema name"), {
       target: { value: "LangExtract Schema" },
     });
@@ -255,21 +268,972 @@ describe("App", () => {
     expect(langextractConfig.prompt_description).toBe(
       "Extract contract parties exactly as written.",
     );
-    expect(langextractConfig.examples).toEqual([
-      {
-        text: "Parties: Acme Corp and River Bank",
-        extractions: [
+    expect((langextractConfig.examples as Array<unknown>)[1]).toEqual({
+      text: "Parties: Acme Corp and River Bank",
+      extractions: [
+        {
+          extraction_class: "primary_subject",
+          extraction_text: "Acme Corp",
+          attributes: { value: "Acme Corp" },
+        },
+      ],
+    });
+  });
+
+  it("persists dismissed LangExtract suggestions across reloads and batch-adds the rest", async () => {
+    const langextractTemplate = {
+      template_name: "LangExtract Schema",
+      template_version: "1.0.0",
+      document_type: "invoice",
+      description: "Invoice extraction",
+      llm_provider_settings: {
+        mode: "local",
+        provider_type: "langextract",
+        provider_label: "LangExtract (Ollama)",
+        api_style: "langextract",
+        base_url: "http://host.docker.internal:11434/v1",
+        model: "qwen3.5:27b",
+        temperature: 0.1,
+        max_tokens: 6000,
+        supports_json_mode: false,
+        allow_external_processing: false,
+        api_key_required: false,
+        timeout_seconds: 120,
+        retry_count: 2,
+        chunk_size: 16000,
+      },
+      langextract_config: {
+        prompt_description: "Extract invoice facts exactly as written.",
+        examples: [
           {
-            extraction_class: "primary_subject",
-            extraction_text: "Acme Corp",
-            attributes: { value: "Acme Corp" },
+            text: "Invoice Vendor: Seed Corp\nTotal Due: $50.00",
+            extractions: [
+              {
+                extraction_class: "vendor_name",
+                extraction_text: "Seed Corp",
+                attributes: { value: "Seed Corp" },
+              },
+            ],
           },
         ],
       },
-    ]);
+      extracted_fields: [
+        {
+          name: "vendor_name",
+          label: "Vendor Name",
+          type: "text",
+          required: true,
+          citation_required: true,
+          description: "Vendor",
+        },
+        {
+          name: "total_amount",
+          label: "Total Amount",
+          type: "currency",
+          required: true,
+          citation_required: true,
+          description: "Amount",
+        },
+      ],
+      calculated_fields: [],
+      output_settings: { export_formats: ["json"] },
+    };
+    const dismissedSuggestionKeys = new Set<string>();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (
+          url.includes("/langextract-feedback-suggestions/") &&
+          url.endsWith("/dismissal") &&
+          init?.method === "PUT"
+        ) {
+          const suggestionKey = url.split("/").at(-2) ?? "";
+          dismissedSuggestionKeys.add(suggestionKey);
+          return Promise.resolve(
+            jsonResponse({
+              template_version_id: 101,
+              suggestion_key: suggestionKey,
+              dismissed: true,
+              updated_at: "2026-05-03T01:00:00Z",
+            }),
+          );
+        }
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "LangExtract Schema",
+                description: "Invoice extraction",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (url.endsWith("/templates/1/versions"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 101,
+                template_id: 1,
+                version: "1.0.0",
+                definition: langextractTemplate,
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (
+          url.endsWith(
+            "/template-versions/101/langextract-feedback-suggestions",
+          )
+        ) {
+          const suggestions = [
+            {
+              key: "suggestion-1",
+              template_version_id: 101,
+              example_text: "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00",
+              extractions: [
+                {
+                  extraction_class: "vendor_name",
+                  extraction_text: "Acme Corp",
+                  attributes: { value: "Acme Corporation" },
+                },
+                {
+                  extraction_class: "total_amount",
+                  extraction_text: "$1,200.00",
+                  attributes: {
+                    value: "$1,200.00",
+                    currency: "USD",
+                  },
+                },
+              ],
+              occurrence_count: 2,
+              source_result_ids: [5, 7],
+              source_field_names: ["vendor_name"],
+              last_reviewed_at: "2026-05-02T00:00:00Z",
+            },
+            {
+              key: "suggestion-2",
+              template_version_id: 101,
+              example_text: "Invoice Vendor: Harbor Supply\nTotal Due: $320.15",
+              extractions: [
+                {
+                  extraction_class: "vendor_name",
+                  extraction_text: "Harbor Supply",
+                  attributes: { value: "Harbor Supply" },
+                },
+                {
+                  extraction_class: "total_amount",
+                  extraction_text: "$320.15",
+                  attributes: {
+                    value: "$320.15",
+                    currency: "USD",
+                  },
+                },
+              ],
+              occurrence_count: 1,
+              source_result_ids: [8],
+              source_field_names: ["vendor_name", "total_amount"],
+              last_reviewed_at: "2026-05-03T00:00:00Z",
+            },
+          ].filter(
+            (suggestion) => !dismissedSuggestionKeys.has(suggestion.key),
+          );
+          return Promise.resolve(
+            jsonResponse({
+              suggestions,
+              diagnostics: {
+                reviewed_result_count: 2,
+                reviewed_edit_count: 2,
+                generated_suggestion_count: suggestions.length,
+                dismissed_suggestion_count: dismissedSuggestionKeys.size,
+                visible_suggestion_count: suggestions.length,
+                skipped_missing_document_text: 0,
+                skipped_missing_target_field: 0,
+                skipped_missing_grounding: 0,
+                skipped_span_override: 0,
+                skipped_span_mismatch: 0,
+                skipped_empty_context: 0,
+                skipped_no_contextual_extractions: 0,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    const firstRender = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    const dismissButtons = await screen.findAllByRole("button", {
+      name: "Dismiss",
+    });
+    fireEvent.click(dismissButtons[0]);
+
+    await screen.findByText("Dismissed reviewed LangExtract suggestion.");
+    firstRender.unmount();
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Schemas" }));
+    expect(
+      await screen.findByRole("heading", { name: "3. Train LangExtract" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("1 reviewed suggestion"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Add all to draft",
+      }),
+    );
+
+    const addedExample = await screen.findByLabelText(
+      "LangExtract example 2 source text",
+    );
+    expect((addedExample as HTMLTextAreaElement).value).toBe(
+      "Invoice Vendor: Harbor Supply\nTotal Due: $320.15",
+    );
+    expect(
+      screen.queryByLabelText("LangExtract example 3 source text"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Added to draft" }),
+    ).toBeDisabled();
   });
 
-  it("shows a targeted error when LangExtract examples are invalid JSON", async () => {
+  it("marks suggestions already present in the loaded draft as added to draft", async () => {
+    const existingSuggestion = {
+      key: "suggestion-1",
+      template_version_id: 101,
+      example_text: "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00",
+      extractions: [
+        {
+          extraction_class: "vendor_name",
+          extraction_text: "Acme Corp",
+          attributes: { value: "Acme Corporation" },
+        },
+        {
+          extraction_class: "total_amount",
+          extraction_text: "$1,200.00",
+          attributes: {
+            value: "$1,200.00",
+            currency: "USD",
+          },
+        },
+      ],
+      occurrence_count: 2,
+      source_result_ids: [5, 7],
+      source_field_names: ["vendor_name"],
+      last_reviewed_at: "2026-05-02T00:00:00Z",
+    };
+    const langextractTemplate = {
+      template_name: "LangExtract Schema",
+      template_version: "1.0.0",
+      document_type: "invoice",
+      description: "Invoice extraction",
+      llm_provider_settings: {
+        mode: "local",
+        provider_type: "langextract",
+        provider_label: "LangExtract (Ollama)",
+        api_style: "langextract",
+        base_url: "http://host.docker.internal:11434/v1",
+        model: "qwen3.5:27b",
+        temperature: 0.1,
+        max_tokens: 6000,
+        supports_json_mode: false,
+        allow_external_processing: false,
+        api_key_required: false,
+        timeout_seconds: 120,
+        retry_count: 2,
+        chunk_size: 16000,
+      },
+      langextract_config: {
+        prompt_description: "Extract invoice facts exactly as written.",
+        examples: [
+          {
+            text: existingSuggestion.example_text,
+            extractions: existingSuggestion.extractions,
+          },
+        ],
+      },
+      extracted_fields: [
+        {
+          name: "vendor_name",
+          label: "Vendor Name",
+          type: "text",
+          required: true,
+          citation_required: true,
+          description: "Vendor",
+        },
+        {
+          name: "total_amount",
+          label: "Total Amount",
+          type: "currency",
+          required: true,
+          citation_required: true,
+          description: "Amount",
+        },
+      ],
+      calculated_fields: [],
+      output_settings: { export_formats: ["json"] },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "LangExtract Schema",
+                description: "Invoice extraction",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (url.endsWith("/templates/1/versions"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 101,
+                template_id: 1,
+                version: "1.0.0",
+                definition: langextractTemplate,
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (
+          url.endsWith(
+            "/template-versions/101/langextract-feedback-suggestions",
+          )
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              suggestions: [existingSuggestion],
+              diagnostics: {
+                reviewed_result_count: 1,
+                reviewed_edit_count: 1,
+                generated_suggestion_count: 1,
+                dismissed_suggestion_count: 0,
+                visible_suggestion_count: 1,
+                skipped_missing_document_text: 0,
+                skipped_missing_target_field: 0,
+                skipped_missing_grounding: 0,
+                skipped_span_override: 0,
+                skipped_span_mismatch: 0,
+                skipped_empty_context: 0,
+                skipped_no_contextual_extractions: 0,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Added to draft" }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Add all to draft" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps an applied suggestion marked as added after editing the draft example", async () => {
+    const suggestion = {
+      key: "suggestion-1",
+      template_version_id: 101,
+      example_text: "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00",
+      extractions: [
+        {
+          extraction_class: "vendor_name",
+          extraction_text: "Acme Corp",
+          attributes: { value: "Acme Corporation" },
+        },
+        {
+          extraction_class: "total_amount",
+          extraction_text: "$1,200.00",
+          attributes: {
+            value: "$1,200.00",
+            currency: "USD",
+          },
+        },
+      ],
+      occurrence_count: 2,
+      source_result_ids: [5, 7],
+      source_field_names: ["vendor_name"],
+      last_reviewed_at: "2026-05-02T00:00:00Z",
+    };
+    const langextractTemplate = {
+      template_name: "LangExtract Schema",
+      template_version: "1.0.0",
+      document_type: "invoice",
+      description: "Invoice extraction",
+      llm_provider_settings: {
+        mode: "local",
+        provider_type: "langextract",
+        provider_label: "LangExtract (Ollama)",
+        api_style: "langextract",
+        base_url: "http://host.docker.internal:11434/v1",
+        model: "qwen3.5:27b",
+        temperature: 0.1,
+        max_tokens: 6000,
+        supports_json_mode: false,
+        allow_external_processing: false,
+        api_key_required: false,
+        timeout_seconds: 120,
+        retry_count: 2,
+        chunk_size: 16000,
+      },
+      langextract_config: {
+        prompt_description: "Extract invoice facts exactly as written.",
+        examples: [
+          {
+            text: "Invoice Vendor: Seed Corp\nTotal Due: $50.00",
+            extractions: [
+              {
+                extraction_class: "vendor_name",
+                extraction_text: "Seed Corp",
+                attributes: { value: "Seed Corp" },
+              },
+            ],
+          },
+        ],
+      },
+      extracted_fields: [
+        {
+          name: "vendor_name",
+          label: "Vendor Name",
+          type: "text",
+          required: true,
+          citation_required: true,
+          description: "Vendor",
+        },
+        {
+          name: "total_amount",
+          label: "Total Amount",
+          type: "currency",
+          required: true,
+          citation_required: true,
+          description: "Amount",
+        },
+      ],
+      calculated_fields: [],
+      output_settings: { export_formats: ["json"] },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "LangExtract Schema",
+                description: "Invoice extraction",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (url.endsWith("/templates/1/versions"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 101,
+                template_id: 1,
+                version: "1.0.0",
+                definition: langextractTemplate,
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (
+          url.endsWith(
+            "/template-versions/101/langextract-feedback-suggestions",
+          )
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              suggestions: [suggestion],
+              diagnostics: {
+                reviewed_result_count: 1,
+                reviewed_edit_count: 1,
+                generated_suggestion_count: 1,
+                dismissed_suggestion_count: 0,
+                visible_suggestion_count: 1,
+                skipped_missing_document_text: 0,
+                skipped_missing_target_field: 0,
+                skipped_missing_grounding: 0,
+                skipped_span_override: 0,
+                skipped_span_mismatch: 0,
+                skipped_empty_context: 0,
+                skipped_no_contextual_extractions: 0,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Add to draft" }),
+    );
+    fireEvent.change(
+      await screen.findByLabelText("LangExtract example 2 source text"),
+      {
+        target: {
+          value:
+            "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00\nAnalyst note: keep",
+        },
+      },
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Added to draft" }),
+    ).toBeDisabled();
+  });
+
+  it("shows LangExtract feedback diagnostics when reviewed runs are not reusable", async () => {
+    const langextractTemplate = {
+      template_name: "LangExtract Schema",
+      template_version: "1.0.0",
+      document_type: "invoice",
+      description: "Invoice extraction",
+      llm_provider_settings: {
+        mode: "local",
+        provider_type: "langextract",
+        provider_label: "LangExtract (Ollama)",
+        api_style: "langextract",
+        base_url: "http://host.docker.internal:11434/v1",
+        model: "qwen3.5:27b",
+        temperature: 0.1,
+        max_tokens: 6000,
+        supports_json_mode: false,
+        allow_external_processing: false,
+        api_key_required: false,
+        timeout_seconds: 120,
+        retry_count: 2,
+        chunk_size: 16000,
+      },
+      langextract_config: {
+        prompt_description: "Extract invoice facts exactly as written.",
+        examples: [
+          {
+            text: "Invoice Vendor: Seed Corp\nTotal Due: $50.00",
+            extractions: [
+              {
+                extraction_class: "vendor_name",
+                extraction_text: "Seed Corp",
+                attributes: { value: "Seed Corp" },
+              },
+            ],
+          },
+        ],
+      },
+      extracted_fields: [
+        {
+          name: "vendor_name",
+          label: "Vendor Name",
+          type: "text",
+          required: true,
+          citation_required: true,
+          description: "Vendor",
+        },
+      ],
+      calculated_fields: [],
+      output_settings: { export_formats: ["json"] },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "LangExtract Schema",
+                description: "Invoice extraction",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (url.endsWith("/templates/1/versions"))
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 101,
+                template_id: 1,
+                version: "1.0.0",
+                definition: langextractTemplate,
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        if (
+          url.endsWith(
+            "/template-versions/101/langextract-feedback-suggestions",
+          )
+        ) {
+          return Promise.resolve(
+            jsonResponse({
+              suggestions: [],
+              diagnostics: {
+                reviewed_result_count: 2,
+                reviewed_edit_count: 2,
+                generated_suggestion_count: 0,
+                dismissed_suggestion_count: 0,
+                visible_suggestion_count: 0,
+                skipped_missing_document_text: 1,
+                skipped_missing_target_field: 0,
+                skipped_missing_grounding: 0,
+                skipped_span_override: 0,
+                skipped_span_mismatch: 1,
+                skipped_empty_context: 0,
+                skipped_no_contextual_extractions: 0,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    expect(
+      await screen.findByText("Some reviewed runs were not reusable."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "1 reviewed edits skipped because parsed text was unavailable",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "1 reviewed edits skipped because stored spans no longer matched the document text",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("No reusable reviewed examples right now."),
+    ).toBeInTheDocument();
+  });
+
+  it("serializes LangExtract list attributes as string arrays", async () => {
+    let savedTemplateBody: Record<string, unknown> | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates") && init?.method === "POST") {
+          savedTemplateBody = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          return Promise.resolve(
+            jsonResponse({
+              id: 1,
+              name: "LangExtract Schema",
+              description: "Updated prompt",
+              document_type: "General Document",
+              is_locked: false,
+              latest_version: "1.0.0",
+              created_at: "2026-05-02T00:00:00Z",
+              updated_at: "2026-05-02T00:00:00Z",
+            }),
+          );
+        }
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByLabelText("LangExtract prompt");
+    fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+    fireEvent.change(
+      screen.getByLabelText("LangExtract example 2 source text"),
+      {
+        target: { value: "Vendor aliases: Acme Corp, Acme Company" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 field name"),
+      {
+        target: { value: "primary_subject" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 source span"),
+      {
+        target: { value: "Acme Corp, Acme Company" },
+      },
+    );
+    const exampleTwoSection = screen.getByTestId("langextract-example-2");
+    fireEvent.click(
+      within(exampleTwoSection).getByRole("button", {
+        name: "Add attribute",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 name"),
+      {
+        target: { value: "aliases" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 type"),
+      {
+        target: { value: "string_array" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 value"),
+      {
+        target: { value: "Acme Corp\nAcme Company" },
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    await waitFor(() => {
+      expect(savedTemplateBody).not.toBeNull();
+    });
+
+    const definition = savedTemplateBody?.definition as Record<string, unknown>;
+    const langextractConfig = definition.langextract_config as Record<
+      string,
+      unknown
+    >;
+    expect((langextractConfig.examples as Array<unknown>)[1]).toEqual({
+      text: "Vendor aliases: Acme Corp, Acme Company",
+      extractions: [
+        {
+          extraction_class: "primary_subject",
+          extraction_text: "Acme Corp, Acme Company",
+          attributes: { aliases: ["Acme Corp", "Acme Company"] },
+        },
+      ],
+    });
+  });
+
+  it("shows a live LangExtract payload preview while editing", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string | URL | Request) => {
@@ -333,16 +1297,1035 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
-    const examplesField = await screen.findByLabelText(
-      "LangExtract examples (JSON array)",
+    await screen.findByLabelText("LangExtract payload preview");
+
+    fireEvent.change(screen.getByLabelText("LangExtract prompt"), {
+      target: { value: "Extract contract parties exactly as written." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+    fireEvent.change(
+      screen.getByLabelText("LangExtract example 2 source text"),
+      {
+        target: { value: "Parties: Acme Corp and River Bank" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 field name"),
+      {
+        target: { value: "primary_subject" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 source span"),
+      {
+        target: { value: "Acme Corp" },
+      },
+    );
+    const exampleTwoSection = screen.getByTestId("langextract-example-2");
+    fireEvent.click(
+      within(exampleTwoSection).getByRole("button", {
+        name: "Add attribute",
+      }),
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 name"),
+      {
+        target: { value: "value" },
+      },
+    );
+    fireEvent.change(
+      screen.getByLabelText("Example 2 extraction 1 attribute 1 value"),
+      {
+        target: { value: "Acme Corp" },
+      },
     );
 
-    fireEvent.change(examplesField, {
-      target: { value: "[{" },
+    const preview = screen.getByLabelText("LangExtract payload preview");
+    expect(preview).toHaveTextContent('"prompt_description":');
+    expect(preview).toHaveTextContent(
+      "Extract contract parties exactly as written.",
+    );
+    expect(preview).toHaveTextContent(
+      '"text": "Parties: Acme Corp and River Bank"',
+    );
+    expect(preview).toHaveTextContent('"extraction_class": "primary_subject"');
+  });
+
+  it("shows a targeted error when a LangExtract example is missing source text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByLabelText("LangExtract example 1 source text");
+
+    fireEvent.change(
+      screen.getByLabelText("LangExtract example 1 source text"),
+      {
+        target: { value: "" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    expect(
+      await screen.findAllByText("LangExtract example 1 needs source text."),
+    ).not.toHaveLength(0);
+  });
+
+  it("shows an inline preview warning when the LangExtract draft is incomplete", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByLabelText("LangExtract example 1 source text");
+    fireEvent.change(
+      screen.getByLabelText("LangExtract example 1 source text"),
+      {
+        target: { value: "" },
+      },
+    );
+    expect(
+      await screen.findAllByText("LangExtract example 1 needs source text."),
+    ).not.toHaveLength(0);
+    expect(
+      screen.queryByLabelText("LangExtract payload preview"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a targeted error when a LangExtract extraction is missing a field name", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByLabelText("Example 1 extraction 1 field name");
+
+    fireEvent.change(
+      screen.getByLabelText("Example 1 extraction 1 field name"),
+      {
+        target: { value: "" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    expect(
+      await screen.findAllByText(
+        "LangExtract example 1 extraction 1 needs a field name.",
+      ),
+    ).not.toHaveLength(0);
+  });
+
+  it("shows a targeted error when a LangExtract extraction references an unknown field", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByLabelText("Example 1 extraction 1 field name");
+
+    fireEvent.change(
+      screen.getByLabelText("Example 1 extraction 1 field name"),
+      {
+        target: { value: "bogus_field" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    expect(
+      await screen.findAllByText(
+        'LangExtract example 1 extraction 1 references unknown field "bogus_field". Available fields: primary_subject, effective_date, total_amount.',
+      ),
+    ).not.toHaveLength(0);
+  });
+
+  it("shows missing required LangExtract field coverage before save", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByText("1 of 1 required fields covered");
+    fireEvent.change(
+      screen.getByLabelText("Example 1 extraction 1 field name"),
+      {
+        target: { value: "total_amount" },
+      },
+    );
+
+    expect(
+      await screen.findByText("0 of 1 required fields covered"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Missing required examples: primary_subject."),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
+
+    expect(
+      await screen.findAllByText(
+        "LangExtract examples must cover every required extracted field. Missing example coverage for: primary_subject.",
+      ),
+    ).not.toHaveLength(0);
+  });
+
+  it("does not persist LangExtract config for non-LangExtract schema saves", async () => {
+    let savedTemplateBody: Record<string, unknown> | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates") && init?.method === "POST") {
+          savedTemplateBody = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          return Promise.resolve(
+            jsonResponse({
+              id: 1,
+              name: "Invoice Schema",
+              description: "Invoice extraction schema.",
+              document_type: "General Document",
+              is_locked: false,
+              latest_version: "1.0.0",
+              created_at: "2026-05-02T00:00:00Z",
+              updated_at: "2026-05-02T00:00:00Z",
+            }),
+          );
+        }
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "mock",
+              provider_label: "Mock Extractor",
+              api_style: "mock",
+              base_url: null,
+              model: "mock-extractor",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: true,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+    fireEvent.change(screen.getByLabelText("Schema name"), {
+      target: { value: "Invoice Schema" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
 
-    await screen.findByText("LangExtract examples must be valid JSON.");
+    await waitFor(() => {
+      expect(savedTemplateBody).not.toBeNull();
+    });
+
+    const definition = savedTemplateBody?.definition as Record<string, unknown>;
+    expect(definition.langextract_config).toBeNull();
+  });
+
+  it("loads saved LangExtract prompt and examples back into the guided editor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Contract Schema",
+                description: "Contract extraction schema.",
+                document_type: "contract",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                definition: {
+                  template_name: "Contract Schema",
+                  template_version: "1.0.0",
+                  document_type: "contract",
+                  description: "Contract extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "langextract",
+                    provider_label: "LangExtract (Ollama)",
+                    api_style: "langextract",
+                    base_url: "http://host.docker.internal:11434/v1",
+                    model: "qwen3.5:27b",
+                    temperature: 0.1,
+                    max_tokens: 6000,
+                    supports_json_mode: false,
+                    allow_external_processing: false,
+                    api_key_required: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  langextract_config: {
+                    prompt_description:
+                      "Extract saved vendor aliases exactly as written.",
+                    examples: [
+                      {
+                        text: "Aliases: Acme Corp, Acme Company",
+                        extractions: [
+                          {
+                            extraction_class: "vendor_name",
+                            extraction_text: "Acme Corp, Acme Company",
+                            attributes: {
+                              aliases: ["Acme Corp", "Acme Company"],
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  extracted_fields: [],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json", "csv", "excel"] },
+                },
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "mock",
+              provider_label: "Mock Extractor",
+              is_persisted_default: false,
+              api_style: "mock",
+              base_url: null,
+              model: "mock-extractor",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: true,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("LangExtract prompt")).toHaveValue(
+        "Extract saved vendor aliases exactly as written.",
+      );
+    });
+    expect(
+      screen.getByLabelText("LangExtract example 1 source text"),
+    ).toHaveValue("Aliases: Acme Corp, Acme Company");
+    expect(
+      screen.getByLabelText("Example 1 extraction 1 field name"),
+    ).toHaveValue("vendor_name");
+    expect(
+      screen.getByLabelText("Example 1 extraction 1 attribute 1 type"),
+    ).toHaveValue("string_array");
+    expect(
+      screen.getByLabelText("Example 1 extraction 1 attribute 1 value"),
+    ).toHaveValue("Acme Corp\nAcme Company");
+  });
+
+  it("queues jobs with provider_override when a persisted default provider is configured", async () => {
+    let queuedJobBody: Record<string, unknown> | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                definition: {
+                  template_name: "Invoice Extraction",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "mock",
+                    provider_label: "Mock Extractor",
+                    api_style: "mock",
+                    base_url: null,
+                    model: "mock-extractor",
+                    temperature: 0.1,
+                    max_tokens: 6000,
+                    supports_json_mode: true,
+                    allow_external_processing: false,
+                    api_key_required: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json", "csv", "excel"] },
+                },
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                original_filename: "invoice.txt",
+                content_type: "text/plain",
+                status: "uploaded",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs") && init?.method === "POST") {
+          queuedJobBody = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          return Promise.resolve(
+            jsonResponse({
+              id: 99,
+              document_id: 7,
+              template_version_id: 11,
+              status: "queued",
+              error_message: null,
+              created_at: "2026-05-02T00:00:00Z",
+              updated_at: "2026-05-02T00:00:00Z",
+            }),
+          );
+        }
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              is_persisted_default: true,
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    const runButton = await screen.findByRole("button", {
+      name: "Run extraction",
+    });
+    fireEvent.click(runButton);
+
+    await waitFor(() => {
+      expect(queuedJobBody).not.toBeNull();
+    });
+
+    expect(queuedJobBody).toMatchObject({
+      document_id: 7,
+      template_version_id: 11,
+      provider_override: expect.objectContaining({
+        provider_type: "langextract",
+        model: "qwen3.5:27b",
+      }),
+    });
+  });
+
+  it("does not send provider_override when only the fallback default provider is loaded", async () => {
+    let queuedJobBody: Record<string, unknown> | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                definition: {
+                  template_name: "Invoice Extraction",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "cloud",
+                    provider_type: "openai",
+                    provider_label: "OpenAI",
+                    api_style: "openai_compatible",
+                    base_url: "https://api.openai.com/v1",
+                    model: "gpt-4.1",
+                    temperature: 0.1,
+                    max_tokens: 6000,
+                    supports_json_mode: true,
+                    allow_external_processing: true,
+                    api_key_required: true,
+                    api_key_env_var: "OPENAI_API_KEY",
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json", "csv", "excel"] },
+                },
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                original_filename: "invoice.txt",
+                content_type: "text/plain",
+                status: "uploaded",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs") && init?.method === "POST") {
+          queuedJobBody = JSON.parse(String(init.body)) as Record<
+            string,
+            unknown
+          >;
+          return Promise.resolve(
+            jsonResponse({
+              id: 99,
+              document_id: 7,
+              template_version_id: 11,
+              status: "queued",
+              error_message: null,
+              created_at: "2026-05-02T00:00:00Z",
+              updated_at: "2026-05-02T00:00:00Z",
+            }),
+          );
+        }
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "mock",
+              provider_label: "Mock Extractor",
+              is_persisted_default: false,
+              api_style: "mock",
+              base_url: null,
+              model: "mock-extractor",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: true,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    const runButton = await screen.findByRole("button", {
+      name: "Run extraction",
+    });
+    fireEvent.click(runButton);
+
+    await waitFor(() => {
+      expect(queuedJobBody).not.toBeNull();
+    });
+
+    expect(queuedJobBody).toMatchObject({
+      document_id: 7,
+      template_version_id: 11,
+    });
+    expect(queuedJobBody).not.toHaveProperty("provider_override");
   });
 
   it("opens the most urgent reviewable job with typed review inputs", async () => {
@@ -560,7 +2543,15 @@ describe("App", () => {
       "Acme Corp",
     );
     expect(screen.getByText("Review only the exceptions")).toBeInTheDocument();
+    expect(screen.getByText("mock (mock-extractor)")).toBeInTheDocument();
     expect(screen.getAllByText("Chars 13-22").length).toBeGreaterThan(0);
+    expect(screen.getByText("Review signals")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Vendor name needs review.").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Low confidence extraction.").length,
+    ).toBeGreaterThan(0);
   });
 
   it("shows desktop onboarding when the tauri backend is unavailable and starts the local stack", async () => {
@@ -674,6 +2665,248 @@ describe("App", () => {
           name: "Finish the runtime checks, then get back to the extraction workspace.",
         }),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows the configured provider for in-flight jobs before a result exists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                definition: {
+                  template_name: "Invoice Schema",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "mock",
+                    provider_label: "Mock Extractor",
+                    api_style: "mock",
+                    base_url: null,
+                    model: "mock-extractor",
+                    temperature: 0.1,
+                    max_tokens: 4000,
+                    supports_json_mode: true,
+                    allow_external_processing: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json", "csv", "excel"] },
+                },
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 2,
+                original_filename: "invoice.pdf",
+                content_type: "application/pdf",
+                status: "processing",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+
+        if (url.endsWith("/jobs")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                document_id: 2,
+                template_version_id: 11,
+                provider_override: {
+                  mode: "local",
+                  provider_type: "langextract",
+                  provider_label: "LangExtract (Ollama)",
+                  api_style: "langextract",
+                  base_url: "http://host.docker.internal:11434/v1",
+                  model: "qwen3.5:27b",
+                  temperature: 0.1,
+                  max_tokens: 4000,
+                  supports_json_mode: false,
+                  allow_external_processing: false,
+                  timeout_seconds: 120,
+                  retry_count: 2,
+                  chunk_size: 16000,
+                },
+                status: "running",
+                error_message: null,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:01:00Z",
+              },
+            ]),
+          );
+        }
+
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 1, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Processing invoice.pdf" }),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("langextract (qwen3.5:27b)")).toBeInTheDocument();
+  });
+
+  it("shows a probe-required badge for LangExtract settings health", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers")) {
+          return Promise.resolve(
+            jsonResponse({
+              providers: [
+                {
+                  key: "langextract-ollama",
+                  label: "LangExtract (Ollama)",
+                  description: "Experimental grounded extraction adapter.",
+                  mode: "local",
+                  provider_type: "langextract",
+                  api_style: "langextract",
+                  base_url: "http://host.docker.internal:11434/v1",
+                  model: "qwen3.5:27b",
+                  enabled: true,
+                  recommended: false,
+                  tags: ["local", "experimental", "grounded", "ollama"],
+                  capabilities: {
+                    supports_chat_completions: false,
+                    supports_json_mode: false,
+                    supports_streaming: false,
+                    supports_remote_processing: false,
+                    requires_api_key: false,
+                    supports_local_runtime: true,
+                  },
+                  settings: {
+                    mode: "local",
+                    provider_type: "langextract",
+                    provider_label: "LangExtract (Ollama)",
+                    api_style: "langextract",
+                    base_url: "http://host.docker.internal:11434/v1",
+                    model: "qwen3.5:27b",
+                    temperature: 0.1,
+                    max_tokens: 6000,
+                    supports_json_mode: false,
+                    allow_external_processing: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                },
+              ],
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers/health")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                provider_key: "langextract-ollama",
+                provider_type: "langextract",
+                ready: false,
+                status: "probe_required",
+                checks: [
+                  "Run a live probe to confirm Ollama runtime and model availability",
+                ],
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Probe required")).toBeInTheDocument();
     });
   });
 

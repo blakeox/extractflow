@@ -30,8 +30,8 @@ def probe_provider(settings: LLMProviderSettings) -> dict[str, object]:
             return _failure(settings, "LangExtract v1 requires allow_external_processing to stay disabled.")
         if not settings.base_url:
             return _failure(settings, "Base URL is required before probing.")
-        endpoint = f"{normalize_langextract_base_url(settings.base_url).rstrip('/')}/api/tags"
-        return _probe_endpoint(settings, endpoint, {})
+        endpoint = f"{normalize_langextract_base_url(settings.base_url).rstrip('/')}/api/generate"
+        return _probe_langextract_endpoint(settings, endpoint)
 
     if not settings.base_url:
         return _failure(settings, "Base URL is required before probing.")
@@ -97,6 +97,64 @@ def _probe_endpoint(settings: LLMProviderSettings, endpoint: str, headers: dict[
             "endpoint": endpoint,
             "status_code": None,
         }
+
+
+def _probe_langextract_endpoint(settings: LLMProviderSettings, endpoint: str) -> dict[str, object]:
+    payload = {
+        "model": settings.model,
+        "prompt": "ping",
+        "stream": False,
+        "options": {"num_predict": 1},
+    }
+    try:
+        with httpx.Client(timeout=min(settings.timeout_seconds, 10)) as client:
+            response = client.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+        if response.status_code != 200:
+            detail = _extract_langextract_probe_error(response)
+            return {
+                "provider_type": settings.provider_type,
+                "reachable": False,
+                "status": "not_ready",
+                "detail": detail or f"Ollama generate endpoint responded with HTTP {response.status_code}.",
+                "endpoint": endpoint,
+                "status_code": response.status_code,
+            }
+    except httpx.HTTPError as exc:
+        return {
+            "provider_type": settings.provider_type,
+            "reachable": False,
+            "status": "error",
+            "detail": str(exc),
+            "endpoint": endpoint,
+            "status_code": None,
+        }
+    return {
+        "provider_type": settings.provider_type,
+        "reachable": True,
+        "status": "reachable",
+        "detail": (f"Ollama runtime accepted a minimal generation request for model '{settings.model}'."),
+        "endpoint": endpoint,
+        "status_code": response.status_code,
+    }
+
+
+def _extract_langextract_probe_error(response: httpx.Response) -> str | None:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+    body = response.text.strip()
+    if body:
+        return body
+    return None
 
 
 def _missing_api_key(settings: LLMProviderSettings) -> str | None:

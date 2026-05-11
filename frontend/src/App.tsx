@@ -10,6 +10,18 @@ import {
 } from "react";
 
 import { API_BASE } from "./lib/config";
+import {
+  LangExtractEditor,
+  type LangExtractFeedbackDiagnostics,
+  type LangExtractFeedbackSuggestion,
+} from "./LangExtractEditor";
+import {
+  buildDraftLangExtractExampleFromSuggestion,
+  buildDraftLangExtractExamples,
+  getAppliedLangExtractSuggestionKeys,
+  buildLangExtractExamples,
+  type DraftLangExtractExample,
+} from "./langextract";
 
 type PageId = "extractions" | "templates" | "settings" | "audit" | "help";
 
@@ -51,6 +63,7 @@ type ProviderSettings = {
   mode: "local" | "cloud";
   provider_type: string;
   provider_label?: string | null;
+  is_persisted_default?: boolean;
   api_style?: "mock" | "openai_compatible" | "azure_openai" | "langextract";
   base_url?: string | null;
   api_key_env_var?: string | null;
@@ -187,10 +200,23 @@ type JobRecord = {
   id: number;
   document_id: number;
   template_version_id: number;
+  provider_override?: ProviderSettings | null;
   status: string;
   error_message?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type LangExtractFeedbackSuggestionDismissal = {
+  template_version_id: number;
+  suggestion_key: string;
+  dismissed: boolean;
+  updated_at: string;
+};
+
+type LangExtractFeedbackSuggestionListResponse = {
+  suggestions: LangExtractFeedbackSuggestion[];
+  diagnostics: LangExtractFeedbackDiagnostics;
 };
 
 type ReviewFieldResult = {
@@ -276,7 +302,7 @@ type DraftTemplate = {
   template_version: string;
   local_only: boolean;
   langextract_prompt_description: string;
-  langextract_examples_json: string;
+  langextract_examples: DraftLangExtractExample[];
 };
 
 type WorkspaceStage = "draft" | "processing" | "review" | "ready" | "failed";
@@ -312,6 +338,21 @@ const DEFAULT_CUSTOM_PROVIDER_DRAFT: CustomProviderDraft = {
   timeout_seconds: "120",
   retry_count: "2",
   chunk_size: "16000",
+};
+
+const EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS: LangExtractFeedbackDiagnostics = {
+  reviewed_result_count: 0,
+  reviewed_edit_count: 0,
+  generated_suggestion_count: 0,
+  dismissed_suggestion_count: 0,
+  visible_suggestion_count: 0,
+  skipped_missing_document_text: 0,
+  skipped_missing_target_field: 0,
+  skipped_missing_grounding: 0,
+  skipped_span_override: 0,
+  skipped_span_mismatch: 0,
+  skipped_empty_context: 0,
+  skipped_no_contextual_extractions: 0,
 };
 
 function loadSavedCustomProviderDraft(): CustomProviderDraft {
@@ -692,6 +733,24 @@ function getInitialReviewDraft(
   return JSON.stringify(value);
 }
 
+function isLangExtractProvider(settings?: ProviderSettings | null) {
+  return (
+    settings?.provider_type === "langextract" &&
+    settings.api_style === "langextract"
+  );
+}
+
+function getReviewSignals(field: ReviewFieldResult): string[] {
+  const signals = [...field.validation_errors];
+  if (field.extraction_notes) {
+    signals.push(field.extraction_notes);
+  }
+  if (!signals.length && field.requires_review) {
+    signals.push("This field needs confirmation before export.");
+  }
+  return [...new Set(signals.map((signal) => signal.trim()).filter(Boolean))];
+}
+
 function parseReviewDraft(
   field: ReviewFieldResult,
   raw: string,
@@ -737,44 +796,30 @@ function parseReviewDraft(
   }
 }
 
-function stringifyLangExtractExamples(
-  config?: TemplateDefinition["langextract_config"],
-) {
-  return JSON.stringify(config?.examples ?? [], null, 2);
-}
-
-function parseLangExtractExamplesJson(raw: string) {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed) as unknown;
-  } catch {
-    throw new Error("LangExtract examples must be valid JSON.");
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error("LangExtract examples must be a JSON array.");
-  }
-  return parsed as NonNullable<
-    TemplateDefinition["langextract_config"]
-  >["examples"];
-}
-
 function buildTemplatePayload(
   draft: DraftTemplate,
   provider: ProviderSettings | null,
   base?: TemplateDefinition,
 ): TemplateDefinition {
   const seed = base ?? starterTemplateDefinition;
+  const effectiveProvider = provider ?? seed.llm_provider_settings;
+  const usesLangExtractConfig =
+    effectiveProvider.api_style === "langextract" ||
+    seed.llm_provider_settings.api_style === "langextract";
   const langextractPromptDescription =
     draft.langextract_prompt_description.trim();
-  const parsedLangExtractExamples = parseLangExtractExamplesJson(
-    draft.langextract_examples_json,
-  );
+  const parsedLangExtractExamples = usesLangExtractConfig
+    ? buildLangExtractExamples(
+        draft.langextract_examples,
+        seed.extracted_fields.map((field) => field.name),
+        seed.extracted_fields
+          .filter((field) => field.required)
+          .map((field) => field.name),
+      )
+    : [];
   const langextractConfig =
-    langextractPromptDescription || parsedLangExtractExamples.length
+    usesLangExtractConfig &&
+    (langextractPromptDescription || parsedLangExtractExamples.length)
       ? {
           prompt_description: langextractPromptDescription,
           examples: parsedLangExtractExamples,
@@ -787,7 +832,7 @@ function buildTemplatePayload(
     template_version: draft.template_version,
     document_type: draft.document_type,
     description: draft.description,
-    llm_provider_settings: provider ?? seed.llm_provider_settings,
+    llm_provider_settings: effectiveProvider,
     langextract_config: langextractConfig,
   };
 }
@@ -1538,6 +1583,14 @@ function SchemaPage({
   provider,
   draft,
   setDraft,
+  langextractFeedbackSuggestions,
+  langextractFeedbackDiagnostics,
+  langextractFeedbackStatus,
+  appliedLangExtractSuggestionKeys,
+  dismissedLangExtractSuggestionKeys,
+  onApplyLangExtractSuggestion,
+  onApplyAllLangExtractSuggestions,
+  onDismissLangExtractSuggestion,
   onCreateTemplate,
   busyAction,
 }: {
@@ -1551,6 +1604,18 @@ function SchemaPage({
   provider: ProviderSettings | null;
   draft: DraftTemplate;
   setDraft: Dispatch<SetStateAction<DraftTemplate>>;
+  langextractFeedbackSuggestions: LangExtractFeedbackSuggestion[];
+  langextractFeedbackDiagnostics: LangExtractFeedbackDiagnostics;
+  langextractFeedbackStatus: "idle" | "loading" | "ready" | "error";
+  appliedLangExtractSuggestionKeys: string[];
+  dismissedLangExtractSuggestionKeys: string[];
+  onApplyLangExtractSuggestion: (
+    suggestion: LangExtractFeedbackSuggestion,
+  ) => void;
+  onApplyAllLangExtractSuggestions: () => void;
+  onDismissLangExtractSuggestion: (
+    suggestionKey: string,
+  ) => Promise<void> | void;
   onCreateTemplate: () => Promise<void>;
   busyAction: string | null;
 }) {
@@ -1558,7 +1623,7 @@ function SchemaPage({
   const effectiveProvider = provider ?? definition.llm_provider_settings;
   const showLangExtractEditor =
     effectiveProvider.api_style === "langextract" ||
-    Boolean(definition.langextract_config);
+    definition.llm_provider_settings.api_style === "langextract";
   const selectedSchema =
     templates.find((item) => item.id === selectedTemplateId) ?? null;
   const selectedVersions = templateVersions.filter(
@@ -1574,6 +1639,8 @@ function SchemaPage({
     definition.extracted_fields.length - requiredFieldCount;
   const exportFormatsLabel =
     definition.output_settings.export_formats.join(" · ");
+  const searchParametersStepNumber = showLangExtractEditor ? 4 : 3;
+  const outputRulesStepNumber = showLangExtractEditor ? 5 : 4;
 
   return (
     <div className="page-stack">
@@ -1736,38 +1803,6 @@ function SchemaPage({
                   }))
                 }
               />
-              {showLangExtractEditor ? (
-                <>
-                  <label className="full-line">
-                    <span>LangExtract prompt</span>
-                    <textarea
-                      rows={5}
-                      value={draft.langextract_prompt_description}
-                      placeholder="Describe exactly what LangExtract should extract and how grounded spans should behave."
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          langextract_prompt_description: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="full-line">
-                    <span>LangExtract examples (JSON array)</span>
-                    <textarea
-                      rows={12}
-                      value={draft.langextract_examples_json}
-                      placeholder='[{"text":"...","extractions":[{"extraction_class":"field_name","extraction_text":"...","attributes":{"value":"..."}}]}]'
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          langextract_examples_json: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
             </div>
             <div className="schema-guidance-stack">
               <div className="schema-guidance-card">
@@ -1793,6 +1828,33 @@ function SchemaPage({
             </div>
           </div>
         </section>
+
+        {showLangExtractEditor ? (
+          <section className="surface span-7">
+            <CardHeader
+              title="3. Train LangExtract"
+              subtitle="Author grounded examples first, then fold reviewed suggestions back into the schema when they are strong enough to keep."
+            />
+            <LangExtractEditor
+              draft={draft}
+              setDraft={setDraft}
+              validFieldNames={definition.extracted_fields.map(
+                (field) => field.name,
+              )}
+              requiredFieldNames={definition.extracted_fields
+                .filter((field) => field.required)
+                .map((field) => field.name)}
+              feedbackSuggestions={langextractFeedbackSuggestions}
+              feedbackDiagnostics={langextractFeedbackDiagnostics}
+              feedbackStatus={langextractFeedbackStatus}
+              appliedSuggestionKeys={appliedLangExtractSuggestionKeys}
+              dismissedSuggestionKeys={dismissedLangExtractSuggestionKeys}
+              onApplySuggestion={onApplyLangExtractSuggestion}
+              onApplyAllSuggestions={onApplyAllLangExtractSuggestions}
+              onDismissSuggestion={onDismissLangExtractSuggestion}
+            />
+          </section>
+        ) : null}
 
         <section className="surface span-5">
           <CardHeader
@@ -1820,8 +1882,22 @@ function SchemaPage({
                 </p>
               </div>
             </div>
+            {showLangExtractEditor ? (
+              <div className="schema-step-card active">
+                <span className="schema-step-number">3</span>
+                <div>
+                  <strong>Train LangExtract with examples</strong>
+                  <p>
+                    Ground the prompt with reusable source spans before you rely
+                    on reviewed feedback.
+                  </p>
+                </div>
+              </div>
+            ) : null}
             <div className="schema-step-card">
-              <span className="schema-step-number">3</span>
+              <span className="schema-step-number">
+                {searchParametersStepNumber}
+              </span>
               <div>
                 <strong>Review search parameters</strong>
                 <p>
@@ -1831,7 +1907,9 @@ function SchemaPage({
               </div>
             </div>
             <div className="schema-step-card">
-              <span className="schema-step-number">4</span>
+              <span className="schema-step-number">
+                {outputRulesStepNumber}
+              </span>
               <div>
                 <strong>Confirm review and export rules</strong>
                 <p>
@@ -1869,7 +1947,7 @@ function SchemaPage({
 
         <section className="surface span-7">
           <CardHeader
-            title="3. Review the search parameters"
+            title={`${searchParametersStepNumber}. Review the search parameters`}
             subtitle="This is the actual search contract the extraction run will follow."
           />
           <div className="builder-list parameter-list">
@@ -1930,7 +2008,7 @@ function SchemaPage({
 
         <section className="surface span-5">
           <CardHeader
-            title="4. Review output and trust rules"
+            title={`${outputRulesStepNumber}. Review output and trust rules`}
             subtitle="Keep deterministic logic and export behavior visible before the schema is saved."
           />
           <div className="schema-guidance-stack">
@@ -2111,6 +2189,14 @@ function ExtractionWorkspacePage({
     fieldsNeedingReview[0] ??
     extractedFields[0] ??
     null;
+  const selectedRunProvider =
+    selectedResult?.result.llm_provider ??
+    selectedJob?.provider_override ??
+    selectedTemplateVersion?.definition.llm_provider_settings ??
+    null;
+  const selectedRunProviderLabel = selectedRunProvider
+    ? `${selectedRunProvider.provider_type} (${selectedRunProvider.model})`
+    : "Unknown provider";
 
   const jobGroups = [
     {
@@ -2665,6 +2751,10 @@ function ExtractionWorkspacePage({
                         }
                       />
                       <SummaryStat
+                        label="Run provider"
+                        value={selectedRunProviderLabel}
+                      />
+                      <SummaryStat
                         label="Started"
                         value={formatTimestamp(selectedJob?.created_at)}
                       />
@@ -2720,6 +2810,10 @@ function ExtractionWorkspacePage({
                         value={extractedFields.length}
                       />
                       <SummaryStat
+                        label="Run provider"
+                        value={selectedRunProviderLabel}
+                      />
+                      <SummaryStat
                         label="Needs review"
                         value={fieldsNeedingReview.length}
                         tone={
@@ -2752,6 +2846,7 @@ function ExtractionWorkspacePage({
                               selectedTemplateVersion?.definition ?? null,
                               field.field_name,
                             );
+                            const reviewSignals = getReviewSignals(field);
                             const fieldType = getFieldType(field, definition);
                             const draftValue =
                               reviewDrafts[field.field_name] ??
@@ -2769,8 +2864,7 @@ function ExtractionWorkspacePage({
                                   <div>
                                     <strong>{field.label}</strong>
                                     <p>
-                                      {field.validation_errors[0] ||
-                                        field.extraction_notes ||
+                                      {reviewSignals[0] ??
                                         "This field needs confirmation."}
                                     </p>
                                   </div>
@@ -2786,6 +2880,18 @@ function ExtractionWorkspacePage({
                                       : "Needs Review"}
                                   </StatusBadge>
                                 </div>
+                                {reviewSignals.length ? (
+                                  <div className="review-signals">
+                                    <span className="metric-label">
+                                      Review signals
+                                    </span>
+                                    <ul className="review-signal-list">
+                                      {reviewSignals.map((signal) => (
+                                        <li key={signal}>{signal}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ) : null}
                                 <FieldShell
                                   label="Review value"
                                   hint={
@@ -3115,22 +3221,26 @@ function SettingsPage({
                         ? "info"
                         : health?.ready
                           ? "success"
-                          : item.recommended
-                            ? "indigo"
-                            : item.enabled
-                              ? "neutral"
-                              : "danger"
+                          : health?.status === "probe_required"
+                            ? "warning"
+                            : item.recommended
+                              ? "indigo"
+                              : item.enabled
+                                ? "neutral"
+                                : "danger"
                     }
                   >
                     {selected
                       ? "Default"
                       : health?.ready
                         ? "Ready"
-                        : item.recommended
-                          ? "Recommended"
-                          : item.enabled
-                            ? "Available"
-                            : "Disabled"}
+                        : health?.status === "probe_required"
+                          ? "Probe required"
+                          : item.recommended
+                            ? "Recommended"
+                            : item.enabled
+                              ? "Available"
+                              : "Disabled"}
                   </StatusBadge>
                 </div>
                 <div className="provider-body">
@@ -3794,10 +3904,27 @@ export function App() {
     local_only: true,
     langextract_prompt_description:
       starterTemplateDefinition.langextract_config?.prompt_description ?? "",
-    langextract_examples_json: stringifyLangExtractExamples(
+    langextract_examples: buildDraftLangExtractExamples(
       starterTemplateDefinition.langextract_config,
     ),
   });
+  const [langextractFeedbackSuggestions, setLangextractFeedbackSuggestions] =
+    useState<LangExtractFeedbackSuggestion[]>([]);
+  const [langextractFeedbackDiagnostics, setLangextractFeedbackDiagnostics] =
+    useState<LangExtractFeedbackDiagnostics>(
+      EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
+    );
+  const [langextractFeedbackStatus, setLangextractFeedbackStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [
+    sessionAppliedLangExtractSuggestionKeys,
+    setSessionAppliedLangExtractSuggestionKeys,
+  ] = useState<string[]>([]);
+  const [
+    dismissedLangExtractSuggestionKeys,
+    setDismissedLangExtractSuggestionKeys,
+  ] = useState<string[]>([]);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [banner, setBanner] = useState<{
     tone: "success" | "error";
@@ -4032,6 +4159,17 @@ export function App() {
   const currentTemplateDefinition =
     templateVersions.find((item) => item.id === selectedTemplateVersionId)
       ?.definition ?? null;
+  const draftMatchedLangExtractSuggestionKeys =
+    getAppliedLangExtractSuggestionKeys(
+      draftTemplate.langextract_examples,
+      langextractFeedbackSuggestions,
+    );
+  const appliedLangExtractSuggestionKeys = [
+    ...new Set([
+      ...sessionAppliedLangExtractSuggestionKeys,
+      ...draftMatchedLangExtractSuggestionKeys,
+    ]),
+  ];
   const reviewableResults = Object.values(resultsByJob).filter(
     (result) => result.result.fields_requiring_review.length > 0,
   );
@@ -4057,11 +4195,58 @@ export function App() {
           .allow_external_processing,
       langextract_prompt_description:
         currentTemplateDefinition.langextract_config?.prompt_description ?? "",
-      langextract_examples_json: stringifyLangExtractExamples(
+      langextract_examples: buildDraftLangExtractExamples(
         currentTemplateDefinition.langextract_config,
       ),
     });
+    setSessionAppliedLangExtractSuggestionKeys([]);
+    setDismissedLangExtractSuggestionKeys([]);
   }, [currentTemplateDefinition]);
+
+  useEffect(() => {
+    if (
+      !selectedTemplateVersionId ||
+      !currentTemplateDefinition ||
+      !isLangExtractProvider(currentTemplateDefinition.llm_provider_settings)
+    ) {
+      setLangextractFeedbackSuggestions([]);
+      setLangextractFeedbackDiagnostics(EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS);
+      setLangextractFeedbackStatus("idle");
+      return;
+    }
+
+    let cancelled = false;
+    setLangextractFeedbackStatus("loading");
+    void readJson<LangExtractFeedbackSuggestionListResponse>(
+      `/template-versions/${selectedTemplateVersionId}/langextract-feedback-suggestions`,
+    )
+      .then((feedback) => {
+        if (cancelled) {
+          return;
+        }
+        setLangextractFeedbackSuggestions(
+          Array.isArray(feedback?.suggestions) ? feedback.suggestions : [],
+        );
+        setLangextractFeedbackDiagnostics(
+          feedback?.diagnostics ?? EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
+        );
+        setLangextractFeedbackStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setLangextractFeedbackSuggestions([]);
+        setLangextractFeedbackDiagnostics(
+          EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
+        );
+        setLangextractFeedbackStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTemplateDefinition, selectedTemplateVersionId]);
 
   async function handleUpload(file: File) {
     try {
@@ -4086,6 +4271,99 @@ export function App() {
     }
   }
 
+  function handleApplyLangExtractSuggestion(
+    suggestion: LangExtractFeedbackSuggestion,
+  ) {
+    setDraftTemplate((current) => ({
+      ...current,
+      langextract_examples: [
+        ...current.langextract_examples,
+        buildDraftLangExtractExampleFromSuggestion(suggestion),
+      ],
+    }));
+    setSessionAppliedLangExtractSuggestionKeys((current) =>
+      current.includes(suggestion.key) ? current : [...current, suggestion.key],
+    );
+    setBanner({
+      tone: "success",
+      message: "Added reviewed LangExtract example to the draft schema.",
+    });
+  }
+
+  function handleApplyAllLangExtractSuggestions() {
+    const pendingSuggestions = langextractFeedbackSuggestions.filter(
+      (suggestion) =>
+        !dismissedLangExtractSuggestionKeys.includes(suggestion.key) &&
+        !appliedLangExtractSuggestionKeys.includes(suggestion.key),
+    );
+    if (!pendingSuggestions.length) {
+      return;
+    }
+    setDraftTemplate((current) => ({
+      ...current,
+      langextract_examples: [
+        ...current.langextract_examples,
+        ...pendingSuggestions.map((suggestion) =>
+          buildDraftLangExtractExampleFromSuggestion(suggestion),
+        ),
+      ],
+    }));
+    setSessionAppliedLangExtractSuggestionKeys((current) => [
+      ...current,
+      ...pendingSuggestions
+        .map((suggestion) => suggestion.key)
+        .filter((key) => !current.includes(key)),
+    ]);
+    setBanner({
+      tone: "success",
+      message:
+        pendingSuggestions.length === 1
+          ? "Added 1 reviewed LangExtract example to the draft schema."
+          : `Added ${pendingSuggestions.length} reviewed LangExtract examples to the draft schema.`,
+    });
+  }
+
+  async function handleDismissLangExtractSuggestion(suggestionKey: string) {
+    if (!selectedTemplateVersionId) {
+      return;
+    }
+    try {
+      await readJson<LangExtractFeedbackSuggestionDismissal>(
+        `/template-versions/${selectedTemplateVersionId}/langextract-feedback-suggestions/${suggestionKey}/dismissal`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dismissed: true }),
+        },
+      );
+      setDismissedLangExtractSuggestionKeys((current) =>
+        current.includes(suggestionKey) ? current : [...current, suggestionKey],
+      );
+      const feedback =
+        await readJson<LangExtractFeedbackSuggestionListResponse>(
+          `/template-versions/${selectedTemplateVersionId}/langextract-feedback-suggestions`,
+        );
+      setLangextractFeedbackSuggestions(
+        Array.isArray(feedback?.suggestions) ? feedback.suggestions : [],
+      );
+      setLangextractFeedbackDiagnostics(
+        feedback?.diagnostics ?? EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
+      );
+      setBanner({
+        tone: "success",
+        message: "Dismissed reviewed LangExtract suggestion.",
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not dismiss LangExtract suggestion.",
+      });
+    }
+  }
+
   async function handleRunExtraction() {
     if (!selectedDocumentId || !selectedTemplateVersionId) {
       setBanner({
@@ -4097,12 +4375,16 @@ export function App() {
     }
     try {
       setBusyAction("run");
+      const providerOverride = provider?.is_persisted_default
+        ? provider
+        : undefined;
       const created = await readJson<JobRecord>("/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           document_id: selectedDocumentId,
           template_version_id: selectedTemplateVersionId,
+          provider_override: providerOverride,
         }),
       });
       await refreshCoreData();
@@ -4959,6 +5241,22 @@ export function App() {
               provider={provider}
               draft={draftTemplate}
               setDraft={setDraftTemplate}
+              langextractFeedbackSuggestions={langextractFeedbackSuggestions}
+              langextractFeedbackDiagnostics={langextractFeedbackDiagnostics}
+              langextractFeedbackStatus={langextractFeedbackStatus}
+              appliedLangExtractSuggestionKeys={
+                appliedLangExtractSuggestionKeys
+              }
+              dismissedLangExtractSuggestionKeys={
+                dismissedLangExtractSuggestionKeys
+              }
+              onApplyLangExtractSuggestion={handleApplyLangExtractSuggestion}
+              onApplyAllLangExtractSuggestions={
+                handleApplyAllLangExtractSuggestions
+              }
+              onDismissLangExtractSuggestion={
+                handleDismissLangExtractSuggestion
+              }
               onCreateTemplate={handleCreateTemplate}
               busyAction={busyAction}
             />

@@ -118,6 +118,7 @@ def reconcile_extracted_fields(
         else:
             result = max(candidates, key=score_extraction_result)
             if len(candidates) > 1:
+                result.requires_review = True
                 result.extraction_notes = append_note(
                     result.extraction_notes,
                     f"Selected highest-confidence match from {len(candidates)} chunk candidates.",

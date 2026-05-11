@@ -1,0 +1,124 @@
+{
+  "name": "invoice-basic",
+  "description": "Starter LangExtract golden case for grounded invoice extraction and formula post-processing.",
+  "tags": ["starter", "invoice"],
+  "document_text": "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00",
+  "template_definition": {
+    "template_name": "Invoice Extraction Eval",
+    "template_version": "1.0.0",
+    "document_type": "invoice",
+    "description": "Starter LangExtract eval case.",
+    "llm_provider_settings": {
+      "mode": "local",
+      "provider_type": "langextract",
+      "provider_label": "LangExtract (Ollama)",
+      "api_style": "langextract",
+      "base_url": "http://host.docker.internal:11434/v1",
+      "model": "qwen3.5:27b",
+      "temperature": 0.0,
+      "max_tokens": 4000,
+      "supports_json_mode": false,
+      "allow_external_processing": false,
+      "timeout_seconds": 120,
+      "retry_count": 2,
+      "chunk_size": 16000,
+      "langextract_max_document_chars": 160000
+    },
+    "langextract_config": {
+      "prompt_description": "Extract the vendor name and invoice total exactly as they appear in the document. Keep extractions grounded to verbatim spans.",
+      "examples": [
+        {
+          "text": "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00",
+          "extractions": [
+            {
+              "extraction_class": "vendor_name",
+              "extraction_text": "Acme Corp",
+              "attributes": {
+                "value": "Acme Corp"
+              }
+            },
+            {
+              "extraction_class": "total_amount",
+              "extraction_text": "$1,200.00",
+              "attributes": {
+                "currency": "USD"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "extracted_fields": [
+      {
+        "name": "vendor_name",
+        "label": "Vendor Name",
+        "description": "Vendor listed on the invoice.",
+        "type": "text",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false
+        }
+      },
+      {
+        "name": "total_amount",
+        "label": "Total Amount",
+        "description": "Invoice total.",
+        "type": "currency",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false,
+          "currency": "USD"
+        }
+      }
+    ],
+    "calculated_fields": [
+      {
+        "name": "amount_with_buffer",
+        "label": "Amount With Buffer",
+        "description": "Ten percent buffer on invoice total.",
+        "type": "calculated",
+        "output_type": "currency",
+        "formula": "coalesce(total_amount.amount, 0) * 1.10",
+        "depends_on": ["total_amount"],
+        "validation": {
+          "allow_null": false,
+          "min": 0
+        }
+      }
+    ],
+    "output_settings": {
+      "export_formats": ["json"]
+    }
+  },
+  "expected_fields": {
+    "vendor_name": {
+      "extracted_value": "Acme Corp",
+      "normalized_value": {
+        "value": "Acme Corp"
+      },
+      "requires_review": false
+    },
+    "total_amount": {
+      "extracted_value": "$1,200.00",
+      "normalized_value": {
+        "amount": 1200.0,
+        "currency": "USD",
+        "display_value": "$1,200.00"
+      },
+      "requires_review": false
+    }
+  },
+  "expected_calculated_fields": {
+    "amount_with_buffer": {
+      "normalized_value": {
+        "amount": 1320.0,
+        "currency": "USD"
+      },
+      "requires_review": false
+    }
+  },
+  "expected_review_flags": [],
+  "expected_document_level_note_substrings": []
+}

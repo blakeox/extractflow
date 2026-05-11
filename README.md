@@ -123,11 +123,14 @@ Run individual slices:
 make test-python
 make test-ui
 make test-e2e
+make eval-langextract
 PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m ruff check backend worker shared tests
 npm --prefix frontend run lint
 npm run format:check
 PYTHONPATH=backend:shared python3 -m pytest tests/backend -k templates
 ```
+
+- `make eval-langextract` runs the committed LangExtract golden-set cases in `evals/langextract/cases/`; it is intentionally opt-in because it evaluates live extraction quality against a local LangExtract/Ollama runtime instead of deterministic unit behavior.
 
 Continuous enforcement:
 
@@ -168,6 +171,28 @@ Failure-path expectations:
 - provider probes surface transport failures as `status: error` with the timeout or connection detail preserved
 - worker provider adapters retry up to `retry_count + 1` total attempts before failing the extraction
 - worker jobs move to `failed` with `error_message` populated when the document/template is missing or extraction raises at runtime
+- LangExtract uses `chunk_size` as its internal grounded window size, but `langextract_max_document_chars` is the separate safety ceiling for total document length; runs over that limit fail fast with an explicit error instead of truncating grounded evidence
+
+## LangExtract Eval Harness
+
+The repository now includes a small LangExtract golden-set harness under `evals/langextract/cases/`.
+
+- Each case stores parsed `document_text`, a full template definition, and expected extracted/calculated outputs plus review flags and note substrings.
+- Matching is tolerant for common LLM variance: strings are whitespace/case normalized, numeric values allow a small tolerance, and expected dict keys are matched without failing on extra actual keys.
+- The harness evaluates the extraction and reconciliation pipeline on parsed text, not parser fidelity for PDFs or DOCX files.
+
+Run it with:
+
+```bash
+make eval-langextract
+```
+
+or point it at a specific case or directory:
+
+```bash
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+"$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases
+```
 
 ## Provider Configuration
 
@@ -202,9 +227,15 @@ Readiness and control surfaces:
 - `/api/settings/providers/health` reports whether each provider is actually ready based on required endpoint and env configuration
 - `/api/settings/providers/controls` returns app-level provider controls including the custom-profile reverification threshold
 - the Settings page now includes a custom provider form for private OpenAI-compatible and Azure endpoints, with save and probe actions
+- extraction jobs use the selected schema version by default, but when a provider has been explicitly saved in Settings it is sent as a per-job provider override so the active default matches the queued run
 - saved custom provider profiles move between `Saved`, `Verified`, and `Stale` based on the configured `CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS` window
 - Azure readiness requires `base_url`, `deployment`, `api_version`, and `AZURE_OPENAI_API_KEY`
-- `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples and probes Ollama through `/api/tags`
+- `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples, now authored through a guided schema editor with a live saved-payload preview instead of raw example JSON, and verifies Ollama by issuing a minimal `/api/generate` request for the configured model before queueing
+- LangExtract preserves global grounded offsets by using its own internal windowing with `chunk_size`; this repo separately caps total LangExtract input with `langextract_max_document_chars` so very large documents fail explicitly instead of silently truncating or running unbounded
+- LangExtract examples must reference real extracted field keys from the schema; unknown example field names are rejected in both the UI and API so supervised examples cannot drift away from the extraction contract
+- LangExtract examples must also cover every field the schema marks as required, and the schema editor now shows required-field example coverage before save
+- Reviewed LangExtract runs now surface grounded candidate examples back into the schema editor; operators must explicitly add them to the draft and save a new schema version before they affect future runs
+- The LangExtract schema editor now explains when reviewed runs were skipped for feedback reuse, including missing parsed text and drifted grounded spans, instead of collapsing those cases into a silent empty state
 
 Example custom provider catalog entry:
 
