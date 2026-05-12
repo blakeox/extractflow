@@ -1,0 +1,128 @@
+{
+  "name": "receipt-basic",
+  "description": "Receipt-oriented LangExtract eval for merchant, purchase date, and total amount extraction.",
+  "tags": ["receipt", "grounded"],
+  "document_text": "Merchant: Harbor Supply\nPurchase Date: 2026-02-14\nTotal Paid: $87.43",
+  "template_definition": {
+    "template_name": "Receipt Extraction Eval",
+    "template_version": "1.0.0",
+    "document_type": "receipt",
+    "description": "Receipt LangExtract eval case.",
+    "llm_provider_settings": {
+      "mode": "local",
+      "provider_type": "langextract",
+      "provider_label": "LangExtract (Ollama)",
+      "api_style": "langextract",
+      "base_url": "http://host.docker.internal:11434/v1",
+      "model": "qwen3.5:27b",
+      "temperature": 0.0,
+      "max_tokens": 4000,
+      "supports_json_mode": false,
+      "allow_external_processing": false,
+      "timeout_seconds": 120,
+      "retry_count": 2,
+      "chunk_size": 16000,
+      "langextract_max_document_chars": 160000
+    },
+    "langextract_config": {
+      "prompt_description": "Extract the merchant, purchase date, and total paid exactly as written. Keep every extraction grounded to the receipt text.",
+      "examples": [
+        {
+          "text": "Merchant: Harbor Supply\nPurchase Date: 2026-02-14\nTotal Paid: $87.43",
+          "extractions": [
+            {
+              "extraction_class": "merchant_name",
+              "extraction_text": "Harbor Supply",
+              "attributes": {
+                "value": "Harbor Supply"
+              }
+            },
+            {
+              "extraction_class": "purchase_date",
+              "extraction_text": "2026-02-14",
+              "attributes": {
+                "value": "2026-02-14"
+              }
+            },
+            {
+              "extraction_class": "total_paid",
+              "extraction_text": "$87.43",
+              "attributes": {
+                "currency": "USD"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "extracted_fields": [
+      {
+        "name": "merchant_name",
+        "label": "Merchant Name",
+        "description": "Merchant printed on the receipt.",
+        "type": "text",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false
+        }
+      },
+      {
+        "name": "purchase_date",
+        "label": "Purchase Date",
+        "description": "Date printed on the receipt.",
+        "type": "date",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false
+        }
+      },
+      {
+        "name": "total_paid",
+        "label": "Total Paid",
+        "description": "Receipt total.",
+        "type": "currency",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false,
+          "currency": "USD"
+        }
+      }
+    ],
+    "calculated_fields": [],
+    "output_settings": {
+      "export_formats": ["json"]
+    }
+  },
+  "expected_fields": {
+    "merchant_name": {
+      "extracted_value": "Harbor Supply",
+      "normalized_value": {
+        "value": "Harbor Supply"
+      },
+      "requires_review": false
+    },
+    "purchase_date": {
+      "extracted_value": "2026-02-14",
+      "normalized_value": {
+        "value": "2026-02-14",
+        "display_value": "2026-02-14"
+      },
+      "requires_review": false
+    },
+    "total_paid": {
+      "extracted_value": "$87.43",
+      "normalized_value": {
+        "amount": 87.43,
+        "currency": "USD",
+        "display_value": "$87.43"
+      },
+      "requires_review": false
+    }
+  },
+  "expected_calculated_fields": {},
+  "expected_review_flags": [],
+  "expected_document_level_note_substrings": []
+}

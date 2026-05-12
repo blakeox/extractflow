@@ -165,6 +165,8 @@ Observability surfaces:
 - backend responses include `X-Request-ID`; inbound request IDs are propagated when present, otherwise the API generates one
 - backend logs emit structured request events with method, path, status, duration, and request ID
 - worker logs emit structured lifecycle events for startup and non-idle job status transitions with job identifiers when available
+- LangExtract feedback generation now emits structured diagnostics with reviewed-result counts, generated suggestion counts, and skip reasons
+- LangExtract worker runs now emit structured extraction outcome summaries plus explicit oversized-document rejection events
 
 Failure-path expectations:
 
@@ -180,6 +182,7 @@ The repository now includes a small LangExtract golden-set harness under `evals/
 - Each case stores parsed `document_text`, a full template definition, and expected extracted/calculated outputs plus review flags and note substrings.
 - Matching is tolerant for common LLM variance: strings are whitespace/case normalized, numeric values allow a small tolerance, and expected dict keys are matched without failing on extra actual keys.
 - The harness evaluates the extraction and reconciliation pipeline on parsed text, not parser fidelity for PDFs or DOCX files.
+- The committed starter set now covers invoice, invoice-variant, lease, receipt, and statement-style grounded extraction flows so regressions are easier to spot across document families and label variants.
 
 Run it with:
 
@@ -193,6 +196,20 @@ or point it at a specific case or directory:
 PYTHON_BIN="$(./scripts/resolve-python.sh)"
 "$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases
 ```
+
+## LangExtract Observability Summary
+
+If you are collecting structured backend/worker logs locally, you can turn the committed LangExtract events into a quick JSON summary with:
+
+```bash
+python3 ./scripts/summarize-langextract-observability.py /path/to/logfile.jsonl
+```
+
+The summary rolls up:
+
+- `langextract_document_rejected` counts and rejection reasons
+- `langextract_extraction_completed` totals for review-required fields, note counts, and review-signal categories
+- `langextract_feedback_suggestions_built` totals for generated/dismissed suggestions and skip reasons
 
 ## Provider Configuration
 

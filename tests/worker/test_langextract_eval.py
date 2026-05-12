@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from app.services.langextract_eval import (
     LangExtractEvalCase,
@@ -155,3 +156,13 @@ def test_run_eval_case_reports_missing_fields_and_review_flag_mismatches(monkeyp
     assert any(mismatch.category == "field" for mismatch in result.mismatches)
     assert any(mismatch.category == "review_flags" for mismatch in result.mismatches)
     assert "FAIL missing-field" in summary
+
+
+def test_repository_eval_cases_validate_and_use_unique_names() -> None:
+    cases_dir = Path(__file__).resolve().parents[2] / "evals" / "langextract" / "cases"
+
+    cases = load_eval_cases(cases_dir)
+
+    assert len(cases) >= 5
+    assert len({case.name for case in cases}) == len(cases)
+    assert all(case.source_path and case.source_path.endswith(".json") for case in cases)
