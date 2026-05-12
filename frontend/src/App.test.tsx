@@ -210,6 +210,11 @@ describe("App", () => {
       target: { value: "Extract contract parties exactly as written." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("LangExtract example 2 source text"),
+      ).toHaveFocus();
+    });
     fireEvent.change(
       screen.getByLabelText("LangExtract example 2 source text"),
       {
@@ -231,9 +236,14 @@ describe("App", () => {
     const exampleTwoSection = screen.getByTestId("langextract-example-2");
     fireEvent.click(
       within(exampleTwoSection).getByRole("button", {
-        name: "Add attribute",
+        name: /Add attribute to extraction 1 in example 2/,
       }),
     );
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("Example 2 extraction 1 attribute 1 name"),
+      ).toHaveFocus();
+    });
     fireEvent.change(
       screen.getByLabelText("Example 2 extraction 1 attribute 1 name"),
       {
@@ -505,11 +515,19 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
     const dismissButtons = await screen.findAllByRole("button", {
-      name: "Dismiss",
+      name: /Dismiss suggestion/,
     });
     fireEvent.click(dismissButtons[0]);
 
     await screen.findByText("Dismissed reviewed LangExtract suggestion.");
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole("button", { name: /Dismiss suggestion/ }),
+      ).toHaveLength(1);
+      expect(
+        screen.getByRole("button", { name: "Dismiss suggestion 1" }),
+      ).toHaveFocus();
+    });
     firstRender.unmount();
 
     render(<App />);
@@ -520,12 +538,22 @@ describe("App", () => {
     expect(
       await screen.findByText("1 reviewed suggestion"),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Best practice: applied suggestions stay draft-only until you save a new schema version.",
+      ),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", {
         name: "Add all to draft",
       }),
     );
+    expect(
+      await screen.findByText(
+        "Added 1 reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it.",
+      ),
+    ).toBeInTheDocument();
 
     const addedExample = await screen.findByLabelText(
       "LangExtract example 2 source text",
@@ -537,7 +565,7 @@ describe("App", () => {
       screen.queryByLabelText("LangExtract example 3 source text"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Added to draft" }),
+      screen.getByRole("button", { name: /already in the draft/ }),
     ).toBeDisabled();
   });
 
@@ -714,7 +742,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
     expect(
-      await screen.findByRole("button", { name: "Added to draft" }),
+      await screen.findByRole("button", { name: /already in the draft/ }),
     ).toBeDisabled();
     expect(
       screen.queryByRole("button", { name: "Add all to draft" }),
@@ -900,8 +928,15 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Add to draft" }),
+      await screen.findByRole("button", {
+        name: /Add suggestion \d+ to the draft/,
+      }),
     );
+    expect(
+      await screen.findByText(
+        "Added reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it.",
+      ),
+    ).toBeInTheDocument();
     fireEvent.change(
       await screen.findByLabelText("LangExtract example 2 source text"),
       {
@@ -913,7 +948,7 @@ describe("App", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Added to draft" }),
+      screen.getByRole("button", { name: /already in the draft/ }),
     ).toBeDisabled();
   });
 
@@ -1188,7 +1223,7 @@ describe("App", () => {
     const exampleTwoSection = screen.getByTestId("langextract-example-2");
     fireEvent.click(
       within(exampleTwoSection).getByRole("button", {
-        name: "Add attribute",
+        name: /Add attribute to extraction 1 in example 2/,
       }),
     );
     fireEvent.change(
@@ -1324,7 +1359,7 @@ describe("App", () => {
     const exampleTwoSection = screen.getByTestId("langextract-example-2");
     fireEvent.click(
       within(exampleTwoSection).getByRole("button", {
-        name: "Add attribute",
+        name: /Add attribute to extraction 1 in example 2/,
       }),
     );
     fireEvent.change(
@@ -1349,6 +1384,134 @@ describe("App", () => {
       '"text": "Parties: Acme Corp and River Bank"',
     );
     expect(preview).toHaveTextContent('"extraction_class": "primary_subject"');
+  });
+
+  it("keeps focus on the next sensible LangExtract editor control after structural edits", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "langextract",
+              provider_label: "LangExtract (Ollama)",
+              api_style: "langextract",
+              base_url: "http://host.docker.internal:11434/v1",
+              model: "qwen3.5:27b",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: false,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/settings/providers/controls")) {
+          return Promise.resolve(
+            jsonResponse({ custom_provider_probe_max_age_hours: 24 }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+
+    await screen.findByLabelText("LangExtract prompt");
+    fireEvent.click(screen.getByRole("button", { name: "Add example" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("LangExtract example 2 source text"),
+      ).toHaveFocus();
+    });
+
+    const exampleTwoSection = screen.getByTestId("langextract-example-2");
+    fireEvent.click(
+      within(exampleTwoSection).getByRole("button", {
+        name: /Add extraction to example 2/,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("Example 2 extraction 2 field name"),
+      ).toHaveFocus();
+    });
+
+    const exampleTwoExtractionTwo = screen.getByTestId(
+      "langextract-example-2-extraction-2",
+    );
+    fireEvent.click(
+      within(exampleTwoExtractionTwo).getByRole("button", {
+        name: /Add attribute to extraction 2 in example 2/,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("Example 2 extraction 2 attribute 1 name"),
+      ).toHaveFocus();
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Remove attribute 1 from extraction 2 in example 2/,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        within(exampleTwoExtractionTwo).getByRole("button", {
+          name: /Add attribute to extraction 2 in example 2/,
+        }),
+      ).toHaveFocus();
+    });
+
+    fireEvent.click(
+      within(exampleTwoSection).getByRole("button", {
+        name: "Remove example 2",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText("LangExtract example 1 source text"),
+      ).toHaveFocus();
+    });
   });
 
   it("shows a targeted error when a LangExtract example is missing source text", async () => {

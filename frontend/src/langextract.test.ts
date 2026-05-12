@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDraftLangExtractExampleFromSuggestion,
   buildDraftLangExtractExamples,
+  getLangExtractDraftGuidance,
   buildLangExtractExamples,
   buildLangExtractPreview,
   doesDraftLangExtractExampleMatchSuggestion,
@@ -213,5 +214,67 @@ describe("langextract helpers", () => {
     expect(preview.error).toContain(
       "Missing example coverage for: total_amount.",
     );
+  });
+
+  it("surfaces guidance for weak drafts", () => {
+    const guidance = getLangExtractDraftGuidance({
+      langextract_prompt_description: "",
+      langextract_examples: [
+        {
+          text: "",
+          extractions: [
+            { extraction_class: "", extraction_text: "", attributes: [] },
+          ],
+        },
+      ],
+    });
+
+    expect(guidance.isReady).toBe(false);
+    expect(guidance.messages).toContain(
+      "Add a prompt that names the target facts, grounding expectations, and when ambiguous matches should stay review-required.",
+    );
+    expect(guidance.messages).toContain(
+      "Finish at least one complete grounded example before saving this draft.",
+    );
+  });
+
+  it("reports ready guidance when prompt and examples are complete", () => {
+    const guidance = getLangExtractDraftGuidance(
+      {
+        langextract_prompt_description:
+          "Extract contract parties exactly as written, keep grounded spans verbatim, and leave ambiguous matches review-required instead of guessing.",
+        langextract_examples: [
+          {
+            text: "Parties: Acme Corp and River Bank",
+            extractions: [
+              {
+                extraction_class: "primary_subject",
+                extraction_text: "Acme Corp",
+                attributes: [],
+              },
+            ],
+          },
+          {
+            text: "Borrower: Pine Street LLC",
+            extractions: [
+              {
+                extraction_class: "primary_subject",
+                extraction_text: "Pine Street LLC",
+                attributes: [],
+              },
+            ],
+          },
+        ],
+      },
+      ["primary_subject"],
+      ["primary_subject"],
+    );
+
+    expect(guidance).toEqual({
+      isReady: true,
+      messages: [
+        "This draft has a usable prompt, multiple complete examples, and required field coverage. Next, vary layouts and phrasing before shipping.",
+      ],
+    });
   });
 });

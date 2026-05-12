@@ -55,6 +55,11 @@ type ComparableLangExtractExample = {
   extractions: ComparableLangExtractExtraction[];
 };
 
+export type LangExtractDraftGuidance = {
+  isReady: boolean;
+  messages: string[];
+};
+
 export function createEmptyLangExtractAttribute(): DraftLangExtractAttribute {
   return {
     key: "",
@@ -309,6 +314,100 @@ export function getLangExtractFieldCoverage(
     missingRequiredFields: requiredFields.filter(
       (fieldName) => !coveredFieldSet.has(fieldName),
     ),
+  };
+}
+
+function isDraftAttributeComplete(
+  attribute: DraftLangExtractAttribute,
+): boolean {
+  if (!attribute.key.trim()) {
+    return false;
+  }
+  if (attribute.value_kind === "string_array") {
+    return attribute.value.split("\n").some((value) => value.trim());
+  }
+  return Boolean(attribute.value.trim());
+}
+
+function isDraftExtractionComplete(
+  extraction: DraftLangExtractExtraction,
+): boolean {
+  return (
+    Boolean(extraction.extraction_class.trim()) &&
+    Boolean(extraction.extraction_text.trim()) &&
+    extraction.attributes.every(isDraftAttributeComplete)
+  );
+}
+
+function isDraftExampleComplete(example: DraftLangExtractExample): boolean {
+  return (
+    Boolean(example.text.trim()) &&
+    example.extractions.length > 0 &&
+    example.extractions.every(isDraftExtractionComplete)
+  );
+}
+
+export function getLangExtractDraftGuidance(
+  draft: LangExtractDraftShape,
+  validFieldNames: string[] = [],
+  requiredFieldNames: string[] = [],
+): LangExtractDraftGuidance {
+  const promptDescription = draft.langextract_prompt_description.trim();
+  const completeExamples = draft.langextract_examples.filter(
+    isDraftExampleComplete,
+  );
+  const incompleteExampleCount =
+    draft.langextract_examples.length - completeExamples.length;
+  const coverage = getLangExtractFieldCoverage(
+    completeExamples,
+    validFieldNames,
+    requiredFieldNames,
+  );
+  const messages: string[] = [];
+
+  if (!promptDescription) {
+    messages.push(
+      "Add a prompt that names the target facts, grounding expectations, and when ambiguous matches should stay review-required.",
+    );
+  } else if (promptDescription.length < 80) {
+    messages.push(
+      "Strengthen the prompt with edge cases or review guidance so the extraction rules are more specific than the field labels alone.",
+    );
+  }
+
+  if (!completeExamples.length) {
+    messages.push(
+      "Finish at least one complete grounded example before saving this draft.",
+    );
+  } else if (completeExamples.length === 1) {
+    messages.push(
+      "Add a second complete example with different wording or layout so LangExtract does not overfit a single document pattern.",
+    );
+  }
+
+  if (incompleteExampleCount > 0) {
+    messages.push(
+      `${incompleteExampleCount} example draft${incompleteExampleCount === 1 ? "" : "s"} still need complete source text, field names, spans, or attribute values.`,
+    );
+  }
+
+  if (coverage.missingRequiredFields.length) {
+    messages.push(
+      `Cover the remaining required fields in complete examples: ${coverage.missingRequiredFields.join(
+        ", ",
+      )}.`,
+    );
+  }
+
+  if (!messages.length) {
+    messages.push(
+      "This draft has a usable prompt, multiple complete examples, and required field coverage. Next, vary layouts and phrasing before shipping.",
+    );
+  }
+
+  return {
+    isReady: messages.length === 1,
+    messages,
   };
 }
 

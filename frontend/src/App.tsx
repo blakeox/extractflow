@@ -1205,11 +1205,19 @@ function PageHeader({
   );
 }
 
-function CardHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function CardHeader({
+  title,
+  subtitle,
+  titleId,
+}: {
+  title: string;
+  subtitle?: string;
+  titleId?: string;
+}) {
   return (
     <div className="card-header">
       <div className="card-header-copy">
-        <h2>{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {subtitle ? <p>{subtitle}</p> : null}
       </div>
     </div>
@@ -1663,8 +1671,12 @@ function SchemaPage({
       </section>
 
       <div className="detail-grid">
-        <section className="surface span-12 schema-selector-surface">
+        <section
+          className="surface span-12 schema-selector-surface"
+          aria-labelledby="schema-base-step-title"
+        >
           <CardHeader
+            titleId="schema-base-step-title"
             title="1. Start from the closest existing schema"
             subtitle="Most operators should begin from a reusable schema and only change the brief when the job truly differs."
           />
@@ -1735,8 +1747,12 @@ function SchemaPage({
           </div>
         </section>
 
-        <section className="surface span-7">
+        <section
+          className="surface span-7"
+          aria-labelledby="schema-brief-step-title"
+        >
           <CardHeader
+            titleId="schema-brief-step-title"
             title="2. Describe the extraction brief"
             subtitle="Tell the system what class of document this is and what information the run is meant to find."
           />
@@ -1830,10 +1846,14 @@ function SchemaPage({
         </section>
 
         {showLangExtractEditor ? (
-          <section className="surface span-7">
+          <section
+            className="surface span-7"
+            aria-labelledby="langextract-step-title"
+          >
             <CardHeader
+              titleId="langextract-step-title"
               title="3. Train LangExtract"
-              subtitle="Author grounded examples first, then fold reviewed suggestions back into the schema when they are strong enough to keep."
+              subtitle="Author grounded examples first, then fold reviewed suggestions back into the schema when they are strong enough to keep. Applied suggestions stay draft-only until you save a new schema version."
             />
             <LangExtractEditor
               draft={draft}
@@ -1856,14 +1876,17 @@ function SchemaPage({
           </section>
         ) : null}
 
-        <section className="surface span-5">
+        <section className="surface span-5" aria-labelledby="setup-map-title">
           <CardHeader
+            titleId="setup-map-title"
             title="Setup map"
             subtitle="Keep the configuration sequence obvious so the user always knows what comes next."
           />
-          <div className="schema-step-list">
-            <div className="schema-step-card active">
-              <span className="schema-step-number">1</span>
+          <ol className="schema-step-list">
+            <li className="schema-step-card active" aria-current="step">
+              <span className="schema-step-number" aria-hidden="true">
+                1
+              </span>
               <div>
                 <strong>Choose a schema base</strong>
                 <p>
@@ -1871,9 +1894,11 @@ function SchemaPage({
                   one.
                 </p>
               </div>
-            </div>
-            <div className="schema-step-card active">
-              <span className="schema-step-number">2</span>
+            </li>
+            <li className="schema-step-card active" aria-current="step">
+              <span className="schema-step-number" aria-hidden="true">
+                2
+              </span>
               <div>
                 <strong>Describe the extraction goal</strong>
                 <p>
@@ -1881,10 +1906,12 @@ function SchemaPage({
                   terms.
                 </p>
               </div>
-            </div>
+            </li>
             {showLangExtractEditor ? (
-              <div className="schema-step-card active">
-                <span className="schema-step-number">3</span>
+              <li className="schema-step-card active" aria-current="step">
+                <span className="schema-step-number" aria-hidden="true">
+                  3
+                </span>
                 <div>
                   <strong>Train LangExtract with examples</strong>
                   <p>
@@ -1892,10 +1919,10 @@ function SchemaPage({
                     on reviewed feedback.
                   </p>
                 </div>
-              </div>
+              </li>
             ) : null}
-            <div className="schema-step-card">
-              <span className="schema-step-number">
+            <li className="schema-step-card">
+              <span className="schema-step-number" aria-hidden="true">
                 {searchParametersStepNumber}
               </span>
               <div>
@@ -1905,9 +1932,9 @@ function SchemaPage({
                   types.
                 </p>
               </div>
-            </div>
-            <div className="schema-step-card">
-              <span className="schema-step-number">
+            </li>
+            <li className="schema-step-card">
+              <span className="schema-step-number" aria-hidden="true">
                 {outputRulesStepNumber}
               </span>
               <div>
@@ -1917,8 +1944,8 @@ function SchemaPage({
                   workflow.
                 </p>
               </div>
-            </div>
-          </div>
+            </li>
+          </ol>
 
           <div className="summary-grid top-gap">
             <SummaryStat
@@ -1945,8 +1972,12 @@ function SchemaPage({
           </div>
         </section>
 
-        <section className="surface span-7">
+        <section
+          className="surface span-7"
+          aria-labelledby="search-parameters-step-title"
+        >
           <CardHeader
+            titleId="search-parameters-step-title"
             title={`${searchParametersStepNumber}. Review the search parameters`}
             subtitle="This is the actual search contract the extraction run will follow."
           />
@@ -2006,8 +2037,12 @@ function SchemaPage({
           </div>
         </section>
 
-        <section className="surface span-5">
+        <section
+          className="surface span-5"
+          aria-labelledby="output-rules-step-title"
+        >
           <CardHeader
+            titleId="output-rules-step-title"
             title={`${outputRulesStepNumber}. Review output and trust rules`}
             subtitle="Keep deterministic logic and export behavior visible before the schema is saved."
           />
@@ -4286,7 +4321,8 @@ export function App() {
     );
     setBanner({
       tone: "success",
-      message: "Added reviewed LangExtract example to the draft schema.",
+      message:
+        "Added reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it.",
     });
   }
 
@@ -4318,8 +4354,8 @@ export function App() {
       tone: "success",
       message:
         pendingSuggestions.length === 1
-          ? "Added 1 reviewed LangExtract example to the draft schema."
-          : `Added ${pendingSuggestions.length} reviewed LangExtract examples to the draft schema.`,
+          ? "Added 1 reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it."
+          : `Added ${pendingSuggestions.length} reviewed LangExtract examples to the draft schema. Save a new schema version before future runs use them.`,
     });
   }
 

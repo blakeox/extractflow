@@ -1,10 +1,11 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import {
   buildLangExtractPreview,
   createEmptyLangExtractAttribute,
   createEmptyLangExtractExample,
   createEmptyLangExtractExtraction,
+  getLangExtractDraftGuidance,
   getLangExtractFieldCoverage,
   type DraftLangExtractAttribute,
   type DraftLangExtractExample,
@@ -61,6 +62,34 @@ type LangExtractEditorProps<T extends LangExtractDraftState> = {
   onDismissSuggestion: (suggestionKey: string) => Promise<void> | void;
 };
 
+type FocusTarget =
+  | { kind: "example-source"; exampleIndex: number }
+  | { kind: "extraction-field"; exampleIndex: number; extractionIndex: number }
+  | {
+      kind: "attribute-name";
+      exampleIndex: number;
+      extractionIndex: number;
+      attributeIndex: number;
+    }
+  | { kind: "add-attribute"; exampleIndex: number; extractionIndex: number }
+  | {
+      kind: "feedback-dismiss";
+      suggestionPosition: number;
+      expectedVisibleCount: number;
+    };
+
+function focusByDataId(dataFocusId: string) {
+  const target = document.querySelector<HTMLElement>(
+    `[data-focus-id="${dataFocusId}"]`,
+  );
+  if (!target) {
+    return false;
+  }
+
+  target.focus();
+  return true;
+}
+
 export function LangExtractEditor<T extends LangExtractDraftState>({
   draft,
   setDraft,
@@ -75,6 +104,13 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
   onApplyAllSuggestions,
   onDismissSuggestion,
 }: LangExtractEditorProps<T>) {
+  const introHeadingId = "langextract-training-heading";
+  const promptHeadingId = "langextract-prompt-heading";
+  const coverageHeadingId = "langextract-coverage-heading";
+  const guidanceHeadingId = "langextract-guidance-heading";
+  const examplesHeadingId = "langextract-examples-heading";
+  const feedbackHeadingId = "langextract-feedback-heading";
+  const previewHeadingId = "langextract-preview-heading";
   const preview = buildLangExtractPreview(
     draft,
     validFieldNames,
@@ -85,6 +121,11 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
     validFieldNames,
     requiredFieldNames,
   );
+  const qualityGuidance = getLangExtractDraftGuidance(
+    draft,
+    validFieldNames,
+    requiredFieldNames,
+  );
   const visibleSuggestions = feedbackSuggestions.filter(
     (suggestion) => !dismissedSuggestionKeys.includes(suggestion.key),
   );
@@ -92,6 +133,7 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
     (suggestion) => !appliedSuggestionKeys.includes(suggestion.key),
   );
   const hasExamples = draft.langextract_examples.length > 0;
+  const [pendingFocus, setPendingFocus] = useState<FocusTarget | null>(null);
   const feedbackIssues = [
     {
       count: feedbackDiagnostics.skipped_missing_document_text,
@@ -128,6 +170,55 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
         "reviewed edits skipped because the context window did not contain reusable grounded extractions",
     },
   ].filter((issue) => issue.count > 0);
+
+  useEffect(() => {
+    if (!pendingFocus) {
+      return;
+    }
+
+    let focused = false;
+
+    switch (pendingFocus.kind) {
+      case "example-source":
+        focused = focusByDataId(
+          `langextract-example-${pendingFocus.exampleIndex + 1}-source`,
+        );
+        break;
+      case "extraction-field":
+        focused = focusByDataId(
+          `langextract-example-${pendingFocus.exampleIndex + 1}-extraction-${pendingFocus.extractionIndex + 1}-field`,
+        );
+        break;
+      case "attribute-name":
+        focused = focusByDataId(
+          `langextract-example-${pendingFocus.exampleIndex + 1}-extraction-${pendingFocus.extractionIndex + 1}-attribute-${pendingFocus.attributeIndex + 1}-name`,
+        );
+        break;
+      case "add-attribute":
+        focused = focusByDataId(
+          `langextract-example-${pendingFocus.exampleIndex + 1}-extraction-${pendingFocus.extractionIndex + 1}-add-attribute`,
+        );
+        break;
+      case "feedback-dismiss":
+        if (visibleSuggestions.length > pendingFocus.expectedVisibleCount) {
+          return;
+        }
+        focused =
+          focusByDataId(
+            `langextract-feedback-dismiss-${pendingFocus.suggestionPosition}`,
+          ) ||
+          focusByDataId(
+            `langextract-feedback-dismiss-${pendingFocus.suggestionPosition - 1}`,
+          ) ||
+          focusByDataId("langextract-feedback-add-all") ||
+          focusByDataId("langextract-feedback-heading");
+        break;
+    }
+
+    if (focused) {
+      setPendingFocus(null);
+    }
+  }, [draft.langextract_examples, pendingFocus, visibleSuggestions.length]);
 
   function updateExample(
     exampleIndex: number,
@@ -175,12 +266,15 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
 
   return (
     <div className="langextract-editor full-line">
-      <div className="langextract-editor-header">
+      <section
+        className="langextract-editor-header"
+        aria-labelledby={introHeadingId}
+      >
         <div className="langextract-editor-heading">
           <span className="metric-label">LangExtract training set</span>
-          <strong>
+          <h3 id={introHeadingId}>
             Author grounded examples before you trust reviewed reuse.
-          </strong>
+          </h3>
           <p className="langextract-editor-copy">
             Write the extraction prompt, ground it with document examples, then
             fold in reviewed suggestions only when they improve the draft.
@@ -196,22 +290,30 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
           <button
             type="button"
             className="secondary-button"
-            onClick={() =>
+            onClick={() => {
+              setPendingFocus({
+                kind: "example-source",
+                exampleIndex: draft.langextract_examples.length,
+              });
               setDraft((current) => ({
                 ...current,
                 langextract_examples: [
                   ...current.langextract_examples,
                   createEmptyLangExtractExample(),
                 ],
-              }))
-            }
+              }));
+            }}
           >
             Add example
           </button>
         </div>
-      </div>
+      </section>
 
-      <div className="langextract-panel langextract-prompt-card">
+      <section
+        className="langextract-panel langextract-prompt-card"
+        aria-labelledby={promptHeadingId}
+      >
+        <h3 id={promptHeadingId}>Prompt</h3>
         <label className="full-line">
           <span>LangExtract prompt</span>
           <textarea
@@ -226,17 +328,24 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
             }
           />
         </label>
-      </div>
+      </section>
 
       {requiredFieldNames.length ? (
-        <div className="langextract-panel langextract-coverage-card">
+        <section
+          className="langextract-panel langextract-coverage-card"
+          aria-labelledby={coverageHeadingId}
+        >
           <span className="metric-label">Required field coverage</span>
-          <strong>
+          <h3 id={coverageHeadingId}>
             {hasExamples
               ? `${coverage.coveredRequiredFields.length} of ${requiredFieldNames.length} required fields covered`
               : `Add examples to cover ${requiredFieldNames.length} required field${requiredFieldNames.length === 1 ? "" : "s"}`}
-          </strong>
-          <p className="langextract-editor-copy">
+          </h3>
+          <p
+            className="langextract-editor-copy"
+            role="status"
+            aria-live="polite"
+          >
             {hasExamples
               ? coverage.missingRequiredFields.length
                 ? `Missing required examples: ${coverage.missingRequiredFields.join(
@@ -245,13 +354,38 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                 : "Every required extracted field appears in at least one LangExtract example."
               : "Coverage updates as soon as grounded examples mention each required extracted field."}
           </p>
-        </div>
+        </section>
       ) : null}
 
-      <div className="langextract-section">
+      <section
+        className="langextract-panel langextract-guidance-card"
+        aria-labelledby={guidanceHeadingId}
+      >
+        <span className="metric-label">Draft quality guidance</span>
+        <h3 id={guidanceHeadingId}>
+          {qualityGuidance.isReady
+            ? "This draft is structurally ready."
+            : "Strengthen this draft before you trust it."}
+        </h3>
+        <p className="langextract-editor-copy">
+          These are authoring heuristics, not hard blockers. Use them to improve
+          prompt specificity and example variety before you lock a schema.
+        </p>
+        <ul className="schema-checklist">
+          {qualityGuidance.messages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      </section>
+
+      <section
+        className="langextract-section"
+        aria-labelledby={examplesHeadingId}
+      >
         <div className="langextract-section-header">
           <div>
             <span className="metric-label">Examples</span>
+            <h3 id={examplesHeadingId}>Grounded example set</h3>
             <p className="langextract-editor-copy">
               Show the document text, then mark the grounded spans LangExtract
               should return. This is a training set, not a JSON puzzle.
@@ -265,22 +399,33 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                 key={`langextract-example-${exampleIndex}`}
                 className="langextract-example-card"
                 data-testid={`langextract-example-${exampleIndex + 1}`}
+                aria-labelledby={`langextract-example-title-${exampleIndex + 1}`}
               >
                 <div className="builder-item-topline">
-                  <strong>Example {exampleIndex + 1}</strong>
+                  <h4 id={`langextract-example-title-${exampleIndex + 1}`}>
+                    Example {exampleIndex + 1}
+                  </h4>
                   <button
                     type="button"
                     className="ghost-button"
-                    onClick={() =>
+                    onClick={() => {
+                      setPendingFocus({
+                        kind: "example-source",
+                        exampleIndex:
+                          exampleIndex < draft.langextract_examples.length - 1
+                            ? exampleIndex
+                            : exampleIndex - 1,
+                      });
                       setDraft((current) => ({
                         ...current,
                         langextract_examples:
                           current.langextract_examples.filter(
                             (_, index) => index !== exampleIndex,
                           ),
-                      }))
-                    }
+                      }));
+                    }}
                     disabled={draft.langextract_examples.length === 1}
+                    aria-label={`Remove example ${exampleIndex + 1}`}
                   >
                     Remove example {exampleIndex + 1}
                   </button>
@@ -289,6 +434,7 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                   <span>Source text</span>
                   <textarea
                     aria-label={`LangExtract example ${exampleIndex + 1} source text`}
+                    data-focus-id={`langextract-example-${exampleIndex + 1}-source`}
                     rows={4}
                     value={example.text}
                     placeholder="Paste the relevant document excerpt exactly as it appears."
@@ -306,21 +452,36 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                       key={`langextract-example-${exampleIndex}-extraction-${extractionIndex}`}
                       className="langextract-extraction-block"
                       data-testid={`langextract-example-${exampleIndex + 1}-extraction-${extractionIndex + 1}`}
+                      role="group"
+                      aria-labelledby={`langextract-example-${exampleIndex + 1}-extraction-title-${extractionIndex + 1}`}
                     >
                       <div className="builder-item-topline">
-                        <strong>Extraction {extractionIndex + 1}</strong>
+                        <h5
+                          id={`langextract-example-${exampleIndex + 1}-extraction-title-${extractionIndex + 1}`}
+                        >
+                          Extraction {extractionIndex + 1}
+                        </h5>
                         <button
                           type="button"
                           className="ghost-button"
-                          onClick={() =>
+                          onClick={() => {
+                            setPendingFocus({
+                              kind: "extraction-field",
+                              exampleIndex,
+                              extractionIndex:
+                                extractionIndex < example.extractions.length - 1
+                                  ? extractionIndex
+                                  : extractionIndex - 1,
+                            });
                             updateExample(exampleIndex, (current) => ({
                               ...current,
                               extractions: current.extractions.filter(
                                 (_, index) => index !== extractionIndex,
                               ),
-                            }))
-                          }
+                            }));
+                          }}
                           disabled={example.extractions.length === 1}
+                          aria-label={`Remove extraction ${extractionIndex + 1} from example ${exampleIndex + 1}`}
                         >
                           Remove extraction {extractionIndex + 1}
                         </button>
@@ -330,6 +491,7 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                           <span>Field name</span>
                           <input
                             aria-label={`Example ${exampleIndex + 1} extraction ${extractionIndex + 1} field name`}
+                            data-focus-id={`langextract-example-${exampleIndex + 1}-extraction-${extractionIndex + 1}-field`}
                             value={extraction.extraction_class}
                             placeholder="primary_subject"
                             onChange={(event) =>
@@ -374,6 +536,7 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                 <span>Attribute</span>
                                 <input
                                   aria-label={`Example ${exampleIndex + 1} extraction ${extractionIndex + 1} attribute ${attributeIndex + 1} name`}
+                                  data-focus-id={`langextract-example-${exampleIndex + 1}-extraction-${extractionIndex + 1}-attribute-${attributeIndex + 1}-name`}
                                   value={attribute.key}
                                   placeholder="value"
                                   onChange={(event) =>
@@ -446,7 +609,25 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                               <button
                                 type="button"
                                 className="ghost-button"
-                                onClick={() =>
+                                onClick={() => {
+                                  setPendingFocus(
+                                    extraction.attributes.length > 1
+                                      ? {
+                                          kind: "attribute-name",
+                                          exampleIndex,
+                                          extractionIndex,
+                                          attributeIndex:
+                                            attributeIndex <
+                                            extraction.attributes.length - 1
+                                              ? attributeIndex
+                                              : attributeIndex - 1,
+                                        }
+                                      : {
+                                          kind: "add-attribute",
+                                          exampleIndex,
+                                          extractionIndex,
+                                        },
+                                  );
                                   updateExtraction(
                                     exampleIndex,
                                     extractionIndex,
@@ -456,8 +637,9 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                         (_, index) => index !== attributeIndex,
                                       ),
                                     }),
-                                  )
-                                }
+                                  );
+                                }}
+                                aria-label={`Remove attribute ${attributeIndex + 1} from extraction ${extractionIndex + 1} in example ${exampleIndex + 1}`}
                               >
                                 Remove attribute {attributeIndex + 1}
                               </button>
@@ -467,7 +649,13 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                         <button
                           type="button"
                           className="secondary-button"
-                          onClick={() =>
+                          onClick={() => {
+                            setPendingFocus({
+                              kind: "attribute-name",
+                              exampleIndex,
+                              extractionIndex,
+                              attributeIndex: extraction.attributes.length,
+                            });
                             updateExtraction(
                               exampleIndex,
                               extractionIndex,
@@ -478,8 +666,10 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                   createEmptyLangExtractAttribute(),
                                 ],
                               }),
-                            )
-                          }
+                            );
+                          }}
+                          aria-label={`Add attribute to extraction ${extractionIndex + 1} in example ${exampleIndex + 1}`}
+                          data-focus-id={`langextract-example-${exampleIndex + 1}-extraction-${extractionIndex + 1}-add-attribute`}
                         >
                           Add attribute
                         </button>
@@ -490,15 +680,21 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={() =>
+                  onClick={() => {
+                    setPendingFocus({
+                      kind: "extraction-field",
+                      exampleIndex,
+                      extractionIndex: example.extractions.length,
+                    });
                     updateExample(exampleIndex, (current) => ({
                       ...current,
                       extractions: [
                         ...current.extractions,
                         createEmptyLangExtractExtraction(),
                       ],
-                    }))
-                  }
+                    }));
+                  }}
+                  aria-label={`Add extraction to example ${exampleIndex + 1}`}
                 >
                   Add extraction
                 </button>
@@ -514,17 +710,31 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {feedbackStatus !== "idle" || visibleSuggestions.length ? (
-        <div className="langextract-section langextract-feedback-section">
+        <section
+          className="langextract-section langextract-feedback-section"
+          aria-labelledby={feedbackHeadingId}
+        >
           <div className="langextract-section-header">
             <div>
               <span className="metric-label">Reviewed run feedback</span>
+              <h3
+                id={feedbackHeadingId}
+                tabIndex={-1}
+                data-focus-id="langextract-feedback-heading"
+              >
+                Reviewed suggestion inbox
+              </h3>
               <p className="langextract-editor-copy">
                 These candidate examples came from grounded review edits. Keep
                 them secondary to the draft until they earn a place in the
                 training set.
+              </p>
+              <p className="langextract-editor-copy">
+                Best practice: applied suggestions stay draft-only until you
+                save a new schema version.
               </p>
             </div>
             <div className="langextract-feedback-actions">
@@ -537,7 +747,14 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={onApplyAllSuggestions}
+                  onClick={() => {
+                    setPendingFocus({
+                      kind: "example-source",
+                      exampleIndex: draft.langextract_examples.length,
+                    });
+                    onApplyAllSuggestions();
+                  }}
+                  data-focus-id="langextract-feedback-add-all"
                 >
                   Add all to draft
                 </button>
@@ -590,19 +807,19 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                     <div className="langextract-feedback-card-header">
                       <details className="langextract-feedback-disclosure">
                         <summary className="langextract-feedback-summary">
-                          <div>
+                          <span className="langextract-feedback-summary-copy">
                             <strong>Suggestion {index + 1}</strong>
-                            <p className="langextract-editor-copy">
+                            <span className="langextract-editor-copy">
                               Fields: {suggestion.source_field_names.join(", ")}
-                            </p>
-                          </div>
-                          <div className="langextract-feedback-summary-meta">
+                            </span>
+                          </span>
+                          <span className="langextract-feedback-summary-meta">
                             <span className="pill">
                               Seen in {suggestion.occurrence_count} reviewed run
                               {suggestion.occurrence_count === 1 ? "" : "s"}
                             </span>
-                            <span className="pill">Expand details</span>
-                          </div>
+                            <span className="pill">Details</span>
+                          </span>
                         </summary>
                         <div className="langextract-feedback-body">
                           <pre>
@@ -624,17 +841,36 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                         <button
                           type="button"
                           className="tertiary-button"
-                          onClick={() =>
-                            void onDismissSuggestion(suggestion.key)
-                          }
+                          onClick={() => {
+                            setPendingFocus({
+                              kind: "feedback-dismiss",
+                              suggestionPosition: index + 1,
+                              expectedVisibleCount:
+                                visibleSuggestions.length - 1,
+                            });
+                            void onDismissSuggestion(suggestion.key);
+                          }}
+                          aria-label={`Dismiss suggestion ${index + 1}`}
+                          data-focus-id={`langextract-feedback-dismiss-${index + 1}`}
                         >
                           Dismiss
                         </button>
                         <button
                           type="button"
                           className="secondary-button"
-                          onClick={() => onApplySuggestion(suggestion)}
+                          onClick={() => {
+                            setPendingFocus({
+                              kind: "example-source",
+                              exampleIndex: draft.langextract_examples.length,
+                            });
+                            onApplySuggestion(suggestion);
+                          }}
                           disabled={alreadyApplied}
+                          aria-label={
+                            alreadyApplied
+                              ? `Suggestion ${index + 1} is already in the draft`
+                              : `Add suggestion ${index + 1} to the draft`
+                          }
                         >
                           {alreadyApplied ? "Added to draft" : "Add to draft"}
                         </button>
@@ -660,12 +896,15 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
               </p>
             </div>
           ) : null}
-        </div>
+        </section>
       ) : null}
 
-      <div className="langextract-preview-card">
+      <section
+        className="langextract-preview-card"
+        aria-labelledby={previewHeadingId}
+      >
         <div className="builder-item-topline">
-          <strong>Saved payload preview</strong>
+          <h3 id={previewHeadingId}>Saved payload preview</h3>
           <span className="pill">langextract_config</span>
         </div>
         <p className="langextract-editor-copy">
@@ -677,12 +916,16 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
             <code>{preview.content}</code>
           </pre>
         ) : (
-          <p className="langextract-preview-empty">
+          <p
+            className="langextract-preview-empty"
+            role="status"
+            aria-live="polite"
+          >
             {preview.error ??
               "Add a prompt or at least one complete example to generate a preview."}
           </p>
         )}
-      </div>
+      </section>
     </div>
   );
 }
