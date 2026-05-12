@@ -8,6 +8,7 @@ from pathlib import Path
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.langextract_feedback import build_langextract_feedback_attributes
 from extraction_core.models import ExtractionFieldDefinition, ExtractionTemplate, ExtractionValidationSummary
+from extraction_core.observability import configure_logger, log_event
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -34,6 +35,7 @@ SKIP_SPAN_OVERRIDE = "span_override"
 SKIP_SPAN_MISMATCH = "span_mismatch"
 SKIP_EMPTY_CONTEXT = "empty_context"
 SKIP_NO_CONTEXTUAL_EXTRACTIONS = "no_contextual_extractions"
+logger = configure_logger("extractflow.backend.langextract_feedback")
 
 
 def list_langextract_feedback_suggestions(
@@ -112,7 +114,7 @@ def list_langextract_feedback_suggestions(
             item.key,
         ),
     )
-    return LangExtractFeedbackSuggestionListResponse(
+    response = LangExtractFeedbackSuggestionListResponse(
         suggestions=suggestions,
         diagnostics=LangExtractFeedbackDiagnosticsResponse(
             reviewed_result_count=len(result_rows),
@@ -129,6 +131,25 @@ def list_langextract_feedback_suggestions(
             skipped_no_contextual_extractions=skip_counts[SKIP_NO_CONTEXTUAL_EXTRACTIONS],
         ),
     )
+    log_event(
+        logger,
+        20,
+        "langextract_feedback_suggestions_built",
+        template_version_id=template_version.id,
+        reviewed_result_count=response.diagnostics.reviewed_result_count,
+        reviewed_edit_count=response.diagnostics.reviewed_edit_count,
+        generated_suggestion_count=response.diagnostics.generated_suggestion_count,
+        visible_suggestion_count=response.diagnostics.visible_suggestion_count,
+        dismissed_suggestion_count=response.diagnostics.dismissed_suggestion_count,
+        skipped_missing_document_text=response.diagnostics.skipped_missing_document_text,
+        skipped_missing_target_field=response.diagnostics.skipped_missing_target_field,
+        skipped_missing_grounding=response.diagnostics.skipped_missing_grounding,
+        skipped_span_override=response.diagnostics.skipped_span_override,
+        skipped_span_mismatch=response.diagnostics.skipped_span_mismatch,
+        skipped_empty_context=response.diagnostics.skipped_empty_context,
+        skipped_no_contextual_extractions=response.diagnostics.skipped_no_contextual_extractions,
+    )
+    return response
 
 
 def set_langextract_feedback_suggestion_dismissed(

@@ -19,10 +19,12 @@ from extraction_core.models import (
     LangExtractConfig,
     LLMProviderSettings,
 )
+from extraction_core.observability import configure_logger, log_event
 
 PAGE_MARKER_PATTERN = re.compile(r"\[Page (?P<page>\d+)\]")
 CURRENCY_PATTERN = re.compile(r"[-+]?\$?\s?(\d[\d,]*(?:\.\d{1,2})?)")
 NUMBER_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
+logger = configure_logger("extractflow.worker.provider")
 
 
 class ProviderAdapter(Protocol):
@@ -157,6 +159,16 @@ class LangExtractAdapter:
         if not template.langextract_config or not template.langextract_config.examples:
             raise ValueError("LangExtract provider requires template.langextract_config with at least one example.")
         if settings.langextract_max_document_chars is not None and len(text) > settings.langextract_max_document_chars:
+            log_event(
+                logger,
+                40,
+                "langextract_document_rejected",
+                reason="document_too_large",
+                document_chars=len(text),
+                max_document_chars=settings.langextract_max_document_chars,
+                model=settings.model,
+                provider_type=settings.provider_type,
+            )
             raise ValueError(
                 "LangExtract document length "
                 f"{len(text)} chars exceeds langextract_max_document_chars="

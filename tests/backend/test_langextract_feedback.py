@@ -201,6 +201,63 @@ def test_list_langextract_feedback_suggestions_dedupes_matching_review_examples(
     ]
 
 
+def test_list_langextract_feedback_suggestions_logs_diagnostics(monkeypatch) -> None:
+    parsed_text = "Invoice Vendor: Acme Corp\nTotal Due: $1,200.00\n"
+    parsed_path = Path(os.environ["PARSED_DIR"]) / "langextract-feedback-logging.txt"
+    parsed_path.write_text(parsed_text, encoding="utf-8")
+    vendor_start = parsed_text.index("Acme Corp")
+    vendor_end = vendor_start + len("Acme Corp")
+    amount_start = parsed_text.index("$1,200.00")
+    amount_end = amount_start + len("$1,200.00")
+    logged: list[dict] = []
+
+    monkeypatch.setattr(
+        "app.services.langextract_feedback.log_event",
+        lambda logger, level, event, **fields: logged.append({"event": event, **fields}),
+    )
+
+    with SessionLocal() as db:
+        version = _create_langextract_template_version(db)
+        payload = _build_result_payload(
+            document_id=1,
+            llm_provider=version.definition["llm_provider_settings"],
+            vendor_start=vendor_start,
+            vendor_end=vendor_end,
+            amount_start=amount_start,
+            amount_end=amount_end,
+        )
+        _create_result_with_review_edit(
+            db,
+            template_version_id=version.id,
+            parsed_text_path=str(parsed_path),
+            stored_path=str(parsed_path),
+            content_type="text/plain",
+            result_json=payload,
+        )
+
+        feedback = list_langextract_feedback_suggestions(db, version)
+
+    assert feedback.diagnostics.generated_suggestion_count == 1
+    assert logged == [
+        {
+            "event": "langextract_feedback_suggestions_built",
+            "template_version_id": version.id,
+            "reviewed_result_count": 1,
+            "reviewed_edit_count": 1,
+            "generated_suggestion_count": 1,
+            "visible_suggestion_count": 1,
+            "dismissed_suggestion_count": 0,
+            "skipped_missing_document_text": 0,
+            "skipped_missing_target_field": 0,
+            "skipped_missing_grounding": 0,
+            "skipped_span_override": 0,
+            "skipped_span_mismatch": 0,
+            "skipped_empty_context": 0,
+            "skipped_no_contextual_extractions": 0,
+        }
+    ]
+
+
 def test_list_langextract_feedback_suggestions_returns_empty_without_readable_document_text() -> None:
     with SessionLocal() as db:
         version = _create_langextract_template_version(db)

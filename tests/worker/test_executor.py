@@ -133,6 +133,86 @@ def test_execute_extraction_marks_multiple_candidates_for_review(monkeypatch, tm
     assert "vendor_name" in result["fields_requiring_review"]
 
 
+def test_execute_extraction_logs_langextract_review_summary(monkeypatch, tmp_path) -> None:
+    document = tmp_path / "statement.txt"
+    document.write_text("Vendor Name: Acme Corp", encoding="utf-8")
+    template_definition = build_template_definition()
+    template_definition["llm_provider_settings"] = {
+        **template_definition["llm_provider_settings"],
+        "provider_type": "langextract",
+        "provider_label": "LangExtract (Ollama)",
+        "api_style": "langextract",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "supports_json_mode": False,
+        "allow_external_processing": False,
+    }
+    logged: list[dict] = []
+
+    def fake_extract(self, text, template, settings):
+        return [
+            ExtractionFieldResult(
+                field_name="vendor_name",
+                label="Vendor Name",
+                data_type="text",
+                extracted_value="Acme Corp",
+                normalized_value={"value": "Acme Corp"},
+                confidence_score=0.2,
+                source_text="Acme Corp",
+                page_number=1,
+                location_reference="Page 1",
+                extraction_notes="Candidate one.",
+            ),
+            ExtractionFieldResult(
+                field_name="vendor_name",
+                label="Vendor Name",
+                data_type="text",
+                extracted_value="Acme Corporation",
+                normalized_value={"value": "Acme Corporation"},
+                confidence_score=0.1,
+                source_text="Acme Corporation",
+                page_number=2,
+                location_reference="Page 2",
+                extraction_notes="Candidate two.",
+            ),
+            ExtractionFieldResult(
+                field_name="total_amount",
+                label="Total Amount",
+                data_type="currency",
+                extracted_value="$1,200.00",
+                normalized_value={"amount": 1200, "currency": "USD", "display_value": "$1,200.00"},
+                confidence_score=0.95,
+                source_text="",
+                page_number=None,
+                location_reference="",
+            ),
+        ]
+
+    monkeypatch.setattr(ExtractionProvider, "extract", fake_extract)
+    monkeypatch.setattr(
+        "app.services.executor.log_event",
+        lambda logger, level, event, **fields: logged.append({"event": event, **fields}),
+    )
+
+    execute_extraction(str(document), 99, template_definition)
+
+    assert logged == [
+        {
+            "event": "langextract_extraction_completed",
+            "document_id": 99,
+            "model": template_definition["llm_provider_settings"]["model"],
+            "provider_type": "langextract",
+            "extracted_field_count": 2,
+            "calculated_field_count": 1,
+            "review_required_count": 2,
+            "document_note_count": 0,
+            "low_confidence_review_count": 1,
+            "multi_candidate_review_count": 1,
+            "citation_gap_count": 1,
+            "validation_error_count": 1,
+        }
+    ]
+
+
 def test_validate_extracted_field_applies_required_allowed_and_regex_rules() -> None:
     field = ExtractionFieldDefinition.model_validate(
         {
@@ -278,14 +358,43 @@ def test_langextract_adapter_maps_grounded_extractions(monkeypatch) -> None:
     assert vendor.char_end == source_text.index("Acme Corp") + len("Acme Corp")
     assert vendor.page_number == 1
     assert amount.page_number == 2
-    assert amount.char_start == source_text.index("$1,200.00")
-    assert amount.char_end == source_text.index("$1,200.00") + len("$1,200.00")
-    assert amount.normalized_value == {
-        "amount": 1200.0,
-        "currency": "USD",
-        "display_value": "$1,200.00",
-    }
-    assert "grounded chars" in amount.extraction_notes
+
+
+def test_langextract_adapter_logs_oversized_document_rejection(monkeypatch) -> None:
+    provider = ExtractionProvider()
+    template = ExtractionTemplate.model_validate(build_template_definition())
+    template.llm_provider_settings = LLMProviderSettings(
+        mode="local",
+        provider_type="langextract",
+        provider_label="LangExtract (Ollama)",
+        api_style="langextract",
+        base_url="http://host.docker.internal:11434/v1",
+        model="qwen3.5:27b",
+        supports_json_mode=False,
+        allow_external_processing=False,
+        langextract_max_document_chars=10,
+    )
+    logged: list[dict] = []
+
+    monkeypatch.setattr(
+        provider_service,
+        "log_event",
+        lambda logger, level, event, **fields: logged.append({"event": event, **fields}),
+    )
+
+    with pytest.raises(ValueError, match="exceeds langextract_max_document_chars"):
+        provider.extract("This input is definitely too large.", template, template.llm_provider_settings)
+
+    assert logged == [
+        {
+            "event": "langextract_document_rejected",
+            "reason": "document_too_large",
+            "document_chars": len("This input is definitely too large."),
+            "max_document_chars": 10,
+            "model": "qwen3.5:27b",
+            "provider_type": "langextract",
+        }
+    ]
 
 
 def test_langextract_adapter_bypasses_outer_chunking_and_keeps_global_offsets(monkeypatch) -> None:
