@@ -203,7 +203,7 @@ def log_parser_selected(path: Path, parser_name: str, *, ocr_enabled: bool) -> N
     )
 
 
-def prewarm_docling_converters() -> None:
+def prewarm_docling_converters() -> dict[str, object]:
     if not docling_enabled():
         return {"status": "disabled", "attempted": False, "warmed_targets": []}
 

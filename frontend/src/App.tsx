@@ -1900,7 +1900,7 @@ function SchemaPage({
             subtitle="Keep the configuration sequence obvious so the user always knows what comes next."
           />
           <ol className="schema-step-list">
-            <li className="schema-step-card active" aria-current="step">
+            <li className="schema-step-card active">
               <span className="schema-step-number" aria-hidden="true">
                 1
               </span>
@@ -1912,7 +1912,7 @@ function SchemaPage({
                 </p>
               </div>
             </li>
-            <li className="schema-step-card active" aria-current="step">
+            <li className="schema-step-card active">
               <span className="schema-step-number" aria-hidden="true">
                 2
               </span>
@@ -1925,7 +1925,7 @@ function SchemaPage({
               </div>
             </li>
             {showLangExtractEditor ? (
-              <li className="schema-step-card active" aria-current="step">
+              <li className="schema-step-card active">
                 <span className="schema-step-number" aria-hidden="true">
                   3
                 </span>
