@@ -10,6 +10,10 @@ class WorkerSettings(BaseSettings):
     worker_poll_seconds: int = Field(default=5, ge=1, le=3600)
     parsed_dir: str = "/data/parsed"
     worker_status_path: str = "/data/worker-status.json"
+    docling_enabled: bool = Field(default=True, validation_alias="EXTRACTFLOW_USE_DOCLING")
+    docling_prewarm: bool = True
+    docling_pdf_ocr_retry: bool = True
+    docling_image_ocr: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

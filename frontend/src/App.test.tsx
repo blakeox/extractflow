@@ -533,25 +533,23 @@ describe("App", () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Schemas" }));
     expect(
-      await screen.findByRole("heading", { name: "3. Train LangExtract" }),
+      await screen.findByRole("heading", {
+        name: "3. Teach the schema with grounded examples",
+      }),
     ).toBeInTheDocument();
+    expect(await screen.findByText("1 suggestion")).toBeInTheDocument();
     expect(
-      await screen.findByText("1 reviewed suggestion"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Best practice: applied suggestions stay draft-only until you save a new schema version.",
-      ),
+      screen.getByText("Suggestions ready to promote"),
     ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Add all to draft",
+        name: "Promote suggestion 1 to the draft",
       }),
     );
     expect(
       await screen.findByText(
-        "Added 1 reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it.",
+        "Added reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it.",
       ),
     ).toBeInTheDocument();
 
@@ -564,9 +562,7 @@ describe("App", () => {
     expect(
       screen.queryByLabelText("LangExtract example 3 source text"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /already in the draft/ }),
-    ).toBeDisabled();
+    expect(screen.getByText("Added to draft")).toBeInTheDocument();
   });
 
   it("marks suggestions already present in the loaded draft as added to draft", async () => {
@@ -741,9 +737,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
-    expect(
-      await screen.findByRole("button", { name: /already in the draft/ }),
-    ).toBeDisabled();
+    expect(await screen.findByText("Added to draft")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add all to draft" }),
     ).not.toBeInTheDocument();
@@ -929,7 +923,7 @@ describe("App", () => {
 
     fireEvent.click(
       await screen.findByRole("button", {
-        name: /Add suggestion \d+ to the draft/,
+        name: /Promote suggestion \d+ to the draft/,
       }),
     );
     expect(
@@ -947,9 +941,7 @@ describe("App", () => {
       },
     );
 
-    expect(
-      screen.getByRole("button", { name: /already in the draft/ }),
-    ).toBeDisabled();
+    expect(screen.getByText("Added to draft")).toBeInTheDocument();
   });
 
   it("shows LangExtract feedback diagnostics when reviewed runs are not reusable", async () => {
@@ -1331,7 +1323,9 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
+    await screen.findByLabelText("LangExtract prompt");
 
+    fireEvent.click(screen.getAllByText(/Saved payload preview/)[0]);
     await screen.findByLabelText("LangExtract payload preview");
 
     fireEvent.change(screen.getByLabelText("LangExtract prompt"), {
@@ -1753,7 +1747,7 @@ describe("App", () => {
     ).not.toHaveLength(0);
   });
 
-  it("shows a targeted error when a LangExtract extraction references an unknown field", async () => {
+  it("uses a field picker so LangExtract extractions cannot reference unknown fields", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string | URL | Request) => {
@@ -1819,19 +1813,19 @@ describe("App", () => {
 
     await screen.findByLabelText("Example 1 extraction 1 field name");
 
-    fireEvent.change(
-      screen.getByLabelText("Example 1 extraction 1 field name"),
-      {
-        target: { value: "bogus_field" },
-      },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Save schema" }));
-
+    const fieldPicker = screen.getByLabelText(
+      "Example 1 extraction 1 field name",
+    ) as HTMLSelectElement;
+    expect(fieldPicker.tagName).toBe("SELECT");
     expect(
-      await screen.findAllByText(
-        'LangExtract example 1 extraction 1 references unknown field "bogus_field". Available fields: primary_subject, effective_date, total_amount.',
-      ),
-    ).not.toHaveLength(0);
+      within(fieldPicker).queryByRole("option", { name: "bogus_field" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(fieldPicker, {
+      target: { value: "bogus_field" },
+    });
+
+    expect(fieldPicker).not.toHaveValue("bogus_field");
   });
 
   it("shows missing required LangExtract field coverage before save", async () => {

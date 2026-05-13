@@ -153,6 +153,10 @@ The Python services now fail fast on invalid configuration instead of starting w
 - `WORKER_STATUS_PATH` must remain under `DATA_DIR` so the worker health signal stays inside the shared app data volume
 - `PROVIDER_CATALOG_JSON`, when set, must be a JSON array
 - Provider base URLs must be explicit `http://` or `https://` URLs
+- `EXTRACTFLOW_USE_DOCLING` controls the worker's Docling-backed parser path for PDF, DOCX, HTML, and images; when disabled, those document types fail fast instead of silently falling back to removed legacy parsers
+- `DOCLING_PREWARM` controls whether the worker pre-initializes the cached Docling converters during startup to reduce first-document latency
+- `DOCLING_PDF_OCR_RETRY` controls whether PDFs get a second Docling pass with RapidOCR after the plain-text parse comes back weak
+- `DOCLING_IMAGE_OCR` controls whether image parsing uses Docling OCR or a plain non-OCR pass
 
 Backend readiness surfaces:
 
@@ -165,6 +169,8 @@ Observability surfaces:
 - backend responses include `X-Request-ID`; inbound request IDs are propagated when present, otherwise the API generates one
 - backend logs emit structured request events with method, path, status, duration, and request ID
 - worker logs emit structured lifecycle events for startup and non-idle job status transitions with job identifiers when available
+- worker startup now emits Docling prewarm events so parser warmup failures are visible before the first document hits the queue
+- worker status writes now include the active Docling startup configuration, and when prewarm is enabled the `starting` status is updated with the prewarm result payload
 - LangExtract feedback generation now emits structured diagnostics with reviewed-result counts, generated suggestion counts, and skip reasons
 - LangExtract worker runs now emit structured extraction outcome summaries plus explicit oversized-document rejection events
 
@@ -197,6 +203,14 @@ PYTHON_BIN="$(./scripts/resolve-python.sh)"
 "$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases
 ```
 
+Live image-OCR smoke test:
+
+```bash
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+PYTHONPATH=worker:shared \
+  "$PYTHON_BIN" -m pytest tests/worker/test_executor.py -k real_docling_ocr_dependency
+```
+
 ## LangExtract Observability Summary
 
 If you are collecting structured backend/worker logs locally, you can turn the committed LangExtract events into a quick JSON summary with:
@@ -222,21 +236,13 @@ The app now separates three concerns:
 Environment variables:
 
 ```bash
-OPENAI_API_KEY=
-AZURE_OPENAI_API_KEY=
-DEEPSEEK_API_KEY=
-KIMI_API_KEY=
-DEFAULT_LOCAL_PROVIDER_BASE_URL=http://host.docker.internal:11434/v1
-DEFAULT_LM_STUDIO_BASE_URL=http://localhost:1234/v1
-DEFAULT_OPENAI_BASE_URL=https://api.openai.com/v1
-DEFAULT_AZURE_OPENAI_BASE_URL=https://example.openai.azure.com
-DEFAULT_AZURE_OPENAI_API_VERSION=2024-10-21
-DEFAULT_AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
-DEFAULT_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEFAULT_KIMI_BASE_URL=https://api.moonshot.ai/v1
-CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS=24
-PROVIDER_CATALOG_JSON=
+EXTRACTFLOW_USE_DOCLING=true
+DOCLING_PREWARM=true
+DOCLING_PDF_OCR_RETRY=true
+DOCLING_IMAGE_OCR=true
 ```
+
+Use [`.env.example`](.env.example) as the source of truth for the full local runtime environment contract. The block above calls out the Docling-specific parser toggles because they directly change document parsing behavior.
 
 Readiness and control surfaces:
 
@@ -367,11 +373,14 @@ Rollback checklist:
 - Calculated fields are evaluated after extraction with a deterministic formula engine.
 - Exports and uploaded documents are stored on the shared local Docker volume under `/data`.
 - Sensitive document text is not intentionally logged by default.
+- PDF, DOCX, HTML, and image parsing now go through Docling; PDFs keep the repo's `[Page N]` text contract and retry once with **Docling RapidOCR** when the non-OCR pass is too weak.
+- CSV and Excel files still use the existing pandas path so the worker keeps emitting CSV-shaped text for tabular prompts.
 
 ## Current Constraints
 
 - The default `mock` extractor is a bootstrap path, not production-grade extraction quality.
-- OCR is installed but only lightly integrated.
+- OCR now lives inside the Docling parser flow instead of a separate legacy PDF OCR branch, and the worker no longer installs or calls the old Tesseract-specific Python path.
+- OCR-backed Docling image parsing now depends on `onnxruntime`, and the first OCR-backed image parse may spend extra time downloading RapidOCR model assets before warm caches exist.
 - The review UI is functional but still coarse; it edits normalized JSON directly rather than using field-specific widgets.
 - Authentication, RBAC, audit-grade logging, and team library controls are intentionally deferred to keep the local-first MVP contained.
 - The current queue is SQLite polling, which is acceptable for local/dev but not yet the right control plane for higher-concurrency team workloads.

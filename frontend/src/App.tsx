@@ -837,6 +837,23 @@ function buildTemplatePayload(
   };
 }
 
+function buildDraftTemplateFromDefinition(
+  definition: TemplateDefinition,
+): DraftTemplate {
+  return {
+    template_name: `${definition.template_name} Copy`,
+    document_type: definition.document_type,
+    description: definition.description,
+    template_version: definition.template_version,
+    local_only: !definition.llm_provider_settings.allow_external_processing,
+    langextract_prompt_description:
+      definition.langextract_config?.prompt_description ?? "",
+    langextract_examples: buildDraftLangExtractExamples(
+      definition.langextract_config,
+    ),
+  };
+}
+
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
   if (!response.ok) {
@@ -1597,7 +1614,6 @@ function SchemaPage({
   appliedLangExtractSuggestionKeys,
   dismissedLangExtractSuggestionKeys,
   onApplyLangExtractSuggestion,
-  onApplyAllLangExtractSuggestions,
   onDismissLangExtractSuggestion,
   onCreateTemplate,
   busyAction,
@@ -1620,7 +1636,6 @@ function SchemaPage({
   onApplyLangExtractSuggestion: (
     suggestion: LangExtractFeedbackSuggestion,
   ) => void;
-  onApplyAllLangExtractSuggestions: () => void;
   onDismissLangExtractSuggestion: (
     suggestionKey: string,
   ) => Promise<void> | void;
@@ -1660,7 +1675,7 @@ function SchemaPage({
           actions={
             <button
               type="button"
-              className="primary-button"
+              className="secondary-button"
               onClick={() => void onCreateTemplate()}
               disabled={busyAction === "save-template"}
             >
@@ -1847,13 +1862,13 @@ function SchemaPage({
 
         {showLangExtractEditor ? (
           <section
-            className="surface span-7"
+            className="surface span-12"
             aria-labelledby="langextract-step-title"
           >
             <CardHeader
               titleId="langextract-step-title"
-              title="3. Train LangExtract"
-              subtitle="Author grounded examples first, then fold reviewed suggestions back into the schema when they are strong enough to keep. Applied suggestions stay draft-only until you save a new schema version."
+              title="3. Teach the schema with grounded examples"
+              subtitle="Start with the smallest grounded example set that proves the behavior you want, then promote reviewed suggestions only when they deserve the next saved version."
             />
             <LangExtractEditor
               draft={draft}
@@ -1870,8 +1885,10 @@ function SchemaPage({
               appliedSuggestionKeys={appliedLangExtractSuggestionKeys}
               dismissedSuggestionKeys={dismissedLangExtractSuggestionKeys}
               onApplySuggestion={onApplyLangExtractSuggestion}
-              onApplyAllSuggestions={onApplyAllLangExtractSuggestions}
               onDismissSuggestion={onDismissLangExtractSuggestion}
+              onSaveSchema={() => void onCreateTemplate()}
+              saveBusy={busyAction === "save-template"}
+              sourceVersionLabel={definition.template_version}
             />
           </section>
         ) : null}
@@ -1913,10 +1930,10 @@ function SchemaPage({
                   3
                 </span>
                 <div>
-                  <strong>Train LangExtract with examples</strong>
+                  <strong>Teach the schema with examples</strong>
                   <p>
-                    Ground the prompt with reusable source spans before you rely
-                    on reviewed feedback.
+                    Ground the schema with reliable spans before promoting
+                    reviewed suggestions.
                   </p>
                 </div>
               </li>
@@ -3932,16 +3949,8 @@ export function App() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [focusedFieldName, setFocusedFieldName] = useState<string | null>(null);
   const [draftTemplate, setDraftTemplate] = useState<DraftTemplate>({
+    ...buildDraftTemplateFromDefinition(starterTemplateDefinition),
     template_name: starterTemplateDefinition.template_name,
-    document_type: starterTemplateDefinition.document_type,
-    description: starterTemplateDefinition.description,
-    template_version: starterTemplateDefinition.template_version,
-    local_only: true,
-    langextract_prompt_description:
-      starterTemplateDefinition.langextract_config?.prompt_description ?? "",
-    langextract_examples: buildDraftLangExtractExamples(
-      starterTemplateDefinition.langextract_config,
-    ),
   });
   const [langextractFeedbackSuggestions, setLangextractFeedbackSuggestions] =
     useState<LangExtractFeedbackSuggestion[]>([]);
@@ -3964,6 +3973,8 @@ export function App() {
   const [banner, setBanner] = useState<{
     tone: "success" | "error";
     message: string;
+    actionLabel?: string;
+    onAction?: () => void;
   } | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
@@ -4216,24 +4227,46 @@ export function App() {
     Boolean(desktopStatus?.tauriMode) &&
     (!desktopOnboardingDismissed || apiUnavailable || !provider);
 
+  function applyLangExtractFeedback(
+    feedback: LangExtractFeedbackSuggestionListResponse,
+  ) {
+    setLangextractFeedbackSuggestions(
+      Array.isArray(feedback?.suggestions) ? feedback.suggestions : [],
+    );
+    setLangextractFeedbackDiagnostics(
+      feedback?.diagnostics ?? EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
+    );
+    setLangextractFeedbackStatus("ready");
+  }
+
+  async function fetchLangExtractFeedbackSuggestions(
+    templateVersionId: number,
+  ) {
+    return readJson<LangExtractFeedbackSuggestionListResponse>(
+      `/template-versions/${templateVersionId}/langextract-feedback-suggestions`,
+    );
+  }
+
+  function openSchemaDraft(templateVersionId: number) {
+    const templateVersion =
+      templateVersions.find((item) => item.id === templateVersionId) ?? null;
+    if (templateVersion) {
+      setSelectedTemplateId(templateVersion.template_id);
+      setSelectedTemplateVersionId(templateVersion.id);
+    } else {
+      setSelectedTemplateVersionId(templateVersionId);
+    }
+    setActivePage("templates");
+    setBanner(null);
+  }
+
   useEffect(() => {
     if (!currentTemplateDefinition) {
       return;
     }
-    setDraftTemplate({
-      template_name: `${currentTemplateDefinition.template_name} Copy`,
-      document_type: currentTemplateDefinition.document_type,
-      description: currentTemplateDefinition.description,
-      template_version: currentTemplateDefinition.template_version,
-      local_only:
-        !currentTemplateDefinition.llm_provider_settings
-          .allow_external_processing,
-      langextract_prompt_description:
-        currentTemplateDefinition.langextract_config?.prompt_description ?? "",
-      langextract_examples: buildDraftLangExtractExamples(
-        currentTemplateDefinition.langextract_config,
-      ),
-    });
+    setDraftTemplate(
+      buildDraftTemplateFromDefinition(currentTemplateDefinition),
+    );
     setSessionAppliedLangExtractSuggestionKeys([]);
     setDismissedLangExtractSuggestionKeys([]);
   }, [currentTemplateDefinition]);
@@ -4252,20 +4285,12 @@ export function App() {
 
     let cancelled = false;
     setLangextractFeedbackStatus("loading");
-    void readJson<LangExtractFeedbackSuggestionListResponse>(
-      `/template-versions/${selectedTemplateVersionId}/langextract-feedback-suggestions`,
-    )
+    void fetchLangExtractFeedbackSuggestions(selectedTemplateVersionId)
       .then((feedback) => {
         if (cancelled) {
           return;
         }
-        setLangextractFeedbackSuggestions(
-          Array.isArray(feedback?.suggestions) ? feedback.suggestions : [],
-        );
-        setLangextractFeedbackDiagnostics(
-          feedback?.diagnostics ?? EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
-        );
-        setLangextractFeedbackStatus("ready");
+        applyLangExtractFeedback(feedback);
       })
       .catch(() => {
         if (cancelled) {
@@ -4326,39 +4351,6 @@ export function App() {
     });
   }
 
-  function handleApplyAllLangExtractSuggestions() {
-    const pendingSuggestions = langextractFeedbackSuggestions.filter(
-      (suggestion) =>
-        !dismissedLangExtractSuggestionKeys.includes(suggestion.key) &&
-        !appliedLangExtractSuggestionKeys.includes(suggestion.key),
-    );
-    if (!pendingSuggestions.length) {
-      return;
-    }
-    setDraftTemplate((current) => ({
-      ...current,
-      langextract_examples: [
-        ...current.langextract_examples,
-        ...pendingSuggestions.map((suggestion) =>
-          buildDraftLangExtractExampleFromSuggestion(suggestion),
-        ),
-      ],
-    }));
-    setSessionAppliedLangExtractSuggestionKeys((current) => [
-      ...current,
-      ...pendingSuggestions
-        .map((suggestion) => suggestion.key)
-        .filter((key) => !current.includes(key)),
-    ]);
-    setBanner({
-      tone: "success",
-      message:
-        pendingSuggestions.length === 1
-          ? "Added 1 reviewed LangExtract example to the draft schema. Save a new schema version before future runs use it."
-          : `Added ${pendingSuggestions.length} reviewed LangExtract examples to the draft schema. Save a new schema version before future runs use them.`,
-    });
-  }
-
   async function handleDismissLangExtractSuggestion(suggestionKey: string) {
     if (!selectedTemplateVersionId) {
       return;
@@ -4375,16 +4367,10 @@ export function App() {
       setDismissedLangExtractSuggestionKeys((current) =>
         current.includes(suggestionKey) ? current : [...current, suggestionKey],
       );
-      const feedback =
-        await readJson<LangExtractFeedbackSuggestionListResponse>(
-          `/template-versions/${selectedTemplateVersionId}/langextract-feedback-suggestions`,
-        );
-      setLangextractFeedbackSuggestions(
-        Array.isArray(feedback?.suggestions) ? feedback.suggestions : [],
+      const feedback = await fetchLangExtractFeedbackSuggestions(
+        selectedTemplateVersionId,
       );
-      setLangextractFeedbackDiagnostics(
-        feedback?.diagnostics ?? EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS,
-      );
+      applyLangExtractFeedback(feedback);
       setBanner({
         tone: "success",
         message: "Dismissed reviewed LangExtract suggestion.",
@@ -4643,6 +4629,39 @@ export function App() {
           null,
       );
       await refreshCoreData();
+      const reviewedTemplateVersionId =
+        selectedJob?.template_version_id ?? null;
+      if (reviewedTemplateVersionId && definition) {
+        const templateVersionRecord =
+          templateVersions.find(
+            (item) => item.id === reviewedTemplateVersionId,
+          ) ?? null;
+        if (
+          templateVersionRecord &&
+          isLangExtractProvider(
+            templateVersionRecord.definition.llm_provider_settings,
+          )
+        ) {
+          const feedback = await fetchLangExtractFeedbackSuggestions(
+            reviewedTemplateVersionId,
+          );
+          if (selectedTemplateVersionId === reviewedTemplateVersionId) {
+            applyLangExtractFeedback(feedback);
+          }
+          if (feedback.suggestions.length) {
+            setBanner({
+              tone: "success",
+              message:
+                feedback.suggestions.length === 1
+                  ? "Review edits saved and formulas recalculated. 1 reusable grounded example is ready for this schema."
+                  : `Review edits saved and formulas recalculated. ${feedback.suggestions.length} reusable grounded examples are ready for this schema.`,
+              actionLabel: "Open schema draft",
+              onAction: () => openSchemaDraft(reviewedTemplateVersionId),
+            });
+            return;
+          }
+        }
+      }
       setBanner({
         tone: "success",
         message: "Review edits saved and formulas recalculated.",
@@ -5220,6 +5239,15 @@ export function App() {
               )}
             >
               <span>{banner.message}</span>
+              {banner.actionLabel && banner.onAction ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={banner.onAction}
+                >
+                  {banner.actionLabel}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="text-link"
@@ -5287,9 +5315,6 @@ export function App() {
                 dismissedLangExtractSuggestionKeys
               }
               onApplyLangExtractSuggestion={handleApplyLangExtractSuggestion}
-              onApplyAllLangExtractSuggestions={
-                handleApplyAllLangExtractSuggestions
-              }
               onDismissLangExtractSuggestion={
                 handleDismissLangExtractSuggestion
               }

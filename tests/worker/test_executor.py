@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import Mock
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import pandas as pd
@@ -20,6 +21,64 @@ from extraction_core.models import (
 from pydantic import ValidationError
 
 from tests.support.sample_data import build_template_definition
+
+
+def write_minimal_docx(path, *, lines: list[str]) -> None:
+    paragraph_xml = "".join(f"<w:p><w:r><w:t>{line}</w:t></w:r></w:p>" for line in lines)
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>"""
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>"""
+    document = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    {paragraph_xml}
+    <w:sectPr/>
+  </w:body>
+</w:document>"""
+    core = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Invoice</dc:title></cp:coreProperties>"""
+    app = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Python</Application></Properties>"""
+    with ZipFile(path, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", rels)
+        archive.writestr("word/document.xml", document)
+        archive.writestr("docProps/core.xml", core)
+        archive.writestr("docProps/app.xml", app)
+
+
+def write_minimal_pdf(path, *, lines: list[str]) -> None:
+    text = "\\n".join(lines)
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET"
+    objects = [
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
+        "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n",
+        f"4 0 obj << /Length {len(stream)} >> stream\n{stream}\nendstream endobj\n",
+        "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
+    ]
+    pdf = "%PDF-1.4\n"
+    offsets: list[int] = []
+    for obj in objects:
+        offsets.append(len(pdf.encode("latin-1")))
+        pdf += obj
+    xref_offset = len(pdf.encode("latin-1"))
+    pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+    for offset in offsets:
+        pdf += f"{offset:010d} 00000 n \n"
+    pdf += f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+    path.write_bytes(pdf.encode("latin-1"))
 
 
 def test_execute_extraction_runs_mock_pipeline_and_calculates_fields(tmp_path) -> None:
@@ -255,24 +314,319 @@ def test_parse_document_reads_csv_and_unknown_text_extensions(tmp_path) -> None:
     assert fallback_text == "custom text input"
 
 
-def test_parse_pdf_uses_ocr_when_embedded_text_is_missing(monkeypatch, tmp_path) -> None:
+def test_parse_pdf_prefers_docling_without_ocr_when_it_returns_meaningful_text(monkeypatch, tmp_path) -> None:
+    pdf_path = tmp_path / "invoice.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    calls: list[bool] = []
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+
+    def fake_parse(path, *, do_ocr: bool) -> str:
+        calls.append(do_ocr)
+        return "[Page 1]\nDocling totals table"
+
+    monkeypatch.setattr(parser_service, "_parse_pdf_with_docling_mode", fake_parse)
+
+    parsed = parse_document(str(pdf_path))
+
+    assert parsed == "[Page 1]\nDocling totals table"
+    assert calls == [False]
+
+
+def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) -> None:
+    pdf_path = tmp_path / "invoice.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    parser_service.get_docling_converter.cache_clear()
+
+    class FakeInputFormat:
+        PDF = "pdf"
+        IMAGE = "image"
+        DOCX = "docx"
+
+    class FakePdfPipelineOptions:
+        def __init__(self) -> None:
+            self.do_ocr = True
+            self.ocr_options = None
+            self.do_table_structure = False
+            self.table_structure_options = None
+
+    class FakeTableStructureOptions:
+        def __init__(self, do_cell_matching: bool) -> None:
+            self.do_cell_matching = do_cell_matching
+
+    class FakeRapidOcrOptions:
+        pass
+
+    class FakePdfFormatOption:
+        def __init__(self, pipeline_options) -> None:
+            captured["pipeline_options"] = pipeline_options
+
+    class FakeImageFormatOption:
+        def __init__(self, pipeline_options) -> None:
+            captured["image_pipeline_options"] = pipeline_options
+
+    class FakeDocument:
+        def export_to_text(self) -> str:
+            return "Fallback text"
+
+    class FakeConversion:
+        def __init__(self) -> None:
+            self.document = FakeDocument()
+
+    class FakeDocumentConverter:
+        def __init__(self, *, format_options) -> None:
+            captured["format_options"] = format_options
+
+        def convert(self, path) -> FakeConversion:
+            captured["path"] = path
+            return FakeConversion()
+
+    def fake_generate_multimodal_pages(_conversion):
+        yield ("Vendor Name Acme Corp", "", "", [], [], object())
+        yield ("Total Amount $1,200.00", "", "", [], [], object())
+
+    monkeypatch.setattr(
+        parser_service,
+        "_import_docling_tools",
+        lambda: (
+            FakeInputFormat,
+            FakePdfPipelineOptions,
+            FakeTableStructureOptions,
+            FakeRapidOcrOptions,
+            FakePdfFormatOption,
+            FakeImageFormatOption,
+            FakeDocumentConverter,
+            fake_generate_multimodal_pages,
+        ),
+    )
+
+    parsed = parser_service._parse_pdf_with_docling_mode(pdf_path, do_ocr=False)
+
+    assert parsed == "[Page 1]\nVendor Name Acme Corp\n\n[Page 2]\nTotal Amount $1,200.00"
+    assert captured["path"] == pdf_path
+    assert captured["pipeline_options"].do_ocr is False
+    assert captured["pipeline_options"].do_table_structure is True
+    assert captured["pipeline_options"].table_structure_options.do_cell_matching is True
+
+
+def test_get_docling_converter_uses_rapidocr_for_ocr_pass(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    parser_service.get_docling_converter.cache_clear()
+
+    class FakeInputFormat:
+        PDF = "pdf"
+        IMAGE = "image"
+        DOCX = "docx"
+
+    class FakePdfPipelineOptions:
+        def __init__(self) -> None:
+            self.do_ocr = False
+            self.ocr_options = None
+            self.do_table_structure = False
+            self.table_structure_options = None
+
+    class FakeTableStructureOptions:
+        def __init__(self, do_cell_matching: bool) -> None:
+            self.do_cell_matching = do_cell_matching
+
+    class FakeRapidOcrOptions:
+        def __init__(self) -> None:
+            captured["rapidocr_built"] = True
+
+    class FakePdfFormatOption:
+        def __init__(self, pipeline_options) -> None:
+            captured["pipeline_options"] = pipeline_options
+
+    class FakeImageFormatOption:
+        def __init__(self, pipeline_options) -> None:
+            captured["image_pipeline_options"] = pipeline_options
+
+    class FakeDocumentConverter:
+        def __init__(self, **kwargs) -> None:
+            captured["converter_kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        parser_service,
+        "_import_docling_tools",
+        lambda: (
+            FakeInputFormat,
+            FakePdfPipelineOptions,
+            FakeTableStructureOptions,
+            FakeRapidOcrOptions,
+            FakePdfFormatOption,
+            FakeImageFormatOption,
+            FakeDocumentConverter,
+            lambda conversion: (),
+        ),
+    )
+
+    parser_service.get_docling_converter("pdf", True)
+
+    assert captured["rapidocr_built"] is True
+    assert captured["pipeline_options"].do_ocr is True
+    assert isinstance(captured["pipeline_options"].ocr_options, FakeRapidOcrOptions)
+    assert captured["pipeline_options"].do_table_structure is True
+
+
+def test_parse_pdf_retries_docling_with_ocr_when_initial_pass_is_weak(monkeypatch, tmp_path) -> None:
     pdf_path = tmp_path / "scan.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
+    calls: list[bool] = []
+    monkeypatch.setattr(parser_service.settings, "docling_pdf_ocr_retry", True)
 
-    class FakePage:
-        def extract_text(self) -> str:
-            return ""
+    def fake_parse(path, *, do_ocr: bool) -> str:
+        calls.append(do_ocr)
+        if do_ocr:
+            return "[Page 1]\nDetected account number"
+        return ""
 
-    class FakeReader:
-        def __init__(self, path: str):
-            self.pages = [FakePage()]
-
-    monkeypatch.setattr(parser_service, "PdfReader", FakeReader)
-    monkeypatch.setattr(parser_service, "parse_pdf_with_ocr", lambda path: "[Page 1]\nDetected account number")
+    monkeypatch.setattr(parser_service, "_parse_pdf_with_docling_mode", fake_parse)
 
     parsed = parse_document(str(pdf_path))
 
     assert "Detected account number" in parsed
+    assert calls == [False, True]
+
+
+def test_parse_pdf_skips_docling_ocr_retry_when_disabled(monkeypatch, tmp_path) -> None:
+    pdf_path = tmp_path / "scan.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+    calls: list[bool] = []
+
+    monkeypatch.setattr(parser_service.settings, "docling_pdf_ocr_retry", False)
+
+    def fake_parse(path, *, do_ocr: bool) -> str:
+        calls.append(do_ocr)
+        return ""
+
+    monkeypatch.setattr(parser_service, "_parse_pdf_with_docling_mode", fake_parse)
+
+    with pytest.raises(parser_service.DocumentParseError, match="Docling PDF parsing produced no usable text"):
+        parse_document(str(pdf_path))
+
+    assert calls == [False]
+
+
+def test_parse_docx_uses_docling(monkeypatch, tmp_path) -> None:
+    docx_path = tmp_path / "invoice.docx"
+    docx_path.write_bytes(b"PK")
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service, "parse_docx_with_docling", lambda path: "Vendor Name\nAcme Corp")
+
+    parsed = parse_document(str(docx_path))
+
+    assert parsed == "Vendor Name\nAcme Corp"
+
+
+def test_parse_docx_with_real_docling_dependency(monkeypatch, tmp_path) -> None:
+    docx_path = tmp_path / "invoice.docx"
+    write_minimal_docx(docx_path, lines=["Invoice", "Vendor Name Acme Corp", "Total 1200"])
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+
+    parsed = parse_document(str(docx_path))
+
+    assert "Invoice" in parsed
+    assert "Vendor Name Acme Corp" in parsed
+    assert "Total 1200" in parsed
+
+
+def test_parse_pdf_with_real_docling_dependency(monkeypatch, tmp_path) -> None:
+    pdf_path = tmp_path / "invoice.pdf"
+    write_minimal_pdf(pdf_path, lines=["Invoice", "Vendor Name Acme Corp", "Total 1200"])
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service.settings, "docling_pdf_ocr_retry", False)
+
+    parsed = parse_document(str(pdf_path))
+
+    assert "[Page 1]" in parsed
+    assert "Invoice" in parsed
+    assert "Vendor Name Acme Corp" in parsed
+    assert "Total 1200" in parsed
+
+
+def test_parse_html_uses_docling(monkeypatch, tmp_path) -> None:
+    html_path = tmp_path / "invoice.html"
+    html_path.write_text("<html></html>", encoding="utf-8")
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(
+        parser_service,
+        "parse_html_with_docling",
+        lambda path: "Vendor Name\nAcme Corp\nInvoice total",
+    )
+
+    parsed = parse_document(str(html_path))
+
+    assert parsed == "Vendor Name\nAcme Corp\nInvoice total"
+
+
+def test_parse_html_with_real_docling_dependency(monkeypatch, tmp_path) -> None:
+    html_path = tmp_path / "invoice.html"
+    html_path.write_text(
+        "<html><body><h1>Invoice</h1><p>Vendor Name Acme Corp</p><p>Total 1200</p></body></html>",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+
+    parsed = parse_document(str(html_path))
+
+    assert "Invoice" in parsed
+    assert "Vendor Name Acme Corp" in parsed
+    assert "Total 1200" in parsed
+
+
+def test_image_ocr_runtime_dependency_is_installed() -> None:
+    import onnxruntime
+
+    assert onnxruntime.__version__
+
+
+def test_parse_image_with_real_docling_ocr_dependency(monkeypatch, tmp_path) -> None:
+    from PIL import Image, ImageDraw
+
+    image_path = tmp_path / "invoice.png"
+    image = Image.new("RGB", (1200, 400), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((40, 60), "Invoice\nVendor Name Acme Corp\nTotal 1200", fill="black")
+    image.save(image_path)
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service.settings, "docling_image_ocr", True)
+
+    parsed = parse_document(str(image_path))
+
+    assert "[Page 1]" in parsed
+    assert "Invoice" in parsed
+    assert "Vendor Name Acme Corp" in parsed
+    assert "Total 1200" in parsed
+
+
+def test_parse_image_uses_docling_image_ocr_setting(monkeypatch, tmp_path) -> None:
+    image_path = tmp_path / "invoice.png"
+    image_path.write_bytes(b"PNG")
+    calls: list[bool] = []
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service.settings, "docling_image_ocr", False)
+
+    def fake_parse(path, *, kind: str, do_ocr: bool = False, add_page_markers: bool = False) -> str:
+        calls.append(do_ocr)
+        return "[Page 1]\nVisible invoice text with enough characters"
+
+    monkeypatch.setattr(parser_service, "_parse_docling_text", fake_parse)
+
+    parsed = parse_document(str(image_path))
+
+    assert parsed == "[Page 1]\nVisible invoice text with enough characters"
+    assert calls == [False]
 
 
 def test_langextract_adapter_maps_grounded_extractions(monkeypatch) -> None:

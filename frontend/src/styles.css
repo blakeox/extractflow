@@ -362,6 +362,7 @@ tbody tr:hover {
 
 .ghost-button,
 .tertiary-button,
+.danger-button,
 .text-link,
 .secondary-button,
 .primary-button,
@@ -374,7 +375,8 @@ tbody tr:hover {
 }
 
 .ghost-button,
-.tertiary-button {
+.tertiary-button,
+.danger-button {
   margin-top: 0.8rem;
   grid-column: 1 / -1;
   justify-self: stretch;
@@ -424,6 +426,7 @@ tbody tr:hover {
 .primary-button,
 .secondary-button,
 .tertiary-button,
+.danger-button,
 .icon-button,
 .avatar-button {
   display: inline-flex;
@@ -461,6 +464,7 @@ tbody tr:hover {
 
 .secondary-button,
 .tertiary-button,
+.danger-button,
 .icon-button,
 .avatar-button {
   border: 1px solid var(--border-default);
@@ -474,9 +478,21 @@ tbody tr:hover {
   box-shadow: none;
 }
 
+.danger-button {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.16);
+  background: rgba(254, 242, 242, 0.92);
+  box-shadow: none;
+}
+
 .ghost-button:hover,
 .tertiary-button:hover {
   background: var(--accent-soft);
+}
+
+.danger-button:hover {
+  background: rgba(254, 226, 226, 0.98);
+  border-color: rgba(180, 35, 24, 0.24);
 }
 
 .icon-button {
@@ -1537,6 +1553,19 @@ tbody tr:hover {
   gap: 0.9rem;
 }
 
+.langextract-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.langextract-main,
+.langextract-sidebar {
+  display: grid;
+  gap: 0.95rem;
+}
+
 .langextract-editor-header {
   display: flex;
   align-items: flex-start;
@@ -1730,10 +1759,56 @@ tbody tr:hover {
 }
 
 .langextract-editor .ghost-button,
-.langextract-editor .tertiary-button {
+.langextract-editor .tertiary-button,
+.langextract-editor .danger-button {
   margin-top: 0;
   grid-column: auto;
   justify-self: auto;
+}
+
+.langextract-status-card,
+.langextract-advanced-panel {
+  gap: 0.85rem;
+}
+
+.langextract-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.langextract-state-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-md);
+  padding: 0.7rem 0.95rem;
+  border-radius: var(--radius-md);
+  background: rgba(31, 159, 103, 0.12);
+  color: #166534;
+  font-weight: 600;
+}
+
+.langextract-advanced-panel[open] {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.langextract-advanced-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.langextract-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.langextract-advanced-summary:focus-visible {
+  border-radius: 12px;
+  box-shadow: var(--focus-ring);
+  outline: none;
 }
 
 .schema-step-card {
@@ -2227,6 +2302,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
   margin-bottom: 1rem;
   padding: 0.9rem 1rem;
@@ -2367,9 +2443,14 @@ tbody tr:hover {
   .langextract-editor-header,
   .langextract-feedback-card-header,
   .langextract-feedback-summary,
-  .langextract-feedback-summary-meta {
+  .langextract-feedback-summary-meta,
+  .langextract-advanced-summary {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .langextract-workspace {
+    grid-template-columns: 1fr;
   }
 
   .langextract-section-header {
