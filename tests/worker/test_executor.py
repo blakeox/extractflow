@@ -263,8 +263,6 @@ def test_langextract_provider_settings_require_matching_identity() -> None:
             supports_json_mode=False,
             allow_external_processing=False,
         )
-
-
 def test_llm_provider_extract_builds_request_and_parses_response(monkeypatch) -> None:
     provider = ExtractionProvider()
     template = ExtractionTemplate.model_validate(build_template_definition())

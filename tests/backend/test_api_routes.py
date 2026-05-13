@@ -889,7 +889,6 @@ def test_template_creation_rejects_mismatched_langextract_identity(client) -> No
         "base_url": "http://host.docker.internal:11434/v1",
         "supports_json_mode": False,
     }
-
     response = client.post(
         "/api/templates",
         json={
