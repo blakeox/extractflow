@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from extraction_core import FormulaEngine, topologically_sort_calculated_fields
 from extraction_core.formulas import FormulaValidationError
+from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import (
     CalculatedFieldResult,
     ExtractionFieldDefinition,
@@ -10,10 +13,13 @@ from extraction_core.models import (
     ExtractionValidationSummary,
     LLMProviderSettings,
 )
+from extraction_core.observability import configure_logger, log_event
 
 from app.services.parser import parse_document
 from app.services.provider import ExtractionProvider
 from app.services.validator import validate_calculated_field, validate_extracted_field
+
+logger = configure_logger("extractflow.worker.executor")
 
 
 def execute_extraction(
@@ -91,6 +97,21 @@ def execute_extraction(
         fields_requiring_review=[field.field_name for field in extracted_fields if field.requires_review]
         + [field.field_name for field in calculated_fields if field.requires_review],
     )
+    if uses_langextract_provider(settings.provider_type, settings.api_style):
+        review_signals = summarize_review_signals(extracted_fields, calculated_fields)
+        log_event(
+            logger,
+            logging.INFO,
+            "langextract_extraction_completed",
+            document_id=document_id,
+            model=settings.model,
+            provider_type=settings.provider_type,
+            extracted_field_count=len(extracted_fields),
+            calculated_field_count=len(calculated_fields),
+            review_required_count=len(summary.fields_requiring_review),
+            document_note_count=len(document_level_notes),
+            **review_signals,
+        )
     return summary.model_dump(mode="json")
 
 
@@ -118,6 +139,7 @@ def reconcile_extracted_fields(
         else:
             result = max(candidates, key=score_extraction_result)
             if len(candidates) > 1:
+                result.requires_review = True
                 result.extraction_notes = append_note(
                     result.extraction_notes,
                     f"Selected highest-confidence match from {len(candidates)} chunk candidates.",
@@ -163,3 +185,31 @@ def score_extraction_result(result: ExtractionFieldResult) -> tuple[int, float, 
     has_value = int(result.normalized_value is not None)
     has_citation = int(bool(result.source_text))
     return (has_value + has_citation, result.confidence_score, len(result.source_text))
+
+
+def summarize_review_signals(
+    extracted_fields: list[ExtractionFieldResult],
+    calculated_fields: list[CalculatedFieldResult],
+) -> dict[str, int]:
+    low_confidence_review_count = 0
+    multi_candidate_review_count = 0
+    citation_gap_count = 0
+    validation_error_count = 0
+
+    for field in extracted_fields:
+        if field.requires_review and "review threshold" in field.extraction_notes.casefold():
+            low_confidence_review_count += 1
+        if field.requires_review and "chunk candidates" in field.extraction_notes.casefold():
+            multi_candidate_review_count += 1
+        if any(error == "Citation evidence is required." for error in field.validation_errors):
+            citation_gap_count += 1
+        if field.validation_errors:
+            validation_error_count += 1
+
+    validation_error_count += sum(1 for field in calculated_fields if field.validation_errors)
+    return {
+        "low_confidence_review_count": low_confidence_review_count,
+        "multi_candidate_review_count": multi_candidate_review_count,
+        "citation_gap_count": citation_gap_count,
+        "validation_error_count": validation_error_count,
+    }

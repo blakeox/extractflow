@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
 
@@ -35,6 +35,20 @@ class TemplateVersion(Base):
     created_at = Column(DateTime, nullable=False, default=utc_now)
 
     template = relationship("Template", back_populates="versions")
+
+
+class LangExtractFeedbackDecision(Base):
+    __tablename__ = "langextract_feedback_decisions"
+    __table_args__ = (
+        UniqueConstraint("template_version_id", "suggestion_key", name="uq_langextract_feedback_decision"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    template_version_id = Column(Integer, ForeignKey("template_versions.id"), nullable=False)
+    suggestion_key = Column(String(64), nullable=False)
+    dismissed = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now)
+    updated_at = Column(DateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
 
 class Document(Base):

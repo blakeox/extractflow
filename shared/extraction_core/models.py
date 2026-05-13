@@ -115,6 +115,7 @@ class LLMProviderSettings(BaseModel):
     timeout_seconds: int = 120
     retry_count: int = 2
     chunk_size: int = 16000
+    langextract_max_document_chars: int | None = 160000
 
     @model_validator(mode="after")
     def validate_langextract_constraints(self) -> LLMProviderSettings:
@@ -190,6 +191,26 @@ class ExtractionTemplate(BaseModel):
             raise ValueError("LangExtract templates require a non-empty prompt_description.")
         if not self.langextract_config.examples:
             raise ValueError("LangExtract templates require at least one example.")
+        extracted_field_names = {field.name for field in self.extracted_fields}
+        required_field_names = {field.name for field in self.extracted_fields if field.required}
+        covered_field_names: set[str] = set()
+        for example_index, example in enumerate(self.langextract_config.examples, start=1):
+            for extraction_index, extraction in enumerate(example.extractions, start=1):
+                if extraction.extraction_class not in extracted_field_names:
+                    available = ", ".join(sorted(extracted_field_names)) or "(no extracted fields defined)"
+                    raise ValueError(
+                        "LangExtract example "
+                        f"{example_index} extraction {extraction_index} references unknown field "
+                        f"'{extraction.extraction_class}'. Available extracted fields: {available}."
+                    )
+                covered_field_names.add(extraction.extraction_class)
+        missing_required_fields = sorted(required_field_names - covered_field_names)
+        if missing_required_fields:
+            raise ValueError(
+                "LangExtract examples must cover every required extracted field. Missing example coverage for: "
+                + ", ".join(missing_required_fields)
+                + "."
+            )
         return self
 
 

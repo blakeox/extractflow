@@ -42,6 +42,10 @@ services:
       PARSED_DIR: /data/parsed
       WORKER_POLL_SECONDS: 5
       WORKER_STATUS_PATH: /data/worker-status.json
+      EXTRACTFLOW_USE_DOCLING: ${EXTRACTFLOW_USE_DOCLING:-true}
+      DOCLING_PREWARM: ${DOCLING_PREWARM:-true}
+      DOCLING_PDF_OCR_RETRY: ${DOCLING_PDF_OCR_RETRY:-true}
+      DOCLING_IMAGE_OCR: ${DOCLING_IMAGE_OCR:-true}
     depends_on:
       backend:
         condition: service_healthy

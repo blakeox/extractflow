@@ -5,6 +5,7 @@ from .formulas import (
     topologically_sort_calculated_fields,
 )
 from .langextract import normalize_langextract_base_url, uses_langextract_provider
+from .langextract_feedback import build_langextract_feedback_attributes
 from .models import (
     CalculatedFieldDefinition,
     CalculatedFieldResult,
@@ -27,6 +28,7 @@ from .observability import configure_logger, log_event
 __all__ = [
     "CalculatedFieldDefinition",
     "CalculatedFieldResult",
+    "build_langextract_feedback_attributes",
     "configure_logger",
     "DataType",
     "ExtractionFieldDefinition",

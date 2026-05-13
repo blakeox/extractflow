@@ -1,0 +1,149 @@
+{
+  "name": "lease-basic",
+  "description": "Lease-oriented LangExtract eval for grounded party and rent extraction with formula post-processing.",
+  "tags": ["lease", "grounded"],
+  "document_text": "Landlord: Pine Street Holdings\nTenant: Harbor Bakery LLC\nMonthly Rent: $2,450.00",
+  "template_definition": {
+    "template_name": "Lease Extraction Eval",
+    "template_version": "1.0.0",
+    "document_type": "lease",
+    "description": "Lease LangExtract eval case.",
+    "llm_provider_settings": {
+      "mode": "local",
+      "provider_type": "langextract",
+      "provider_label": "LangExtract (Ollama)",
+      "api_style": "langextract",
+      "base_url": "http://host.docker.internal:11434/v1",
+      "model": "qwen3.5:27b",
+      "temperature": 0.0,
+      "max_tokens": 4000,
+      "supports_json_mode": false,
+      "allow_external_processing": false,
+      "timeout_seconds": 120,
+      "retry_count": 2,
+      "chunk_size": 16000,
+      "langextract_max_document_chars": 160000
+    },
+    "langextract_config": {
+      "prompt_description": "Extract the landlord, tenant, and monthly rent exactly as they appear. Keep all fields grounded to verbatim spans.",
+      "examples": [
+        {
+          "text": "Landlord: Pine Street Holdings\nTenant: Harbor Bakery LLC\nMonthly Rent: $2,450.00",
+          "extractions": [
+            {
+              "extraction_class": "landlord_name",
+              "extraction_text": "Pine Street Holdings",
+              "attributes": {
+                "value": "Pine Street Holdings"
+              }
+            },
+            {
+              "extraction_class": "tenant_name",
+              "extraction_text": "Harbor Bakery LLC",
+              "attributes": {
+                "value": "Harbor Bakery LLC"
+              }
+            },
+            {
+              "extraction_class": "monthly_rent",
+              "extraction_text": "$2,450.00",
+              "attributes": {
+                "currency": "USD"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "extracted_fields": [
+      {
+        "name": "landlord_name",
+        "label": "Landlord Name",
+        "description": "Landlord named in the lease.",
+        "type": "text",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false
+        }
+      },
+      {
+        "name": "tenant_name",
+        "label": "Tenant Name",
+        "description": "Tenant named in the lease.",
+        "type": "text",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false
+        }
+      },
+      {
+        "name": "monthly_rent",
+        "label": "Monthly Rent",
+        "description": "Recurring monthly rent.",
+        "type": "currency",
+        "required": true,
+        "citation_required": true,
+        "validation": {
+          "allow_null": false,
+          "currency": "USD"
+        }
+      }
+    ],
+    "calculated_fields": [
+      {
+        "name": "annual_rent",
+        "label": "Annual Rent",
+        "description": "Twelve months of rent.",
+        "type": "calculated",
+        "output_type": "currency",
+        "formula": "coalesce(monthly_rent.amount, 0) * 12",
+        "depends_on": ["monthly_rent"],
+        "validation": {
+          "allow_null": false,
+          "min": 0
+        }
+      }
+    ],
+    "output_settings": {
+      "export_formats": ["json"]
+    }
+  },
+  "expected_fields": {
+    "landlord_name": {
+      "extracted_value": "Pine Street Holdings",
+      "normalized_value": {
+        "value": "Pine Street Holdings"
+      },
+      "requires_review": false
+    },
+    "tenant_name": {
+      "extracted_value": "Harbor Bakery LLC",
+      "normalized_value": {
+        "value": "Harbor Bakery LLC"
+      },
+      "requires_review": false
+    },
+    "monthly_rent": {
+      "extracted_value": "$2,450.00",
+      "normalized_value": {
+        "amount": 2450.0,
+        "currency": "USD",
+        "display_value": "$2,450.00"
+      },
+      "requires_review": false
+    }
+  },
+  "expected_calculated_fields": {
+    "annual_rent": {
+      "normalized_value": {
+        "amount": 29400.0,
+        "currency": "USD"
+      },
+      "requires_review": false
+    }
+  },
+  "expected_review_flags": [],
+  "expected_document_level_note_substrings": []
+}
