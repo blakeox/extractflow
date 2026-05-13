@@ -33,17 +33,14 @@ def get_provider_health(entry: LLMProviderCatalogEntry) -> dict[str, object]:
     elif settings.api_style == "langextract":
         if settings.mode != "local":
             ready = False
-            checks.append("LangExtract is only supported in local mode")
-        if settings.allow_external_processing:
-            ready = False
             status = "not_ready"
             checks.append("LangExtract is only supported in local mode")
         if settings.allow_external_processing:
             ready = False
             status = "not_ready"
             checks.append("LangExtract v1 must keep allow_external_processing disabled")
-        ready = False
-        if status == "ready":
+        if ready:
+            ready = False
             status = "probe_required"
         checks.append("Run a live probe to confirm Ollama runtime and model availability")
 

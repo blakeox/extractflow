@@ -129,18 +129,6 @@ class LLMProviderSettings(BaseModel):
             raise ValueError("LangExtract must keep allow_external_processing disabled.")
         return self
 
-    @model_validator(mode="after")
-    def validate_langextract_constraints(self) -> LLMProviderSettings:
-        if not uses_langextract_provider(self.provider_type, self.api_style):
-            return self
-        if self.provider_type != LANGEXTRACT_PROVIDER_TYPE or self.api_style != LANGEXTRACT_API_STYLE:
-            raise ValueError("LangExtract requires provider_type and api_style to both be set to 'langextract'.")
-        if self.mode != "local":
-            raise ValueError("LangExtract only supports local mode.")
-        if self.allow_external_processing:
-            raise ValueError("LangExtract must keep allow_external_processing disabled.")
-        return self
-
 
 class LLMProviderCapabilities(BaseModel):
     supports_chat_completions: bool = True

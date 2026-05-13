@@ -165,6 +165,8 @@ def test_template_creation_rejects_langextract_when_required_field_lacks_example
         "LangExtract examples must cover every required extracted field. Missing example coverage for: vendor_name."
         in response.text
     )
+
+
 def test_document_upload_and_job_creation(client) -> None:
     template_payload = {
         "name": "Invoice Schema",
@@ -1248,58 +1250,6 @@ def test_provider_settings_defaults_to_mock_when_unset(client) -> None:
     assert payload["model"] == "mock-extractor"
     assert payload["allow_external_processing"] is False
     assert payload["is_persisted_default"] is False
-
-
-def test_provider_settings_reject_invalid_langextract_policy(client) -> None:
-    response = client.put(
-        "/api/settings/provider",
-        json={
-            "settings": {
-                "mode": "cloud",
-                "provider_type": "langextract",
-                "provider_label": "LangExtract (Ollama)",
-                "api_style": "langextract",
-                "base_url": "http://host.docker.internal:11434/v1",
-                "model": "qwen3.5:27b",
-                "temperature": 0.1,
-                "max_tokens": 4000,
-                "supports_json_mode": False,
-                "allow_external_processing": True,
-                "timeout_seconds": 120,
-                "retry_count": 2,
-                "chunk_size": 16000,
-            }
-        },
-    )
-
-    assert response.status_code == 422
-    assert "LangExtract only supports local mode." in response.text
-
-
-def test_provider_settings_reject_mismatched_langextract_identity(client) -> None:
-    response = client.put(
-        "/api/settings/provider",
-        json={
-            "settings": {
-                "mode": "local",
-                "provider_type": "langextract",
-                "provider_label": "LangExtract (Ollama)",
-                "api_style": "openai_compatible",
-                "base_url": "http://host.docker.internal:11434/v1",
-                "model": "qwen3.5:27b",
-                "temperature": 0.1,
-                "max_tokens": 4000,
-                "supports_json_mode": False,
-                "allow_external_processing": False,
-                "timeout_seconds": 120,
-                "retry_count": 2,
-                "chunk_size": 16000,
-            }
-        },
-    )
-
-    assert response.status_code == 422
-    assert "provider_type and api_style" in response.text
 
 
 def test_provider_settings_reject_invalid_langextract_policy(client) -> None:

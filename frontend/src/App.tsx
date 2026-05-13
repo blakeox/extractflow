@@ -796,31 +796,6 @@ function parseReviewDraft(
   }
 }
 
-function stringifyLangExtractExamples(
-  config?: TemplateDefinition["langextract_config"],
-) {
-  return JSON.stringify(config?.examples ?? [], null, 2);
-}
-
-function parseLangExtractExamplesJson(raw: string) {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return [];
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed) as unknown;
-  } catch {
-    throw new Error("LangExtract examples must be valid JSON.");
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error("LangExtract examples must be a JSON array.");
-  }
-  return parsed as NonNullable<
-    TemplateDefinition["langextract_config"]
-  >["examples"];
-}
-
 function buildTemplatePayload(
   draft: DraftTemplate,
   provider: ProviderSettings | null,
@@ -1859,38 +1834,6 @@ function SchemaPage({
                   }))
                 }
               />
-              {showLangExtractEditor ? (
-                <>
-                  <label className="full-line">
-                    <span>LangExtract prompt</span>
-                    <textarea
-                      rows={5}
-                      value={draft.langextract_prompt_description}
-                      placeholder="Describe exactly what LangExtract should extract and how grounded spans should behave."
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          langextract_prompt_description: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="full-line">
-                    <span>LangExtract examples (JSON array)</span>
-                    <textarea
-                      rows={12}
-                      value={draft.langextract_examples_json}
-                      placeholder='[{"text":"...","extractions":[{"extraction_class":"field_name","extraction_text":"...","attributes":{"value":"..."}}]}]'
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          langextract_examples_json: event.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
             </div>
             <div className="schema-guidance-stack">
               <div className="schema-guidance-card">
