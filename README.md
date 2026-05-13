@@ -123,11 +123,14 @@ Run individual slices:
 make test-python
 make test-ui
 make test-e2e
+make eval-langextract
 PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m ruff check backend worker shared tests
 npm --prefix frontend run lint
 npm run format:check
 PYTHONPATH=backend:shared python3 -m pytest tests/backend -k templates
 ```
+
+- `make eval-langextract` runs the committed LangExtract golden-set cases in `evals/langextract/cases/`; it is intentionally opt-in because it evaluates live extraction quality against a local LangExtract/Ollama runtime instead of deterministic unit behavior.
 
 Continuous enforcement:
 
@@ -150,6 +153,10 @@ The Python services now fail fast on invalid configuration instead of starting w
 - `WORKER_STATUS_PATH` must remain under `DATA_DIR` so the worker health signal stays inside the shared app data volume
 - `PROVIDER_CATALOG_JSON`, when set, must be a JSON array
 - Provider base URLs must be explicit `http://` or `https://` URLs
+- `EXTRACTFLOW_USE_DOCLING` controls the worker's Docling-backed parser path for PDF, DOCX, HTML, and images; when disabled, those document types fail fast instead of silently falling back to removed legacy parsers
+- `DOCLING_PREWARM` controls whether the worker pre-initializes the cached Docling converters during startup to reduce first-document latency
+- `DOCLING_PDF_OCR_RETRY` controls whether PDFs get a second Docling pass with RapidOCR after the plain-text parse comes back weak
+- `DOCLING_IMAGE_OCR` controls whether image parsing uses Docling OCR or a plain non-OCR pass
 
 Backend readiness surfaces:
 
@@ -162,12 +169,61 @@ Observability surfaces:
 - backend responses include `X-Request-ID`; inbound request IDs are propagated when present, otherwise the API generates one
 - backend logs emit structured request events with method, path, status, duration, and request ID
 - worker logs emit structured lifecycle events for startup and non-idle job status transitions with job identifiers when available
+- worker startup now emits Docling prewarm events so parser warmup failures are visible before the first document hits the queue
+- worker status writes now include the active Docling startup configuration, and when prewarm is enabled the `starting` status is updated with the prewarm result payload
+- LangExtract feedback generation now emits structured diagnostics with reviewed-result counts, generated suggestion counts, and skip reasons
+- LangExtract worker runs now emit structured extraction outcome summaries plus explicit oversized-document rejection events
 
 Failure-path expectations:
 
 - provider probes surface transport failures as `status: error` with the timeout or connection detail preserved
 - worker provider adapters retry up to `retry_count + 1` total attempts before failing the extraction
 - worker jobs move to `failed` with `error_message` populated when the document/template is missing or extraction raises at runtime
+- LangExtract uses `chunk_size` as its internal grounded window size, but `langextract_max_document_chars` is the separate safety ceiling for total document length; runs over that limit fail fast with an explicit error instead of truncating grounded evidence
+
+## LangExtract Eval Harness
+
+The repository now includes a small LangExtract golden-set harness under `evals/langextract/cases/`.
+
+- Each case stores parsed `document_text`, a full template definition, and expected extracted/calculated outputs plus review flags and note substrings.
+- Matching is tolerant for common LLM variance: strings are whitespace/case normalized, numeric values allow a small tolerance, and expected dict keys are matched without failing on extra actual keys.
+- The harness evaluates the extraction and reconciliation pipeline on parsed text, not parser fidelity for PDFs or DOCX files.
+- The committed starter set now covers invoice, invoice-variant, lease, receipt, and statement-style grounded extraction flows so regressions are easier to spot across document families and label variants.
+
+Run it with:
+
+```bash
+make eval-langextract
+```
+
+or point it at a specific case or directory:
+
+```bash
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+"$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases
+```
+
+Live image-OCR smoke test:
+
+```bash
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+PYTHONPATH=worker:shared \
+  "$PYTHON_BIN" -m pytest tests/worker/test_executor.py -k real_docling_ocr_dependency
+```
+
+## LangExtract Observability Summary
+
+If you are collecting structured backend/worker logs locally, you can turn the committed LangExtract events into a quick JSON summary with:
+
+```bash
+python3 ./scripts/summarize-langextract-observability.py /path/to/logfile.jsonl
+```
+
+The summary rolls up:
+
+- `langextract_document_rejected` counts and rejection reasons
+- `langextract_extraction_completed` totals for review-required fields, note counts, and review-signal categories
+- `langextract_feedback_suggestions_built` totals for generated/dismissed suggestions and skip reasons
 
 ## Provider Configuration
 
@@ -180,21 +236,13 @@ The app now separates three concerns:
 Environment variables:
 
 ```bash
-OPENAI_API_KEY=
-AZURE_OPENAI_API_KEY=
-DEEPSEEK_API_KEY=
-KIMI_API_KEY=
-DEFAULT_LOCAL_PROVIDER_BASE_URL=http://host.docker.internal:11434/v1
-DEFAULT_LM_STUDIO_BASE_URL=http://localhost:1234/v1
-DEFAULT_OPENAI_BASE_URL=https://api.openai.com/v1
-DEFAULT_AZURE_OPENAI_BASE_URL=https://example.openai.azure.com
-DEFAULT_AZURE_OPENAI_API_VERSION=2024-10-21
-DEFAULT_AZURE_OPENAI_DEPLOYMENT=gpt-4.1-mini
-DEFAULT_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEFAULT_KIMI_BASE_URL=https://api.moonshot.ai/v1
-CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS=24
-PROVIDER_CATALOG_JSON=
+EXTRACTFLOW_USE_DOCLING=true
+DOCLING_PREWARM=true
+DOCLING_PDF_OCR_RETRY=true
+DOCLING_IMAGE_OCR=true
 ```
+
+Use [`.env.example`](.env.example) as the source of truth for the full local runtime environment contract. The block above calls out the Docling-specific parser toggles because they directly change document parsing behavior.
 
 Readiness and control surfaces:
 
@@ -202,9 +250,15 @@ Readiness and control surfaces:
 - `/api/settings/providers/health` reports whether each provider is actually ready based on required endpoint and env configuration
 - `/api/settings/providers/controls` returns app-level provider controls including the custom-profile reverification threshold
 - the Settings page now includes a custom provider form for private OpenAI-compatible and Azure endpoints, with save and probe actions
+- extraction jobs use the selected schema version by default, but when a provider has been explicitly saved in Settings it is sent as a per-job provider override so the active default matches the queued run
 - saved custom provider profiles move between `Saved`, `Verified`, and `Stale` based on the configured `CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS` window
 - Azure readiness requires `base_url`, `deployment`, `api_version`, and `AZURE_OPENAI_API_KEY`
-- `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples and probes Ollama through `/api/tags`
+- `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples, now authored through a guided schema editor with a live saved-payload preview instead of raw example JSON, and verifies Ollama by issuing a minimal `/api/generate` request for the configured model before queueing
+- LangExtract preserves global grounded offsets by using its own internal windowing with `chunk_size`; this repo separately caps total LangExtract input with `langextract_max_document_chars` so very large documents fail explicitly instead of silently truncating or running unbounded
+- LangExtract examples must reference real extracted field keys from the schema; unknown example field names are rejected in both the UI and API so supervised examples cannot drift away from the extraction contract
+- LangExtract examples must also cover every field the schema marks as required, and the schema editor now shows required-field example coverage before save
+- Reviewed LangExtract runs now surface grounded candidate examples back into the schema editor; operators must explicitly add them to the draft and save a new schema version before they affect future runs
+- The LangExtract schema editor now explains when reviewed runs were skipped for feedback reuse, including missing parsed text and drifted grounded spans, instead of collapsing those cases into a silent empty state
 
 Example custom provider catalog entry:
 
@@ -319,11 +373,14 @@ Rollback checklist:
 - Calculated fields are evaluated after extraction with a deterministic formula engine.
 - Exports and uploaded documents are stored on the shared local Docker volume under `/data`.
 - Sensitive document text is not intentionally logged by default.
+- PDF, DOCX, HTML, and image parsing now go through Docling; PDFs keep the repo's `[Page N]` text contract and retry once with **Docling RapidOCR** when the non-OCR pass is too weak.
+- CSV and Excel files still use the existing pandas path so the worker keeps emitting CSV-shaped text for tabular prompts.
 
 ## Current Constraints
 
 - The default `mock` extractor is a bootstrap path, not production-grade extraction quality.
-- OCR is installed but only lightly integrated.
+- OCR now lives inside the Docling parser flow instead of a separate legacy PDF OCR branch, and the worker no longer installs or calls the old Tesseract-specific Python path.
+- OCR-backed Docling image parsing now depends on `onnxruntime`, and the first OCR-backed image parse may spend extra time downloading RapidOCR model assets before warm caches exist.
 - The review UI is functional but still coarse; it edits normalized JSON directly rather than using field-specific widgets.
 - Authentication, RBAC, audit-grade logging, and team library controls are intentionally deferred to keep the local-first MVP contained.
 - The current queue is SQLite polling, which is acceptable for local/dev but not yet the right control plane for higher-concurrency team workloads.

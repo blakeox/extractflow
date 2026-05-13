@@ -9,6 +9,7 @@ def get_provider_health(entry: LLMProviderCatalogEntry) -> dict[str, object]:
     settings = entry.settings
     checks: list[str] = []
     ready = True
+    status = "ready"
 
     if settings.api_style != "mock" and not settings.base_url:
         ready = False
@@ -35,18 +36,28 @@ def get_provider_health(entry: LLMProviderCatalogEntry) -> dict[str, object]:
             checks.append("LangExtract is only supported in local mode")
         if settings.allow_external_processing:
             ready = False
+            status = "not_ready"
+            checks.append("LangExtract is only supported in local mode")
+        if settings.allow_external_processing:
+            ready = False
+            status = "not_ready"
             checks.append("LangExtract v1 must keep allow_external_processing disabled")
-        checks.append("Requires a reachable Ollama runtime")
+        ready = False
+        if status == "ready":
+            status = "probe_required"
+        checks.append("Run a live probe to confirm Ollama runtime and model availability")
 
     if settings.api_style == "mock":
         checks.append("Bootstrap provider only")
     elif ready:
         checks.append("Configuration present")
+    elif status == "ready":
+        status = "not_ready"
 
     return {
         "provider_key": entry.key,
         "provider_type": entry.provider_type,
         "ready": ready,
-        "status": "ready" if ready else "not_ready",
+        "status": status,
         "checks": checks,
     }

@@ -28,3 +28,28 @@ def test_worker_settings_ensure_paths_creates_status_parent(tmp_path) -> None:
 
     assert (tmp_path / "data" / "parsed").exists()
     assert (tmp_path / "data").exists()
+
+
+def test_worker_settings_allow_disabling_docling_prewarm(tmp_path) -> None:
+    settings = WorkerSettings(**build_worker_settings(tmp_path, docling_prewarm=False))
+
+    assert settings.docling_prewarm is False
+
+
+def test_worker_settings_allow_disabling_docling_parser(tmp_path) -> None:
+    settings = WorkerSettings(**build_worker_settings(tmp_path, EXTRACTFLOW_USE_DOCLING=False))
+
+    assert settings.docling_enabled is False
+
+
+def test_worker_settings_allow_disabling_docling_ocr_paths(tmp_path) -> None:
+    settings = WorkerSettings(
+        **build_worker_settings(
+            tmp_path,
+            docling_pdf_ocr_retry=False,
+            docling_image_ocr=False,
+        )
+    )
+
+    assert settings.docling_pdf_ocr_retry is False
+    assert settings.docling_image_ocr is False
