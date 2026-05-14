@@ -148,8 +148,17 @@ Continuous enforcement:
 
 The Python services now fail fast on invalid configuration instead of starting with ambiguous runtime state.
 
-- `DATABASE_URL` must use `sqlite:///...` because the current runtime and SQLAlchemy setup are SQLite-only
+- `DEPLOYMENT_MODE` can be `local`, `hosted_single_tenant`, or `saas_multi_tenant`
+- `ALLOW_EXTERNAL_PROCESSING` controls whether provider configurations that send document text off-box are allowed at all
+- `REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING` forces Presidio-backed text redaction before any external-provider call
+- `REQUIRE_AUTHENTICATION` must be `true` for `saas_multi_tenant` deployments
+- `CURRENT_TENANT_ID` sets the default tenant scope used by the backend and worker for tenant-owned rows
+- `TRUST_TENANT_HEADER` is disabled by default; when enabled it only works for authenticated `saas_multi_tenant` deployments and requires `X-Tenant-ID` on requests
+- `PRESIDIO_REDACTION_ENABLED` must stay enabled when redaction is required for external processing
+- `PRESIDIO_REDACTION_ENTITIES` configures the Presidio entity types masked before external-provider calls
+- `DATABASE_URL` must use `sqlite:///...` for local mode or a PostgreSQL URL for hosted/SaaS deployments
 - `UPLOADS_DIR`, `EXPORTS_DIR`, and `PARSED_DIR` must remain under `DATA_DIR`
+- New document uploads are persisted as managed references under `DATA_DIR` (for example `uploads/<uuid>-file.pdf`), while existing absolute paths inside `DATA_DIR` still resolve for backward compatibility
 - `WORKER_STATUS_PATH` must remain under `DATA_DIR` so the worker health signal stays inside the shared app data volume
 - `PROVIDER_CATALOG_JSON`, when set, must be a JSON array
 - Provider base URLs must be explicit `http://` or `https://` URLs
@@ -169,6 +178,7 @@ Observability surfaces:
 - backend responses include `X-Request-ID`; inbound request IDs are propagated when present, otherwise the API generates one
 - backend logs emit structured request events with method, path, status, duration, and request ID
 - worker logs emit structured lifecycle events for startup and non-idle job status transitions with job identifiers when available
+- worker status and failure details now carry `tenant_id`, and the worker fails jobs whose document/template/job tenant chain is inconsistent instead of crossing tenant boundaries implicitly
 - worker startup now emits Docling prewarm events so parser warmup failures are visible before the first document hits the queue
 - worker status writes now include the active Docling startup configuration, and when prewarm is enabled the `starting` status is updated with the prewarm result payload
 - LangExtract feedback generation now emits structured diagnostics with reviewed-result counts, generated suggestion counts, and skip reasons
@@ -179,6 +189,7 @@ Failure-path expectations:
 - provider probes surface transport failures as `status: error` with the timeout or connection detail preserved
 - worker provider adapters retry up to `retry_count + 1` total attempts before failing the extraction
 - worker jobs move to `failed` with `error_message` populated when the document/template is missing or extraction raises at runtime
+- external-provider runs now fail closed if Presidio redaction is required but unavailable, and spreadsheet documents still reject that path until cell-aware redaction exists
 - LangExtract uses `chunk_size` as its internal grounded window size, but `langextract_max_document_chars` is the separate safety ceiling for total document length; runs over that limit fail fast with an explicit error instead of truncating grounded evidence
 
 ## LangExtract Eval Harness
@@ -196,11 +207,28 @@ Run it with:
 make eval-langextract
 ```
 
+To persist benchmark history in DuckDB while keeping the same golden-set harness, run:
+
+```bash
+make benchmark-langextract
+```
+
+That stores per-run and per-case results in `evals/langextract/benchmarks.duckdb`.
+
 or point it at a specific case or directory:
 
 ```bash
 PYTHON_BIN="$(./scripts/resolve-python.sh)"
 "$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases
+```
+
+You can also record an ad hoc run with a custom label:
+
+```bash
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+"$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases \
+  --duckdb ./evals/langextract/benchmarks.duckdb \
+  --label local-smoke
 ```
 
 Live image-OCR smoke test:
@@ -236,6 +264,14 @@ The app now separates three concerns:
 Environment variables:
 
 ```bash
+DEPLOYMENT_MODE=local
+ALLOW_EXTERNAL_PROCESSING=true
+REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING=false
+REQUIRE_AUTHENTICATION=false
+CURRENT_TENANT_ID=default
+TRUST_TENANT_HEADER=false
+PRESIDIO_REDACTION_ENABLED=true
+PRESIDIO_REDACTION_ENTITIES=EMAIL_ADDRESS,PHONE_NUMBER,CREDIT_CARD,US_SSN,IBAN_CODE,IP_ADDRESS
 EXTRACTFLOW_USE_DOCLING=true
 DOCLING_PREWARM=true
 DOCLING_PDF_OCR_RETRY=true
@@ -248,10 +284,11 @@ Readiness and control surfaces:
 
 - `/api/settings/providers` returns catalog entries and default settings
 - `/api/settings/providers/health` reports whether each provider is actually ready based on required endpoint and env configuration
-- `/api/settings/providers/controls` returns app-level provider controls including the custom-profile reverification threshold
+- `/api/settings/providers/controls` returns app-level provider controls including deployment mode, tenant mode, external-processing policy, auth requirement, and the custom-profile reverification threshold
 - the Settings page now includes a custom provider form for private OpenAI-compatible and Azure endpoints, with save and probe actions
 - extraction jobs use the selected schema version by default, but when a provider has been explicitly saved in Settings it is sent as a per-job provider override so the active default matches the queued run
 - saved custom provider profiles move between `Saved`, `Verified`, and `Stale` based on the configured `CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS` window
+- when `ALLOW_EXTERNAL_PROCESSING=false`, the provider catalog only returns local providers and the API rejects cloud/external provider saves, probes, activations, and job overrides
 - Azure readiness requires `base_url`, `deployment`, `api_version`, and `AZURE_OPENAI_API_KEY`
 - `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples, now authored through a guided schema editor with a live saved-payload preview instead of raw example JSON, and verifies Ollama by issuing a minimal `/api/generate` request for the configured model before queueing
 - LangExtract preserves global grounded offsets by using its own internal windowing with `chunk_size`; this repo separately caps total LangExtract input with `langextract_max_document_chars` so very large documents fail explicitly instead of silently truncating or running unbounded

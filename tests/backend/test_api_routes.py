@@ -7,8 +7,20 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from app.core.tenant import build_tenant_setting_key, get_current_tenant_id
 from app.db.database import SessionLocal
-from app.models import Document, ExtractionJob, ExtractionResult, ReviewEdit, Setting, Template, TemplateVersion
+from app.main import app
+from app.models import (
+    Document,
+    ExportRecord,
+    ExtractionJob,
+    ExtractionResult,
+    ReviewEdit,
+    Setting,
+    Template,
+    TemplateVersion,
+)
+from app.services.storage import resolve_document_storage_path
 from fastapi import HTTPException
 
 from tests.support.sample_data import build_template_definition
@@ -427,8 +439,12 @@ def test_document_upload_uses_unique_storage_path_for_same_filename(client) -> N
 
     assert len(documents) == 2
     assert documents[0].stored_path != documents[1].stored_path
-    assert Path(documents[0].stored_path).read_bytes() == b"first-version"
-    assert Path(documents[1].stored_path).read_bytes() == b"second-version"
+    assert not Path(documents[0].stored_path).is_absolute()
+    assert not Path(documents[1].stored_path).is_absolute()
+    assert documents[0].stored_path.startswith("uploads/")
+    assert documents[1].stored_path.startswith("uploads/")
+    assert resolve_document_storage_path(documents[0].stored_path).read_bytes() == b"first-version"
+    assert resolve_document_storage_path(documents[1].stored_path).read_bytes() == b"second-version"
 
 
 def test_job_creation_rejects_missing_document_or_template(client) -> None:
@@ -535,7 +551,7 @@ def test_review_and_export_flow_updates_result_and_writes_file(client) -> None:
     export_response = client.post(f"/api/results/{result_id}/exports/json")
     assert export_response.status_code == 200
     export_payload = export_response.json()
-    assert Path(export_payload["path"]).exists()
+    assert (Path(os.environ["EXPORTS_DIR"]) / export_payload["path"]).exists()
 
 
 def test_review_recalculation_updates_calculated_fields(client) -> None:
@@ -1097,8 +1113,8 @@ def test_export_routes_cover_csv_excel_and_invalid_format(client) -> None:
     assert csv_response.status_code == 200
     assert excel_response.status_code == 200
 
-    csv_path = Path(csv_response.json()["path"])
-    excel_path = Path(excel_response.json()["path"])
+    csv_path = Path(os.environ["EXPORTS_DIR"]) / csv_response.json()["path"]
+    excel_path = Path(os.environ["EXPORTS_DIR"]) / excel_response.json()["path"]
     assert csv_path.exists()
     assert excel_path.exists()
     assert "vendor_name" in csv_path.read_text(encoding="utf-8")
@@ -1176,6 +1192,7 @@ def test_export_list_and_download_routes_return_saved_export_metadata(client) ->
     assert list_response.json()[0]["result_id"] == result_id
     assert list_response.json()[0]["job_id"] == job_id
     assert list_response.json()[0]["export_format"] == "json"
+    assert list_response.json()[0]["file_path"].startswith("result-")
 
     download_response = client.get(f"/api/exports/{export_payload['export_id']}/download")
     assert download_response.status_code == 200
@@ -1215,6 +1232,22 @@ def test_export_download_route_returns_404_for_missing_export(client) -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Export not found."
+
+
+def test_export_download_route_rejects_paths_outside_exports_dir(client, tmp_path) -> None:
+    outside_file = tmp_path / "outside.json"
+    outside_file.write_text("{}", encoding="utf-8")
+
+    with SessionLocal() as db:
+        record = ExportRecord(result_id=1, export_format="json", file_path=str(outside_file))
+        db.add(record)
+        db.commit()
+        export_id = record.id
+
+    response = client.get(f"/api/exports/{export_id}/download")
+
+    assert response.status_code == 400
+    assert "Managed path must stay inside" in response.json()["detail"]
 
 
 def test_provider_settings_round_trip(client) -> None:
@@ -1675,7 +1708,88 @@ def test_provider_controls_returns_probe_freshness_threshold(client) -> None:
     response = client.get("/api/settings/providers/controls")
 
     assert response.status_code == 200
-    assert response.json()["custom_provider_probe_max_age_hours"] == 24
+    payload = response.json()
+    assert payload["deployment_mode"] == "local"
+    assert payload["tenant_mode"] == "single_tenant"
+    assert payload["allow_external_processing"] is True
+    assert payload["require_redaction_for_external_processing"] is False
+    assert payload["require_authentication"] is False
+    assert payload["custom_provider_probe_max_age_hours"] == 24
+
+
+def test_provider_catalog_hides_external_providers_when_disabled(client, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.provider_catalog.settings.allow_external_processing", False)
+
+    response = client.get("/api/settings/providers")
+
+    assert response.status_code == 200
+    provider_types = {provider["provider_type"] for provider in response.json()["providers"]}
+    assert provider_types == {"mock", "langextract", "ollama", "lm_studio"}
+
+
+def test_provider_settings_reject_external_processing_when_disabled(client, monkeypatch) -> None:
+    monkeypatch.setattr("app.api.routes.settings.allow_external_processing", False)
+
+    response = client.put(
+        "/api/settings/provider",
+        json={
+            "settings": {
+                "mode": "cloud",
+                "provider_type": "openai",
+                "provider_label": "OpenAI",
+                "api_style": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_env_var": "OPENAI_API_KEY",
+                "api_key_required": True,
+                "model": "gpt-4.1",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": True,
+                "allow_external_processing": True,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "This deployment disables external provider processing. Choose a local provider or enable "
+        "ALLOW_EXTERNAL_PROCESSING."
+    )
+
+
+def test_provider_settings_allow_external_processing_when_redaction_flow_enabled(client, monkeypatch) -> None:
+    monkeypatch.setattr("app.api.routes.settings.allow_external_processing", True)
+    monkeypatch.setattr("app.api.routes.settings.require_redaction_for_external_processing", True)
+    monkeypatch.setattr("app.api.routes.settings.presidio_redaction_enabled", True)
+
+    response = client.put(
+        "/api/settings/provider",
+        json={
+            "settings": {
+                "mode": "cloud",
+                "provider_type": "openai",
+                "provider_label": "OpenAI",
+                "api_style": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_env_var": "OPENAI_API_KEY",
+                "api_key_required": True,
+                "model": "gpt-4.1",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": True,
+                "allow_external_processing": True,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["allow_external_processing"] is True
 
 
 def test_custom_provider_profile_save_requires_successful_probe(client, monkeypatch) -> None:
@@ -1898,7 +2012,11 @@ def test_custom_provider_profile_reverify_refreshes_probe_metadata(client, monke
     profile_id = create_response.json()["id"]
 
     with SessionLocal() as db:
-        setting = db.query(Setting).filter(Setting.key == "custom_provider_profiles").first()
+        setting = (
+            db.query(Setting)
+            .filter(Setting.key == build_tenant_setting_key("default", "custom_provider_profiles"))
+            .first()
+        )
         assert setting is not None
         payload = list(setting.value)
         payload[0] = {
@@ -1932,7 +2050,11 @@ def test_custom_provider_profile_activation_requires_recent_probe(client, monkey
     profile_id = create_response.json()["id"]
 
     with SessionLocal() as db:
-        setting = db.query(Setting).filter(Setting.key == "custom_provider_profiles").first()
+        setting = (
+            db.query(Setting)
+            .filter(Setting.key == build_tenant_setting_key("default", "custom_provider_profiles"))
+            .first()
+        )
         assert setting is not None
         payload = list(setting.value)
         payload[0] = {
@@ -1963,6 +2085,134 @@ def test_custom_provider_profile_delete_rejects_missing_profile_id(client) -> No
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Custom provider profile not found."
+
+
+def test_tenant_scoping_hides_other_tenant_records(client) -> None:
+    with SessionLocal() as db:
+        template = Template(
+            tenant_id="tenant-a",
+            name="Tenant A Schema",
+            description="A",
+            document_type="invoice",
+        )
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(
+            tenant_id="tenant-a",
+            template_id=template.id,
+            version="1.0.0",
+            definition=build_template_definition(),
+        )
+        db.add(version)
+        db.flush()
+        document = Document(
+            tenant_id="tenant-a",
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path="uploads/tenant-a.txt",
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(
+            tenant_id="tenant-a",
+            document_id=document.id,
+            template_version_id=version.id,
+            status="completed",
+        )
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            tenant_id="tenant-a",
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Tenant A Schema",
+                "template_version": "1.0.0",
+                "llm_provider": build_template_definition()["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [],
+                "calculated_fields": [],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.flush()
+        export = ExportRecord(
+            tenant_id="tenant-a",
+            result_id=result.id,
+            export_format="json",
+            file_path="result-1.json",
+        )
+        db.add(export)
+        db.commit()
+        job_id = job.id
+        result_id = result.id
+        export_id = export.id
+        version_id = version.id
+
+    app.dependency_overrides[get_current_tenant_id] = lambda: "tenant-b"
+    try:
+        assert client.get("/api/templates").json() == []
+        assert client.get("/api/documents").json() == []
+        assert client.get("/api/jobs").json() == []
+        assert client.get("/api/exports").json() == []
+
+        job_response = client.post(
+            "/api/jobs",
+            json={"document_id": 1, "template_version_id": version_id},
+        )
+        assert job_response.status_code == 404
+        assert client.get(f"/api/jobs/{job_id}/result").status_code == 404
+        assert client.post(f"/api/results/{result_id}/exports/json").status_code == 404
+        assert client.get(f"/api/exports/{export_id}/download").status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_current_tenant_id, None)
+
+
+def test_provider_settings_are_tenant_scoped(client) -> None:
+    tenant_a_payload = {
+        "settings": {
+            "mode": "local",
+            "provider_type": "mock",
+            "base_url": None,
+            "model": "tenant-a-model",
+            "temperature": 0.1,
+            "max_tokens": 4000,
+            "supports_json_mode": True,
+            "allow_external_processing": False,
+            "timeout_seconds": 120,
+            "retry_count": 2,
+            "chunk_size": 16000,
+        }
+    }
+
+    assert client.put("/api/settings/provider", json=tenant_a_payload).status_code == 200
+
+    app.dependency_overrides[get_current_tenant_id] = lambda: "tenant-b"
+    try:
+        default_response = client.get("/api/settings/provider")
+        assert default_response.status_code == 200
+        assert default_response.json()["model"] == "mock-extractor"
+
+        update_response = client.put(
+            "/api/settings/provider",
+            json={
+                "settings": {
+                    **tenant_a_payload["settings"],
+                    "model": "tenant-b-model",
+                }
+            },
+        )
+        assert update_response.status_code == 200
+        assert client.get("/api/settings/provider").json()["model"] == "tenant-b-model"
+    finally:
+        app.dependency_overrides.pop(get_current_tenant_id, None)
+
+    assert client.get("/api/settings/provider").json()["model"] == "tenant-a-model"
 
 
 def test_review_requires_at_least_one_edit(client) -> None:

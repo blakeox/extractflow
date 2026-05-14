@@ -240,9 +240,7 @@ class OpenAICompatibleAdapter:
                         headers=headers,
                     )
                     response.raise_for_status()
-                    content = response.json()["choices"][0]["message"]["content"]
-                    parsed = json.loads(content)
-                    return [ExtractionFieldResult.model_validate(item) for item in parsed["extracted_fields"]]
+                    return parse_extraction_field_results(response.json())
                 except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
                     last_error = exc
             raise RuntimeError(f"Provider call failed for {settings.provider_type}: {last_error}") from last_error
@@ -285,12 +283,30 @@ class AzureOpenAIAdapter:
                 try:
                     response = client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
-                    content = response.json()["choices"][0]["message"]["content"]
-                    parsed = json.loads(content)
-                    return [ExtractionFieldResult.model_validate(item) for item in parsed["extracted_fields"]]
+                    return parse_extraction_field_results(response.json())
                 except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
                     last_error = exc
             raise RuntimeError(f"Provider call failed for {settings.provider_type}: {last_error}") from last_error
+
+
+def parse_extraction_field_results(response_payload: dict[str, Any]) -> list[ExtractionFieldResult]:
+    try:
+        content = response_payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("Provider response did not include choices[0].message.content.") from exc
+
+    if isinstance(content, str):
+        parsed = json.loads(content)
+    elif isinstance(content, dict):
+        parsed = content
+    else:
+        raise ValueError("Provider response content must be a JSON string or object.")
+
+    extracted_fields = parsed.get("extracted_fields")
+    if not isinstance(extracted_fields, list):
+        raise ValueError("Provider response must include an extracted_fields list.")
+
+    return [ExtractionFieldResult.model_validate(item) for item in extracted_fields]
 
 
 def _import_langextract() -> tuple[Any, Any, Any, Any]:

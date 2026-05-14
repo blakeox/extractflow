@@ -39,6 +39,7 @@ def reset_worker_state() -> None:
                 """
                 CREATE TABLE documents (
                     id INTEGER PRIMARY KEY,
+                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
                     original_filename VARCHAR(255) NOT NULL,
                     content_type VARCHAR(255) NOT NULL,
                     stored_path VARCHAR(500) NOT NULL,
@@ -54,6 +55,7 @@ def reset_worker_state() -> None:
                 """
                 CREATE TABLE template_versions (
                     id INTEGER PRIMARY KEY,
+                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
                     template_id INTEGER NOT NULL,
                     version VARCHAR(50) NOT NULL,
                     definition JSON NOT NULL,
@@ -67,11 +69,15 @@ def reset_worker_state() -> None:
                 """
                 CREATE TABLE extraction_jobs (
                     id INTEGER PRIMARY KEY,
+                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
                     document_id INTEGER NOT NULL,
                     template_version_id INTEGER NOT NULL,
                     provider_override JSON,
                     status VARCHAR(50) NOT NULL,
                     error_message TEXT,
+                    claimed_at DATETIME,
+                    worker_id VARCHAR(255),
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
                     created_at DATETIME,
                     updated_at DATETIME
                 )
@@ -83,7 +89,8 @@ def reset_worker_state() -> None:
                 """
                 CREATE TABLE extraction_results (
                     id INTEGER PRIMARY KEY,
-                    job_id INTEGER NOT NULL,
+                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+                    job_id INTEGER NOT NULL UNIQUE,
                     result_json JSON NOT NULL,
                     review_status VARCHAR(50) NOT NULL,
                     created_at DATETIME,

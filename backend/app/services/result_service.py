@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import ExportRecord, ExtractionJob, ExtractionResult, ReviewEdit, TemplateVersion
+from app.services.storage import build_export_target
 
 
 def utc_now() -> datetime:
@@ -32,6 +33,7 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
         target = field_index[edit.field_name]
         db.add(
             ReviewEdit(
+                tenant_id=result.tenant_id,
                 result_id=result.id,
                 reviewer=payload.reviewer,
                 field_name=edit.field_name,
@@ -47,9 +49,20 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
         target.requires_review = False
 
     if payload.recalculate:
-        job = db.query(ExtractionJob).filter(ExtractionJob.id == result.job_id).first()
+        job = (
+            db.query(ExtractionJob)
+            .filter(ExtractionJob.id == result.job_id, ExtractionJob.tenant_id == result.tenant_id)
+            .first()
+        )
         if job:
-            job_template = db.query(TemplateVersion).filter(TemplateVersion.id == job.template_version_id).first()
+            job_template = (
+                db.query(TemplateVersion)
+                .filter(
+                    TemplateVersion.id == job.template_version_id,
+                    TemplateVersion.tenant_id == result.tenant_id,
+                )
+                .first()
+            )
         else:
             job_template = None
         if job_template:
@@ -75,10 +88,7 @@ def export_result(db: Session, result: ExtractionResult, export_format: str) -> 
     summary = ExtractionValidationSummary.model_validate(result.result_json)
     timestamp = utc_now().strftime("%Y%m%d%H%M%S")
     Path(settings.exports_dir).mkdir(parents=True, exist_ok=True)
-    path = (
-        Path(settings.exports_dir)
-        / f"result-{result.id}-{timestamp}.{'xlsx' if export_format == 'excel' else export_format}"
-    )
+    reference, path = build_export_target(result.id, export_format, timestamp)
 
     if export_format == "json":
         path.write_text(json.dumps(summary.model_dump(mode="json"), indent=2), encoding="utf-8")
@@ -139,7 +149,9 @@ def export_result(db: Session, result: ExtractionResult, export_format: str) -> 
     else:
         raise ValueError(f"Unsupported export format: {export_format}")
 
-    record = ExportRecord(result_id=result.id, export_format=export_format, file_path=str(path))
+    record = ExportRecord(
+        tenant_id=result.tenant_id, result_id=result.id, export_format=export_format, file_path=reference
+    )
     db.add(record)
     db.commit()
     db.refresh(record)

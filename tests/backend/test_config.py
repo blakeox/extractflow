@@ -49,3 +49,42 @@ def test_settings_allow_configurable_custom_provider_probe_max_age_hours(tmp_pat
     )
 
     assert settings.custom_provider_probe_max_age_hours == 12
+
+
+def test_settings_accept_postgres_database_urls(tmp_path) -> None:
+    settings = Settings(
+        **build_backend_settings(
+            tmp_path,
+            database_url="postgresql+psycopg://extractflow:secret@db.internal/extractflow",
+        )
+    )
+
+    assert settings.database_url == "postgresql+psycopg://extractflow:secret@db.internal/extractflow"
+
+
+def test_saas_settings_require_authentication(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="REQUIRE_AUTHENTICATION must be true for saas_multi_tenant deployments"):
+        Settings(
+            **build_backend_settings(
+                tmp_path,
+                deployment_mode="saas_multi_tenant",
+                require_authentication=False,
+            )
+        )
+
+
+def test_settings_reject_invalid_current_tenant_id(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="CURRENT_TENANT_ID"):
+        Settings(**build_backend_settings(tmp_path, current_tenant_id="bad tenant"))
+
+
+def test_settings_require_auth_for_trusted_tenant_header(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="TRUST_TENANT_HEADER requires"):
+        Settings(
+            **build_backend_settings(
+                tmp_path,
+                deployment_mode="hosted_single_tenant",
+                require_authentication=True,
+                trust_tenant_header=True,
+            )
+        )
