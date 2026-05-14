@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from hashlib import sha256
-from pathlib import Path
 
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.langextract_feedback import build_langextract_feedback_attributes
@@ -26,6 +25,7 @@ from app.schemas.api import (
     LangExtractFeedbackSuggestionListResponse,
     LangExtractFeedbackSuggestionResponse,
 )
+from app.services.storage import resolve_document_storage_path
 
 CONTEXT_RADIUS = 160
 SKIP_MISSING_DOCUMENT_TEXT = "missing_document_text"
@@ -52,7 +52,12 @@ def list_langextract_feedback_suggestions(
         db.query(ExtractionResult, ExtractionJob, Document)
         .join(ExtractionJob, ExtractionJob.id == ExtractionResult.job_id)
         .join(Document, Document.id == ExtractionJob.document_id)
-        .filter(ExtractionJob.template_version_id == template_version.id)
+        .filter(
+            ExtractionJob.template_version_id == template_version.id,
+            ExtractionResult.tenant_id == template_version.tenant_id,
+            ExtractionJob.tenant_id == template_version.tenant_id,
+            Document.tenant_id == template_version.tenant_id,
+        )
         .all()
     )
     if not result_rows:
@@ -60,7 +65,10 @@ def list_langextract_feedback_suggestions(
 
     result_ids = [result.id for result, _, _ in result_rows]
     review_edits = (
-        db.query(ReviewEdit).filter(ReviewEdit.result_id.in_(result_ids)).order_by(ReviewEdit.created_at.asc()).all()
+        db.query(ReviewEdit)
+        .filter(ReviewEdit.tenant_id == template_version.tenant_id, ReviewEdit.result_id.in_(result_ids))
+        .order_by(ReviewEdit.created_at.asc())
+        .all()
     )
     edits_by_result: dict[int, list[ReviewEdit]] = defaultdict(list)
     for edit in review_edits:
@@ -105,7 +113,7 @@ def list_langextract_feedback_suggestions(
             ):
                 existing.last_reviewed_at = candidate.last_reviewed_at
 
-    dismissed_keys = _get_dismissed_suggestion_keys(db, template_version.id, list(grouped))
+    dismissed_keys = _get_dismissed_suggestion_keys(db, template_version.tenant_id, template_version.id, list(grouped))
     suggestions = sorted(
         (suggestion for suggestion in grouped.values() if suggestion.key not in dismissed_keys),
         key=lambda item: (
@@ -158,6 +166,7 @@ def set_langextract_feedback_suggestion_dismissed(
     record = (
         db.query(LangExtractFeedbackDecision)
         .filter(
+            LangExtractFeedbackDecision.tenant_id == template_version.tenant_id,
             LangExtractFeedbackDecision.template_version_id == template_version.id,
             LangExtractFeedbackDecision.suggestion_key == suggestion_key,
         )
@@ -165,6 +174,7 @@ def set_langextract_feedback_suggestion_dismissed(
     )
     if record is None:
         record = LangExtractFeedbackDecision(
+            tenant_id=template_version.tenant_id,
             template_version_id=template_version.id,
             suggestion_key=suggestion_key,
             dismissed=dismissed,
@@ -261,12 +271,15 @@ def _build_candidate_suggestion(
     )
 
 
-def _get_dismissed_suggestion_keys(db: Session, template_version_id: int, suggestion_keys: list[str]) -> set[str]:
+def _get_dismissed_suggestion_keys(
+    db: Session, tenant_id: str, template_version_id: int, suggestion_keys: list[str]
+) -> set[str]:
     if not suggestion_keys:
         return set()
     rows = (
         db.query(LangExtractFeedbackDecision.suggestion_key)
         .filter(
+            LangExtractFeedbackDecision.tenant_id == tenant_id,
             LangExtractFeedbackDecision.template_version_id == template_version_id,
             LangExtractFeedbackDecision.dismissed.is_(True),
             LangExtractFeedbackDecision.suggestion_key.in_(suggestion_keys),
@@ -280,7 +293,10 @@ def _read_document_text(document: Document) -> str | None:
     for candidate in (document.parsed_text_path, document.stored_path if "text" in document.content_type else None):
         if not candidate:
             continue
-        path = Path(candidate)
+        try:
+            path = resolve_document_storage_path(candidate)
+        except ValueError:
+            continue
         if not path.exists():
             continue
         try:

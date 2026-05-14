@@ -220,7 +220,9 @@ def list_provider_catalog() -> list[LLMProviderCatalogEntry]:
         ),
     ]
     catalog.extend(_load_custom_catalog())
-    return catalog
+    if settings.allow_external_processing:
+        return catalog
+    return [entry for entry in catalog if not entry.settings.allow_external_processing]
 
 
 def _catalog_entry(**kwargs) -> LLMProviderCatalogEntry:

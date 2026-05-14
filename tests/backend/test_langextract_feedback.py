@@ -7,9 +7,11 @@ from pathlib import Path
 from app.db.database import SessionLocal
 from app.models import Document, ExtractionJob, ExtractionResult, ReviewEdit, Template, TemplateVersion
 from app.services.langextract_feedback import (
+    _read_document_text,
     list_langextract_feedback_suggestions,
     set_langextract_feedback_suggestion_dismissed,
 )
+from app.services.storage import build_document_storage_reference
 
 from tests.support.sample_data import build_template_definition
 
@@ -199,6 +201,34 @@ def test_list_langextract_feedback_suggestions_dedupes_matching_review_examples(
         "vendor_name",
         "total_amount",
     ]
+
+
+def test_read_document_text_ignores_paths_outside_data_dir(tmp_path) -> None:
+    outside_path = tmp_path / "outside.txt"
+    outside_path.write_text("Invoice Vendor: Acme Corp", encoding="utf-8")
+    document = Document(
+        original_filename="outside.txt",
+        content_type="text/plain",
+        stored_path=str(outside_path),
+        parsed_text_path=None,
+        status="completed",
+    )
+
+    assert _read_document_text(document) is None
+
+
+def test_read_document_text_accepts_managed_document_reference() -> None:
+    managed_path = Path(os.environ["DATA_DIR"]) / "uploads" / "managed-invoice.txt"
+    managed_path.write_text("Invoice Vendor: Acme Corp", encoding="utf-8")
+    document = Document(
+        original_filename="managed-invoice.txt",
+        content_type="text/plain",
+        stored_path=build_document_storage_reference(managed_path),
+        parsed_text_path=None,
+        status="completed",
+    )
+
+    assert _read_document_text(document) == "Invoice Vendor: Acme Corp"
 
 
 def test_list_langextract_feedback_suggestions_logs_diagnostics(monkeypatch) -> None:

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from extraction_core.observability import configure_logger, log_event
+from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +17,7 @@ from app.core.config import settings
 from app.db.database import Base, SessionLocal, engine
 
 Base.metadata.create_all(bind=engine)
+ensure_extraction_job_runtime_columns(engine)
 logger = configure_logger("extractflow.backend")
 
 

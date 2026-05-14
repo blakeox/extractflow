@@ -68,4 +68,5 @@ def test_worker_runtime_includes_image_ocr_dependencies() -> None:
     dockerfile_text = (repo_root() / "worker" / "Dockerfile").read_text(encoding="utf-8")
 
     assert "onnxruntime==" in requirements_text, "worker/requirements.txt is missing onnxruntime for image OCR"
+    assert "pytesseract" not in requirements_text, "worker/requirements.txt should not keep legacy Tesseract deps"
     assert "libglib2.0-0" in dockerfile_text, "worker/Dockerfile is missing libglib2.0-0 for RapidOCR/OpenCV"

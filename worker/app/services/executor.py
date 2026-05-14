@@ -15,8 +15,10 @@ from extraction_core.models import (
 )
 from extraction_core.observability import configure_logger, log_event
 
+from app.core.config import settings as app_settings
 from app.services.parser import parse_document
 from app.services.provider import ExtractionProvider
+from app.services.redaction import MASK_CHAR, redact_text
 from app.services.validator import validate_calculated_field, validate_extracted_field
 
 logger = configure_logger("extractflow.worker.executor")
@@ -29,15 +31,57 @@ def execute_extraction(
     settings = (
         LLMProviderSettings.model_validate(provider_override) if provider_override else template.llm_provider_settings
     )
+    if settings.allow_external_processing and not app_settings.allow_external_processing:
+        raise ValueError(
+            "This deployment disables external provider processing. Choose a local provider or enable "
+            "ALLOW_EXTERNAL_PROCESSING."
+        )
+    if (
+        settings.allow_external_processing
+        and app_settings.require_redaction_for_external_processing
+        and not app_settings.presidio_redaction_enabled
+    ):
+        raise ValueError(
+            "This deployment requires document redaction before external provider processing, but Presidio "
+            "redaction is disabled. Enable PRESIDIO_REDACTION_ENABLED or disable "
+            "REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING."
+        )
     text = parse_document(document_path)
+    redaction_note: str | None = None
+    if settings.allow_external_processing and app_settings.require_redaction_for_external_processing:
+        if document_path.lower().endswith((".csv", ".xlsx")):
+            raise ValueError(
+                "This deployment requires redaction before external provider processing, and spreadsheet "
+                "documents are not yet supported by the Presidio redaction flow."
+            )
+        redaction_result = redact_text(text, app_settings.configured_redaction_entities)
+        text = redaction_result.text
+        redaction_note = (
+            "External provider text redaction applied for "
+            f"{redaction_result.span_count} spans across {len(redaction_result.entity_counts)} entity types."
+        )
+        log_event(
+            logger,
+            logging.INFO,
+            "external_provider_text_redacted",
+            document_id=document_id,
+            model=settings.model,
+            provider_type=settings.provider_type,
+            span_count=redaction_result.span_count,
+            entity_counts=redaction_result.entity_counts,
+        )
     provider = ExtractionProvider()
     provider_results = provider.extract(text, template, settings)
+    if settings.allow_external_processing and app_settings.require_redaction_for_external_processing:
+        provider_results = sanitize_redacted_provider_results(provider_results)
     extracted_fields, document_level_notes = reconcile_extracted_fields(
         template.extracted_fields,
         provider_results,
         minimum_confidence_threshold=template.minimum_confidence_threshold,
         review_required_on_low_confidence=template.review_required_on_low_confidence,
     )
+    if redaction_note:
+        document_level_notes.append(redaction_note)
 
     engine = FormulaEngine()
     context = {field.field_name: field.normalized_value for field in extracted_fields}
@@ -159,6 +203,22 @@ def reconcile_extracted_fields(
         reconciled.append(result)
 
     return reconciled, notes
+
+
+def sanitize_redacted_provider_results(provider_results: list[ExtractionFieldResult]) -> list[ExtractionFieldResult]:
+    for result in provider_results:
+        if MASK_CHAR not in result.source_text and not (
+            isinstance(result.extracted_value, str) and MASK_CHAR in result.extracted_value
+        ):
+            continue
+        result.extracted_value = None
+        result.normalized_value = None
+        result.requires_review = True
+        result.extraction_notes = append_note(
+            result.extraction_notes,
+            "External-provider evidence contained redacted spans, so the extracted value was cleared for review.",
+        )
+    return provider_results
 
 
 def build_missing_field_result(definition: ExtractionFieldDefinition) -> ExtractionFieldResult:
