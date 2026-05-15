@@ -15,7 +15,7 @@ TEXT_SUFFIXES = {".txt", ".md"}
 HTML_SUFFIXES = {".html", ".htm"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tiff"}
 SPREADSHEET_SUFFIXES = {".csv", ".xlsx", ".xls"}
-DOCLING_SUFFIXES = {".pdf", ".docx", *HTML_SUFFIXES, *IMAGE_SUFFIXES}
+DOCLING_SUFFIXES = {".pdf", ".docx", ".pptx", *HTML_SUFFIXES, *IMAGE_SUFFIXES}
 
 
 class DocumentParseError(RuntimeError):
@@ -42,6 +42,8 @@ def parse_with_docling(path: Path) -> str:
         return parse_pdf_with_docling(path)
     if suffix == ".docx":
         return parse_docx_with_docling(path)
+    if suffix == ".pptx":
+        return parse_pptx_with_docling(path)
     if suffix in HTML_SUFFIXES:
         return parse_html_with_docling(path)
     if suffix in IMAGE_SUFFIXES:
@@ -94,6 +96,14 @@ def parse_html_with_docling(path: Path) -> str:
         log_parser_selected(path, parser_name="docling", ocr_enabled=False)
         return parsed_text
     raise DocumentParseError("Docling HTML parsing produced no usable text.")
+
+
+def parse_pptx_with_docling(path: Path) -> str:
+    parsed_text = _parse_docling_text(path, kind="pptx")
+    if has_meaningful_text(parsed_text):
+        log_parser_selected(path, parser_name="docling", ocr_enabled=False)
+        return parsed_text
+    raise DocumentParseError("Docling PPTX parsing produced no usable text.")
 
 
 def parse_image_with_docling(path: Path) -> str:
@@ -221,6 +231,7 @@ def prewarm_docling_converters() -> dict[str, object]:
     warm_targets = [
         ("pdf", False, InputFormat.PDF),
         ("docx", False, None),
+        ("pptx", False, None),
         ("html", False, None),
         ("image", settings.docling_image_ocr, InputFormat.IMAGE),
     ]
@@ -299,6 +310,9 @@ def get_docling_converter(kind: str, do_ocr: bool):
 
     if kind == "docx":
         return DocumentConverter(allowed_formats=[InputFormat.DOCX])
+
+    if kind == "pptx":
+        return DocumentConverter(allowed_formats=[InputFormat.PPTX])
 
     if kind == "html":
         return DocumentConverter(allowed_formats=[InputFormat.HTML])

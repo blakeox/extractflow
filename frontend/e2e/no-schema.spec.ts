@@ -27,9 +27,10 @@ test("shows the constrained no-schema workflow when no templates exist", async (
   await expect(
     page.getByRole("button", { name: "Open schema builder" }),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open help" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Schema" })).toHaveCount(0);
   await expect(
-    page.getByRole("combobox", { name: "Advanced: version" }),
+    page.getByRole("button", { name: "Change version" }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Run extraction" }),

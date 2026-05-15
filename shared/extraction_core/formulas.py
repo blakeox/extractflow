@@ -6,6 +6,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from dateutil import parser as date_parser
+
 
 class FormulaValidationError(Exception):
     pass
@@ -43,6 +45,10 @@ def unwrap_value(value: Any) -> Any:
 def parse_date(value: Any) -> date | None:
     if value is None:
         return None
+    if isinstance(value, AttrView):
+        value = value.unwrap()
+    if isinstance(value, dict):
+        value = value.get("value", value)
     if isinstance(value, date) and not isinstance(value, datetime):
         return value
     if isinstance(value, datetime):
@@ -51,7 +57,10 @@ def parse_date(value: Any) -> date | None:
         try:
             return datetime.fromisoformat(value).date()
         except ValueError:
-            return None
+            try:
+                return date_parser.parse(value).date()
+            except (TypeError, ValueError, OverflowError):
+                return None
     return None
 
 

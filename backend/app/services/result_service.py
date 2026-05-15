@@ -29,6 +29,16 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
     summary = ExtractionValidationSummary.model_validate(result.result_json)
     field_index = {field.field_name: field for field in summary.extracted_fields}
 
+    if not payload.edits:
+        for field in summary.extracted_fields:
+            if field.requires_review:
+                field.validation_status = "reviewed"
+                field.requires_review = False
+        for calc in summary.calculated_fields:
+            if calc.requires_review:
+                calc.validation_status = "reviewed"
+                calc.requires_review = False
+
     for edit in payload.edits:
         target = field_index[edit.field_name]
         db.add(
@@ -73,6 +83,7 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
                 calc = next(item for item in summary.calculated_fields if item.field_name == definition.name)
                 calc.calculated_value = engine.evaluate(definition.formula, context)
                 calc.validation_status = "reviewed"
+                calc.requires_review = False
                 context[calc.field_name] = calc.calculated_value
 
     recompute_fields_requiring_review(summary)

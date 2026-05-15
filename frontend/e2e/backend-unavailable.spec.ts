@@ -17,17 +17,23 @@ test("keeps the web workspace visible when the backend health check fails", asyn
     page.getByRole("heading", { name: "New extraction" }),
   ).toBeVisible();
   await expect(page.getByText("Upload PDF or source file")).toBeVisible();
-  await expect(page.getByText("No schemas yet")).toBeVisible();
+  await expect(page.getByText("Workspace data unavailable")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Open schema builder" }),
+    page.getByRole("button", { name: "Retry connection" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open help" }).first(),
   ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Schema" })).toHaveCount(0);
   await expect(
-    page.getByRole("combobox", { name: "Advanced: version" }),
+    page.getByRole("button", { name: "Change version" }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Run extraction" }),
   ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Reconnect backend to upload" }),
+  ).toBeDisabled();
   await expect(page.getByRole("button", { name: "Start stack" })).toHaveCount(
     0,
   );
