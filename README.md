@@ -1,6 +1,16 @@
-# Schema-Driven Document Extraction
+# ExtractFlow
 
 Local-first document extraction and calculation platform for structured, schema-driven LLM workflows.
+
+## Project Status
+
+ExtractFlow is an open-source workspace for schema-driven document extraction with human review, deterministic calculations, and structured exports.
+
+Current release posture:
+
+- Best suited today for local and single-team deployments
+- Multi-tenant and external-processing controls exist, but those paths should be treated as operator-owned configuration surfaces rather than turnkey hosted guarantees
+- Desktop packaging is supported, but the Dockerized local web stack remains the primary development and verification path
 
 ## Decision
 
@@ -48,6 +58,7 @@ Provider framework:
 - Remote providers use environment-backed API keys rather than storing secrets in app settings
 - Additional providers can be injected with `PROVIDER_CATALOG_JSON` as long as they expose an OpenAI-compatible `/chat/completions` endpoint
 - Azure OpenAI is handled separately because it is deployment-scoped and uses Azure `api-key` plus `api-version` routing
+- The worker currently pins `docling==2.93.0` as the known-good parser/OCR release; remaining deprecation warnings observed in tests are upstream `docling` internals, not active ExtractFlow parser calls
 
 ## Run
 
@@ -60,7 +71,7 @@ Open [http://localhost:3000](http://localhost:3000).
 What `make dev-up` hardens:
 
 - Verifies Docker and Compose are actually available
-- Creates `.env` from [.env.example](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/.env.example) on first run
+- Creates `.env` from [.env.example](/Users/blakepowell/Documents/GitHub/extractflow/.env.example) on first run
 - Automatically chooses free host ports when the defaults are already occupied
 - Starts services with container healthchecks and readiness-based dependencies
 - Seeds a generalized sample schema on backend startup unless disabled
@@ -137,7 +148,7 @@ Continuous enforcement:
 - GitHub Actions runs Python tests and frontend verification on every push, pull request, and manual dispatch
 - Local Lefthook hooks run the same verification scripts used by CI so contributor machines and GitHub Actions enforce the same contract
 - A separate browser E2E job runs Playwright against the Vite app and covers upload -> run -> review with mocked API traffic
-- Secret scanning also runs in-repo through `scripts/scan-secrets.py` locally and in `.github/workflows/secret-scan.yml`, which is the fallback because GitHub native secret scanning is unavailable on this private repository
+- Secret scanning also runs in-repo through `scripts/scan-secrets.py` locally and in `.github/workflows/secret-scan.yml` so tracked-file secret checks remain part of both local and CI verification
 - Ruff now standardizes the Python surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
 - Frontend CI uses `npm ci` against the checked-in lockfile for deterministic installs
 - PRs also run dependency review, CodeQL scans the Python and TypeScript surfaces, and Dependabot tracks npm, pip, cargo, and GitHub Actions updates
@@ -400,8 +411,8 @@ Rollback checklist:
 ## Workflow
 
 1. On first startup, the backend seeds a sample "General Document Extraction Schema" unless `SEED_SAMPLES_ON_STARTUP=false`.
-2. Save a schema in the Schema Builder or use the seeded schema. A generalized starter example lives in [samples/general-template.json](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/general-template.json), and a lease-specific example remains available in [samples/lease-template.json](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/lease-template.json).
-3. Upload a document. A generalized sample input lives in [samples/general-sample.txt](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/general-sample.txt), and a lease sample remains available in [samples/lease-sample.txt](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/lease-sample.txt).
+2. Save a schema in the Schema Builder or use the seeded schema. A generalized starter example lives in [samples/general-template.json](/Users/blakepowell/Documents/GitHub/extractflow/samples/general-template.json), and a lease-specific example remains available in [samples/lease-template.json](/Users/blakepowell/Documents/GitHub/extractflow/samples/lease-template.json).
+3. Upload a document. A generalized sample input lives in [samples/general-sample.txt](/Users/blakepowell/Documents/GitHub/extractflow/samples/general-sample.txt), and a lease sample remains available in [samples/lease-sample.txt](/Users/blakepowell/Documents/GitHub/extractflow/samples/lease-sample.txt).
 4. Select a schema version and document, then queue extraction.
 5. Wait for the worker to complete the job, open the result, review flagged fields, save edits, and export.
 

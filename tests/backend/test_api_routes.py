@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -234,6 +235,44 @@ def test_document_upload_and_job_creation(client) -> None:
     )
     assert job_response.status_code == 200
     assert job_response.json()["status"] == "queued"
+
+
+def test_parser_status_returns_worker_runtime_details(client) -> None:
+    status_path = Path(os.environ["DATA_DIR"]) / "worker-status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "state": "starting",
+                "timestamp": "2026-05-15T12:00:00+00:00",
+                "details": {
+                    "docling_enabled": True,
+                    "docling_prewarm": True,
+                    "docling_pdf_ocr_retry": True,
+                    "docling_image_ocr": False,
+                    "docling_prewarm_result": {
+                        "status": "completed",
+                        "attempted": True,
+                        "warmed_targets": ["pdf:plain"],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/settings/parser-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"] == "starting"
+    assert payload["docling_enabled"] is True
+    assert payload["docling_prewarm"] is True
+    assert payload["docling_pdf_ocr_retry"] is True
+    assert payload["docling_image_ocr"] is False
+    assert payload["prewarm_status"] == "completed"
+    assert payload["prewarm_attempted"] is True
+    assert ".pdf" in payload["supported_extensions"]
+    assert "PDF" in payload["supported_classes"]
 
 
 def test_job_creation_persists_provider_override(client) -> None:

@@ -8,7 +8,7 @@ This project is under active development. Security fixes are applied to the late
 
 Please report suspected vulnerabilities privately through GitHub Security Advisories:
 
-<https://github.com/blakeox/document-extraction-best-practice-llm/security/advisories/new>
+<https://github.com/blakeox/extractflow/security/advisories/new>
 
 Include:
 

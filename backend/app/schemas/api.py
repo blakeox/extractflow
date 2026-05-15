@@ -107,6 +107,20 @@ class ProviderControlsResponse(BaseModel):
     custom_provider_probe_max_age_hours: int
 
 
+class ParserStatusResponse(BaseModel):
+    state: str
+    timestamp: str | None = None
+    docling_enabled: bool
+    docling_prewarm: bool
+    docling_pdf_ocr_retry: bool
+    docling_image_ocr: bool
+    prewarm_status: str | None = None
+    prewarm_attempted: bool = False
+    prewarm_error: str | None = None
+    supported_extensions: list[str]
+    supported_classes: list[str]
+
+
 class LangExtractFeedbackSuggestionExtractionResponse(BaseModel):
     extraction_class: str
     extraction_text: str

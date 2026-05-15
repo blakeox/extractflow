@@ -127,6 +127,20 @@ type ProviderControls = {
   custom_provider_probe_max_age_hours: number;
 };
 
+type ParserStatus = {
+  state: string;
+  timestamp?: string | null;
+  docling_enabled: boolean;
+  docling_prewarm: boolean;
+  docling_pdf_ocr_retry: boolean;
+  docling_image_ocr: boolean;
+  prewarm_status?: string | null;
+  prewarm_attempted: boolean;
+  prewarm_error?: string | null;
+  supported_extensions: string[];
+  supported_classes: string[];
+};
+
 type CustomProviderProfile = {
   id: string;
   name: string;
@@ -206,6 +220,11 @@ type JobRecord = {
   error_message?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type ParserFailureGuidance = {
+  title: string;
+  detail: string;
 };
 
 type LangExtractFeedbackSuggestionDismissal = {
@@ -634,6 +653,54 @@ function getDocumentTypeLabel(contentType: string) {
   if (contentType.includes("image")) return "Image";
   if (contentType.includes("text")) return "Text";
   return "File";
+}
+
+function getParserFailureGuidance(
+  errorMessage?: string | null,
+): ParserFailureGuidance | null {
+  if (!errorMessage) {
+    return null;
+  }
+  if (errorMessage.includes("Docling parsing is disabled")) {
+    return {
+      title: "Document parser disabled",
+      detail:
+        "This file type depends on the Docling parser path, but the worker runtime has it disabled. Re-enable the parser runtime before retrying this job.",
+    };
+  }
+  if (errorMessage.includes("Docling PDF parsing produced no usable text")) {
+    return {
+      title: "PDF parse produced no usable text",
+      detail:
+        "The worker could not recover meaningful PDF text, even after its OCR retry path. Check scan quality, image contrast, or whether this document should be re-run with a cleaner source file.",
+    };
+  }
+  if (errorMessage.includes("Docling image parsing produced no usable text")) {
+    return {
+      title: "Image OCR produced no usable text",
+      detail:
+        "The worker reached the image OCR path but still did not extract enough text to continue. Check image quality, resolution, or whether the content is text-dense enough for extraction.",
+    };
+  }
+  if (
+    errorMessage.includes("Docling DOCX parsing produced no usable text") ||
+    errorMessage.includes("Docling PPTX parsing produced no usable text") ||
+    errorMessage.includes("Docling HTML parsing produced no usable text")
+  ) {
+    return {
+      title: "Document parse returned no usable content",
+      detail:
+        "The parser opened the file but did not recover enough content to proceed. Check whether the file is mostly empty, image-only, or malformed.",
+    };
+  }
+  if (errorMessage.includes("Docling failed to parse")) {
+    return {
+      title: "Parser runtime failed",
+      detail:
+        "The parser runtime raised an internal error while opening this file. Check parser readiness in Settings and inspect worker logs before retrying.",
+    };
+  }
+  return null;
 }
 
 function parseOptionalId(value: string) {
@@ -2166,6 +2233,7 @@ function ExtractionWorkspacePage({
   selectedTemplateVersionId,
   reviewDrafts,
   focusedFieldName,
+  parserStatus,
   busyAction,
   coreDataState,
   onSelectJob,
@@ -2195,6 +2263,7 @@ function ExtractionWorkspacePage({
   selectedTemplateVersionId: number | null;
   reviewDrafts: Record<string, string>;
   focusedFieldName: string | null;
+  parserStatus: ParserStatus | null;
   busyAction: string | null;
   coreDataState: "loading" | "ready" | "unavailable";
   onSelectJob: (jobId: number) => void;
@@ -2233,6 +2302,9 @@ function ExtractionWorkspacePage({
       : null) ??
     templateVersions.find((item) => item.id === selectedTemplateVersionId) ??
     null;
+  const parserFailureGuidance = getParserFailureGuidance(
+    selectedJob?.error_message,
+  );
   const selectedTemplate =
     templates.find(
       (item) => item.id === selectedTemplateVersion?.template_id,
@@ -2903,8 +2975,25 @@ function ExtractionWorkspacePage({
                     </div>
                     {selectedJob?.error_message ? (
                       <div className="note-card">
-                        <strong>Failure detail</strong>
+                        <strong>
+                          {parserFailureGuidance?.title ?? "Failure detail"}
+                        </strong>
                         <p>{selectedJob.error_message}</p>
+                        {parserFailureGuidance ? (
+                          <p>{parserFailureGuidance.detail}</p>
+                        ) : null}
+                        {parserStatus && parserFailureGuidance ? (
+                          <p>
+                            Parser runtime:{" "}
+                            {parserStatus.docling_enabled
+                              ? "Docling enabled"
+                              : "Docling disabled"}
+                            {parserStatus.prewarm_status
+                              ? ` · prewarm ${parserStatus.prewarm_status}`
+                              : ""}
+                            .
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -3378,6 +3467,7 @@ function ExtractionWorkspacePage({
 
 function SettingsPage({
   provider,
+  parserStatus,
   providerCatalog,
   providerHealth,
   customProviderDraft,
@@ -3409,6 +3499,7 @@ function SettingsPage({
   onOpenHelp,
 }: {
   provider: ProviderSettings | null;
+  parserStatus: ParserStatus | null;
   providerCatalog: ProviderCatalogEntry[];
   providerHealth: Record<string, ProviderHealth>;
   customProviderDraft: CustomProviderDraft;
@@ -3520,6 +3611,75 @@ function SettingsPage({
             <SummaryStat key={label} label={label} value={value} />
           ))}
         </div>
+      </section>
+
+      <section className="surface">
+        <CardHeader
+          title="Document parser runtime"
+          subtitle="This controls whether PDF, DOCX, PPTX, HTML, and image files can be parsed before extraction starts."
+        />
+        <div className="settings-grid settings-grid-wide">
+          <SummaryStat
+            label="Parser runtime"
+            value={
+              parserStatus?.docling_enabled ? "Docling enabled" : "Disabled"
+            }
+            tone={parserStatus?.docling_enabled ? "success" : "danger"}
+          />
+          <SummaryStat
+            label="Worker state"
+            value={parserStatus?.state ?? "Unknown"}
+            tone={
+              parserStatus?.state === "failed"
+                ? "danger"
+                : parserStatus?.state === "running"
+                  ? "warning"
+                  : "default"
+            }
+          />
+          <SummaryStat
+            label="PDF OCR retry"
+            value={parserStatus?.docling_pdf_ocr_retry ? "Enabled" : "Disabled"}
+          />
+          <SummaryStat
+            label="Image OCR"
+            value={parserStatus?.docling_image_ocr ? "Enabled" : "Disabled"}
+          />
+          <SummaryStat
+            label="Prewarm"
+            value={
+              parserStatus?.prewarm_status
+                ? parserStatus.prewarm_status
+                : parserStatus?.docling_prewarm
+                  ? "Configured"
+                  : "Disabled"
+            }
+          />
+          <SummaryStat
+            label="Last worker update"
+            value={formatTimestamp(parserStatus?.timestamp)}
+          />
+        </div>
+        <div className="provider-item top-gap">
+          <span>Supported document classes</span>
+          <strong>
+            {parserStatus?.supported_classes?.join(" • ") ||
+              "PDF • DOCX • PPTX • HTML • Images • CSV • Excel • Plain text • Markdown"}
+          </strong>
+        </div>
+        <div className="provider-item">
+          <span>Docling-backed file extensions</span>
+          <strong>
+            {parserStatus?.supported_extensions?.join(" ") ||
+              ".pdf .docx .pptx .html .htm .png .jpg .jpeg .tiff"}
+          </strong>
+        </div>
+        {parserStatus?.prewarm_error ? (
+          <div className="note-card top-gap">
+            <strong>Parser prewarm warning</strong>
+            <p>{parserStatus.prewarm_error}</p>
+          </div>
+        ) : null}
       </section>
 
       <section className="surface">
@@ -4322,6 +4482,7 @@ export function App() {
     custom_provider_probe_max_age_hours:
       DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS,
   });
+  const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null);
   const [devStatus, setDevStatus] = useState<DevStatus | null>(null);
   const [resultsByJob, setResultsByJob] = useState<
     Record<number, ResultEnvelope>
@@ -4416,6 +4577,7 @@ export function App() {
       providerCatalogData,
       providerHealthData,
       providerControlsData,
+      parserStatusData,
       customProfilesData,
       statusData,
     ] = await Promise.allSettled([
@@ -4427,6 +4589,7 @@ export function App() {
       readJson<{ providers: ProviderCatalogEntry[] }>("/settings/providers"),
       readJson<ProviderHealth[]>("/settings/providers/health"),
       readJson<ProviderControls>("/settings/providers/controls"),
+      readJson<ParserStatus>("/settings/parser-status"),
       readJson<{ profiles: CustomProviderProfile[] }>(
         "/settings/providers/custom",
       ),
@@ -4466,6 +4629,9 @@ export function App() {
             custom_provider_probe_max_age_hours:
               DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS,
           },
+    );
+    setParserStatus(
+      parserStatusData.status === "fulfilled" ? parserStatusData.value : null,
     );
     setCustomProfiles(
       customProfilesData.status === "fulfilled" &&
@@ -5656,6 +5822,7 @@ export function App() {
               selectedTemplateVersionId={selectedTemplateVersionId}
               reviewDrafts={reviewDrafts}
               focusedFieldName={focusedFieldName}
+              parserStatus={parserStatus}
               busyAction={busyAction}
               coreDataState={coreDataState}
               onSelectJob={handleSelectJob}
@@ -5713,6 +5880,7 @@ export function App() {
           {activePage === "settings" ? (
             <SettingsPage
               provider={provider}
+              parserStatus={parserStatus}
               providerCatalog={providerCatalog}
               providerHealth={providerHealth}
               customProviderDraft={customProviderDraft}

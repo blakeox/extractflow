@@ -618,6 +618,19 @@ def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) ->
             captured["image_pipeline_options"] = pipeline_options
 
     class FakeDocument:
+        def iterate_items(self):
+            class FakeProv:
+                def __init__(self, page_no: int) -> None:
+                    self.page_no = page_no
+
+            class FakeItem:
+                def __init__(self, text: str, page_no: int) -> None:
+                    self.text = text
+                    self.prov = [FakeProv(page_no)]
+
+            yield (FakeItem("Vendor Name Acme Corp", 1), 1)
+            yield (FakeItem("Total Amount $1,200.00", 2), 1)
+
         def export_to_text(self) -> str:
             return "Fallback text"
 
@@ -633,10 +646,6 @@ def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) ->
             captured["path"] = path
             return FakeConversion()
 
-    def fake_generate_multimodal_pages(_conversion):
-        yield ("Vendor Name Acme Corp", "", "", [], [], object())
-        yield ("Total Amount $1,200.00", "", "", [], [], object())
-
     monkeypatch.setattr(
         parser_service,
         "_import_docling_tools",
@@ -648,7 +657,6 @@ def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) ->
             FakePdfFormatOption,
             FakeImageFormatOption,
             FakeDocumentConverter,
-            fake_generate_multimodal_pages,
         ),
     )
 
@@ -709,7 +717,6 @@ def test_get_docling_converter_uses_rapidocr_for_ocr_pass(monkeypatch) -> None:
             FakePdfFormatOption,
             FakeImageFormatOption,
             FakeDocumentConverter,
-            lambda conversion: (),
         ),
     )
 
