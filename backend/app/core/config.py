@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     uploads_dir: str = "/data/uploads"
     exports_dir: str = "/data/exports"
     parsed_dir: str = "/data/parsed"
+    worker_status_path: str | None = None
     seed_samples_on_startup: bool = False
     allow_external_processing: bool = True
     require_redaction_for_external_processing: bool = False
@@ -90,10 +91,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_runtime_paths(self) -> "Settings":
         data_root = Path(self.data_dir).expanduser().resolve()
+        if not self.worker_status_path:
+            self.worker_status_path = str(data_root / "worker-status.json")
         runtime_paths = {
             "UPLOADS_DIR": Path(self.uploads_dir).expanduser().resolve(),
             "EXPORTS_DIR": Path(self.exports_dir).expanduser().resolve(),
             "PARSED_DIR": Path(self.parsed_dir).expanduser().resolve(),
+            "WORKER_STATUS_PATH": Path(self.worker_status_path).expanduser().resolve(),
         }
         for env_name, path in runtime_paths.items():
             if not path.is_relative_to(data_root):

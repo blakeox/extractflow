@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from copy import deepcopy
 from pathlib import Path
@@ -25,6 +26,7 @@ from app.schemas.api import (
     LangExtractFeedbackSuggestionDismissalRequest,
     LangExtractFeedbackSuggestionDismissalResponse,
     LangExtractFeedbackSuggestionListResponse,
+    ParserStatusResponse,
     ProviderCatalogResponse,
     ProviderControlsResponse,
     ProviderHealthResponse,
@@ -427,6 +429,45 @@ def get_provider_controls():
         require_redaction_for_external_processing=settings.require_redaction_for_external_processing,
         require_authentication=settings.require_authentication,
         custom_provider_probe_max_age_hours=settings.custom_provider_probe_max_age_hours,
+    )
+
+
+@router.get("/settings/parser-status", response_model=ParserStatusResponse)
+def get_parser_status():
+    details: dict[str, object] = {}
+    state = "unknown"
+    timestamp: str | None = None
+
+    status_path = Path(settings.worker_status_path)
+    if status_path.exists():
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+        state = str(payload.get("state") or state)
+        timestamp = payload.get("timestamp")
+        raw_details = payload.get("details")
+        if isinstance(raw_details, dict):
+            details = raw_details
+
+    prewarm_result = details.get("docling_prewarm_result")
+    prewarm_status = None
+    prewarm_attempted = False
+    prewarm_error = None
+    if isinstance(prewarm_result, dict):
+        prewarm_status = str(prewarm_result.get("status")) if prewarm_result.get("status") is not None else None
+        prewarm_attempted = bool(prewarm_result.get("attempted"))
+        prewarm_error = str(prewarm_result.get("error")) if prewarm_result.get("error") is not None else None
+
+    return ParserStatusResponse(
+        state=state,
+        timestamp=timestamp,
+        docling_enabled=bool(details.get("docling_enabled", True)),
+        docling_prewarm=bool(details.get("docling_prewarm", True)),
+        docling_pdf_ocr_retry=bool(details.get("docling_pdf_ocr_retry", True)),
+        docling_image_ocr=bool(details.get("docling_image_ocr", True)),
+        prewarm_status=prewarm_status,
+        prewarm_attempted=prewarm_attempted,
+        prewarm_error=prewarm_error,
+        supported_extensions=[".pdf", ".docx", ".pptx", ".html", ".htm", ".png", ".jpg", ".jpeg", ".tiff"],
+        supported_classes=["PDF", "DOCX", "PPTX", "HTML", "Images", "CSV", "Excel", "Plain text", "Markdown"],
     )
 
 

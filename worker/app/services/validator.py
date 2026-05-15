@@ -98,7 +98,9 @@ def canonicalize_allowed_scalar(candidate: Any, allowed_values: list[str]) -> tu
                 allowed_value,
                 f"Canonicalized allowed value from '{candidate}' to '{allowed_value}' using normalized comparison.",
             )
-    match = process.extractOne(candidate, allowed_values, scorer=fuzz.WRatio, score_cutoff=FUZZY_ALLOWED_VALUE_SCORE_CUTOFF)
+    match = process.extractOne(
+        candidate, allowed_values, scorer=fuzz.WRatio, score_cutoff=FUZZY_ALLOWED_VALUE_SCORE_CUTOFF
+    )
     if not match:
         return candidate, None
     canonical_value = match[0]

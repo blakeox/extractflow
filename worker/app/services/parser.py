@@ -121,12 +121,7 @@ def parse_image_with_docling(path: Path) -> str:
 
 def _parse_pdf_with_docling_mode(path: Path, *, do_ocr: bool) -> str:
     conversion = _convert_with_docling(path, kind="pdf", do_ocr=do_ocr)
-    generate_multimodal_pages = _import_docling_tools()[-1]
-    chunks: list[str] = []
-    for index, page_data in enumerate(generate_multimodal_pages(conversion), start=1):
-        page_text = normalize_text(page_data[0])
-        if page_text:
-            chunks.append(f"[Page {index}]\n{page_text}")
+    chunks = _collect_docling_page_chunks(conversion.document)
 
     if not chunks:
         fallback_text = normalize_text(conversion.document.export_to_text())
@@ -142,6 +137,27 @@ def _parse_docling_text(path: Path, *, kind: str, do_ocr: bool = False, add_page
     if parsed_text and add_page_markers:
         return f"[Page 1]\n{parsed_text}"
     return parsed_text
+
+
+def _collect_docling_page_chunks(document) -> list[str]:
+    page_lines: dict[int, list[str]] = {}
+
+    for item, _level in document.iterate_items():
+        item_text = normalize_text(getattr(item, "text", "") or "")
+        provenance = getattr(item, "prov", None) or []
+        if not item_text or not provenance:
+            continue
+        page_number = getattr(provenance[0], "page_no", None)
+        if page_number is None:
+            continue
+        page_lines.setdefault(page_number, []).append(item_text)
+
+    chunks: list[str] = []
+    for page_number in sorted(page_lines):
+        page_text = normalize_text("\n".join(page_lines[page_number]))
+        if page_text:
+            chunks.append(f"[Page {page_number}]\n{page_text}")
+    return chunks
 
 
 def _convert_with_docling(path: Path, *, kind: str, do_ocr: bool):
@@ -285,7 +301,6 @@ def get_docling_converter(kind: str, do_ocr: bool):
         PdfFormatOption,
         ImageFormatOption,
         DocumentConverter,
-        _generate_multimodal_pages,
     ) = _import_docling_tools()
 
     if kind == "pdf":
@@ -324,7 +339,6 @@ def _import_docling_tools():
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions, TableStructureOptions
     from docling.document_converter import DocumentConverter, ImageFormatOption, PdfFormatOption
-    from docling.utils.export import generate_multimodal_pages
 
     return (
         InputFormat,
@@ -334,5 +348,4 @@ def _import_docling_tools():
         PdfFormatOption,
         ImageFormatOption,
         DocumentConverter,
-        generate_multimodal_pages,
     )

@@ -22,6 +22,12 @@ def test_settings_reject_paths_outside_data_dir(tmp_path) -> None:
         Settings(**build_backend_settings(tmp_path, uploads_dir=str(tmp_path / "outside-uploads")))
 
 
+def test_settings_default_worker_status_path_stays_inside_data_dir(tmp_path) -> None:
+    settings = Settings(**build_backend_settings(tmp_path))
+
+    assert settings.worker_status_path == str((tmp_path / "data" / "worker-status.json").resolve())
+
+
 def test_settings_reject_non_array_provider_catalog_json(tmp_path) -> None:
     with pytest.raises(ValidationError, match="PROVIDER_CATALOG_JSON must be a JSON array"):
         Settings(**build_backend_settings(tmp_path, provider_catalog_json='{"provider":"custom"}'))
