@@ -21,9 +21,6 @@ test("keeps a failed extraction in the workspace and allows rerun recovery", asy
     });
 
   await page.getByRole("combobox", { name: "Schema" }).selectOption("1");
-  await page
-    .getByRole("combobox", { name: "Advanced: version" })
-    .selectOption("101");
   await page.getByRole("button", { name: "Run extraction" }).click();
 
   await expect(
@@ -53,9 +50,7 @@ test("keeps a failed extraction in the workspace and allows rerun recovery", asy
   await expect(
     page.getByRole("button", { name: /sample-contract\.txt.*need review/i }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Save changes" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save review" })).toBeVisible();
   await expect(page.getByLabel("Vendor Name review value")).toHaveValue(
     "Acme Company",
   );

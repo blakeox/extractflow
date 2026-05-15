@@ -20,6 +20,20 @@ def test_formula_engine_handles_nested_attributes_and_helpers() -> None:
     assert value == 1203.0
 
 
+def test_formula_engine_parses_non_iso_dates_from_normalized_field_objects() -> None:
+    engine = FormulaEngine()
+
+    value = engine.evaluate(
+        "months_between(start_date, end_date)",
+        {
+            "start_date": {"value": "01/15/2025", "display_value": "01/15/2025"},
+            "end_date": {"value": "04/15/2025", "display_value": "04/15/2025"},
+        },
+    )
+
+    assert value == 3
+
+
 def test_formula_engine_rejects_unknown_fields() -> None:
     engine = FormulaEngine()
 

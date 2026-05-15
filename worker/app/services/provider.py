@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import httpx
+from dateutil import parser as date_parser
 from extraction_core.langextract import (
     normalize_langextract_base_url,
     uses_langextract_provider,
@@ -408,7 +409,13 @@ def normalize_langextract_value(
 
     if field_type == "date":
         value = stringify_langextract_value(raw_value)
-        return {"value": value, "display_value": value} if value else None
+        if not value:
+            return None
+        try:
+            normalized_date = date_parser.parse(value).date().isoformat()
+        except (TypeError, ValueError, OverflowError):
+            normalized_date = value
+        return {"value": normalized_date, "display_value": value} if normalized_date else None
 
     if field_type == "number":
         number = parse_number(raw_value)

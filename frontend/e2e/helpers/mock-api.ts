@@ -553,15 +553,24 @@ export async function mockExtractionApiWithState(
       const current = state.results[1];
       const edit = payload.edits[0];
       current.result.extracted_fields = current.result.extracted_fields.map(
-        (field) =>
-          field.field_name === edit.field_name
-            ? {
-                ...field,
-                normalized_value: edit.normalized_value,
-                validation_status: "reviewed",
-                requires_review: false,
-              }
-            : field,
+        (field) => {
+          if (edit && field.field_name === edit.field_name) {
+            return {
+              ...field,
+              normalized_value: edit.normalized_value,
+              validation_status: "reviewed",
+              requires_review: false,
+            };
+          }
+          if (field.requires_review) {
+            return {
+              ...field,
+              validation_status: "reviewed",
+              requires_review: false,
+            };
+          }
+          return field;
+        },
       );
       current.result.fields_requiring_review = [];
       current.result.reviewed_at = "2026-05-02T12:07:00.000Z";

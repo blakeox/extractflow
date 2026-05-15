@@ -179,6 +179,35 @@ def test_template_creation_rejects_langextract_when_required_field_lacks_example
     )
 
 
+def test_template_creation_rejects_invalid_field_json_schema(client) -> None:
+    definition = build_template_definition()
+    definition["extracted_fields"].append(
+        {
+            "name": "line_item",
+            "label": "Line Item",
+            "description": "Structured line item.",
+            "type": "structured_object",
+            "schema": {
+                "type": "object",
+                "properties": "not-an-object",
+            },
+        }
+    )
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid JSON Schema",
+            "description": "Invalid structured field schema",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Field schema is not a valid JSON Schema" in response.text
+
+
 def test_document_upload_and_job_creation(client) -> None:
     template_payload = {
         "name": "Invoice Schema",
@@ -669,6 +698,88 @@ def test_review_recalculation_updates_calculated_fields(client) -> None:
         assert persisted.review_status == "reviewed"
         assert persisted.result_json["calculated_fields"][0]["calculated_value"] == pytest.approx(1650.0)
         assert persisted.result_json["fields_requiring_review"] == ["vendor_name"]
+
+
+def test_review_accepts_confirm_without_field_edits(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.42,
+                        "source_text": "Acme Corp",
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "invalid",
+                        "validation_errors": ["Vendor name needs review."],
+                        "extraction_notes": "Low confidence extraction.",
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [],
+            "recalculate": False,
+        },
+    )
+
+    assert review_response.status_code == 200
+    reviewed_field = review_response.json()["extracted_fields"][0]
+    assert reviewed_field["normalized_value"] == {"value": "Acme Corp"}
+    assert reviewed_field["validation_status"] == "reviewed"
+    assert reviewed_field["requires_review"] is False
+    assert review_response.json()["fields_requiring_review"] == []
+    assert review_response.json()["reviewed_at"] is not None
+
+    with SessionLocal() as db:
+        persisted = db.query(ExtractionResult).filter(ExtractionResult.id == result_id).one()
+        assert persisted.review_status == "reviewed"
+        assert persisted.result_json["fields_requiring_review"] == []
+        assert persisted.result_json["extracted_fields"][0]["requires_review"] is False
 
 
 def test_langextract_feedback_suggestions_surface_contextual_review_examples(client) -> None:
@@ -2213,12 +2324,3 @@ def test_provider_settings_are_tenant_scoped(client) -> None:
         app.dependency_overrides.pop(get_current_tenant_id, None)
 
     assert client.get("/api/settings/provider").json()["model"] == "tenant-a-model"
-
-
-def test_review_requires_at_least_one_edit(client) -> None:
-    response = client.post(
-        "/api/results/1/review",
-        json={"reviewer": "qa-user", "edits": [], "recalculate": True},
-    )
-
-    assert response.status_code == 422

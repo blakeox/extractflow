@@ -4,7 +4,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from jsonschema import Draft202012Validator, SchemaError
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .langextract import (
     LANGEXTRACT_API_STYLE,
@@ -73,6 +74,16 @@ class ExtractionFieldDefinition(BaseModel):
     output_format: FormatRule | None = None
     validation: ValidationRule = Field(default_factory=ValidationRule)
     field_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
+
+    @model_validator(mode="after")
+    def validate_field_schema_definition(self) -> ExtractionFieldDefinition:
+        if self.field_schema is None:
+            return self
+        try:
+            Draft202012Validator.check_schema(self.field_schema)
+        except SchemaError as exc:
+            raise ValueError(f"Field schema is not a valid JSON Schema: {exc.message}") from exc
+        return self
 
 
 class CalculatedFieldDefinition(BaseModel):
@@ -295,10 +306,3 @@ class ReviewEditPayload(BaseModel):
     reviewer: str = "local-user"
     edits: list[ReviewFieldEdit] = Field(default_factory=list)
     recalculate: bool = True
-
-    @field_validator("edits")
-    @classmethod
-    def require_edits(cls, value: list[ReviewFieldEdit]) -> list[ReviewFieldEdit]:
-        if not value:
-            raise ValueError("At least one field edit is required.")
-        return value

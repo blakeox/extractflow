@@ -12,7 +12,12 @@ from app.services import parser as parser_service
 from app.services import provider as provider_service
 from app.services.executor import execute_extraction
 from app.services.parser import parse_document
-from app.services.provider import AzureOpenAIAdapter, ExtractionProvider, OpenAICompatibleAdapter
+from app.services.provider import (
+    AzureOpenAIAdapter,
+    ExtractionProvider,
+    OpenAICompatibleAdapter,
+    normalize_langextract_value,
+)
 from app.services.validator import validate_extracted_field
 from extraction_core.models import (
     ExtractionFieldDefinition,
@@ -452,6 +457,78 @@ def test_validate_extracted_field_applies_required_allowed_and_regex_rules() -> 
     assert "Value exceeds maximum length." in validated.validation_errors
 
 
+def test_validate_extracted_field_canonicalizes_close_allowed_values_for_review() -> None:
+    field = ExtractionFieldDefinition.model_validate(
+        {
+            "name": "payment_terms",
+            "label": "Payment Terms",
+            "description": "Payment terms.",
+            "type": "category",
+            "allowed_values": ["Net 30", "Due on receipt"],
+        }
+    )
+    result = ExtractionFieldResult(
+        field_name="payment_terms",
+        label="Payment Terms",
+        data_type="category",
+        extracted_value="net30",
+        normalized_value={"value": "net30"},
+    )
+
+    validated = validate_extracted_field(field, result)
+
+    assert validated.validation_status == "valid"
+    assert validated.normalized_value == {"value": "Net 30"}
+    assert validated.requires_review is True
+    assert "Canonicalized allowed value" in validated.extraction_notes
+
+
+def test_validate_extracted_field_applies_json_schema_to_structured_values() -> None:
+    field = ExtractionFieldDefinition.model_validate(
+        {
+            "name": "line_item",
+            "label": "Line Item",
+            "description": "Structured line item.",
+            "type": "structured_object",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "quantity": {"type": "number", "minimum": 1},
+                },
+                "required": ["description", "quantity"],
+            },
+        }
+    )
+    result = ExtractionFieldResult(
+        field_name="line_item",
+        label="Line Item",
+        data_type="structured_object",
+        extracted_value='{"description":"Widget","quantity":0}',
+        normalized_value={"description": "Widget", "quantity": 0},
+    )
+
+    validated = validate_extracted_field(field, result)
+
+    assert validated.validation_status == "invalid"
+    assert any("Value does not satisfy schema" in error for error in validated.validation_errors)
+
+
+def test_normalize_langextract_value_normalizes_dates_to_iso() -> None:
+    field = ExtractionFieldDefinition.model_validate(
+        {
+            "name": "invoice_date",
+            "label": "Invoice Date",
+            "description": "Invoice date.",
+            "type": "date",
+        }
+    )
+
+    normalized = normalize_langextract_value(field, "03/14/2025", {})
+
+    assert normalized == {"value": "2025-03-14", "display_value": "03/14/2025"}
+
+
 def test_parse_document_reads_csv_and_unknown_text_extensions(tmp_path) -> None:
     csv_path = tmp_path / "invoice.csv"
     pd.DataFrame([{"vendor": "Acme", "amount": 1200}]).to_csv(csv_path, index=False)
@@ -476,7 +553,7 @@ def test_parse_document_reads_xlsx_spreadsheets(tmp_path) -> None:
     assert "Acme,1200" in spreadsheet_text
 
 
-@pytest.mark.parametrize("suffix", [".pdf", ".docx", ".html", ".png"])
+@pytest.mark.parametrize("suffix", [".pdf", ".docx", ".html", ".png", ".pptx"])
 def test_parse_document_rejects_docling_backed_types_when_disabled(monkeypatch, tmp_path, suffix: str) -> None:
     document_path = tmp_path / f"blocked{suffix}"
     document_path.write_bytes(b"placeholder")
@@ -693,6 +770,48 @@ def test_parse_docx_uses_docling(monkeypatch, tmp_path) -> None:
     parsed = parse_document(str(docx_path))
 
     assert parsed == "Vendor Name\nAcme Corp"
+
+
+def test_parse_pptx_uses_docling(monkeypatch, tmp_path) -> None:
+    pptx_path = tmp_path / "invoice.pptx"
+    pptx_path.write_bytes(b"PK")
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service, "parse_pptx_with_docling", lambda path: "Slide 1\nInvoice total")
+
+    parsed = parse_document(str(pptx_path))
+
+    assert parsed == "Slide 1\nInvoice total"
+
+
+def test_prewarm_docling_converters_includes_pptx(monkeypatch) -> None:
+    parser_service.get_docling_converter.cache_clear()
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service.settings, "docling_pdf_ocr_retry", False)
+    monkeypatch.setattr(parser_service.settings, "docling_image_ocr", False)
+
+    class FakeInputFormat:
+        PDF = "pdf"
+        IMAGE = "image"
+        DOCX = "docx"
+        PPTX = "pptx"
+        HTML = "html"
+
+    class FakeConverter:
+        def initialize_pipeline(self, _input_format) -> None:
+            return None
+
+    monkeypatch.setattr(
+        parser_service,
+        "_import_docling_tools",
+        lambda: (FakeInputFormat, None, None, None, None, None, None, None),
+    )
+    monkeypatch.setattr(parser_service, "get_docling_converter", lambda kind, do_ocr: FakeConverter())
+
+    result = parser_service.prewarm_docling_converters()
+
+    assert result["status"] == "completed"
+    assert "pptx:plain" in result["warmed_targets"]
 
 
 def test_parse_docx_with_real_docling_dependency(monkeypatch, tmp_path) -> None:

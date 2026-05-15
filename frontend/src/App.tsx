@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type Dispatch,
@@ -314,9 +315,15 @@ const primaryNavigation: NavItem[] = [
 
 const secondaryNavigation: NavItem[] = [
   { id: "settings", label: "Settings", icon: "settings" },
-  { id: "audit", label: "Audit", icon: "audit" },
-  { id: "help", label: "Help", icon: "help" },
 ];
+
+const pageLabels: Record<PageId, string> = {
+  extractions: "Extractions",
+  templates: "Schemas",
+  settings: "Settings",
+  audit: "Audit",
+  help: "Help",
+};
 
 const CUSTOM_PROVIDER_KEY = "custom-provider-draft";
 const DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS = 24;
@@ -1021,8 +1028,8 @@ function AppSidebar({
       </div>
 
       <div className="nav-section">
-        <span className="nav-section-label">Admin</span>
-        <nav className="nav-list" aria-label="Admin">
+        <span className="nav-section-label">Setup</span>
+        <nav className="nav-list" aria-label="Setup">
           {secondaryNavigation.map((item) => (
             <button
               key={item.id}
@@ -1071,10 +1078,7 @@ function AppSidebar({
 }
 
 function TopBar({ activePage }: { activePage: PageId }) {
-  const activeLabel =
-    primaryNavigation.find((item) => item.id === activePage)?.label ??
-    secondaryNavigation.find((item) => item.id === activePage)?.label ??
-    "Workspace";
+  const activeLabel = pageLabels[activePage] ?? "Workspace";
 
   const subtitles: Record<PageId, string> = {
     extractions:
@@ -1082,10 +1086,10 @@ function TopBar({ activePage }: { activePage: PageId }) {
     templates:
       "Schemas stay reusable, but they should not interrupt the extraction job.",
     settings:
-      "Provider, privacy, and runtime controls live here instead of hijacking the main workflow.",
+      "Choose the provider and runtime defaults without polluting the extraction path.",
     audit:
-      "Track operational history without putting it in the user’s critical path.",
-    help: "Support the workflow after first value, not before it.",
+      "Check history when you need it, not when you are trying to extract.",
+    help: "Use setup and workflow guidance only when the next step is unclear.",
   };
 
   return (
@@ -1146,18 +1150,22 @@ function SwitchField({
   onToggle: () => void;
   hint?: string;
 }) {
+  const labelId = useId();
+  const hintId = useId();
+
   return (
     <div className="switch-field">
       <div className="switch-copy">
-        <span>{label}</span>
-        {hint ? <p>{hint}</p> : null}
+        <span id={labelId}>{label}</span>
+        {hint ? <p id={hintId}>{hint}</p> : null}
       </div>
       {checked ? (
         <button
           type="button"
           role="switch"
           aria-checked="true"
-          aria-label={label}
+          aria-labelledby={labelId}
+          aria-describedby={hint ? hintId : undefined}
           className={classNames("switch-control", "active")}
           onClick={onToggle}
         >
@@ -1169,7 +1177,8 @@ function SwitchField({
           type="button"
           role="switch"
           aria-checked="false"
-          aria-label={label}
+          aria-labelledby={labelId}
+          aria-describedby={hint ? hintId : undefined}
           className="switch-control"
           onClick={onToggle}
         >
@@ -1447,11 +1456,13 @@ function DesktopSetupPanel({
   );
 }
 
-function DesktopOnboardingOverlay({
+function DesktopSetupNotice({
   desktopStatus,
   provider,
   apiUnavailable,
   busyAction,
+  desktopOnboardingDismissed,
+  onRefresh,
   onStartDesktopStack,
   onOpenSettings,
   onDismiss,
@@ -1460,6 +1471,8 @@ function DesktopOnboardingOverlay({
   provider: ProviderSettings | null;
   apiUnavailable: boolean;
   busyAction: string | null;
+  desktopOnboardingDismissed: boolean;
+  onRefresh: () => Promise<void>;
   onStartDesktopStack: () => Promise<void>;
   onOpenSettings: () => void;
   onDismiss: () => void;
@@ -1468,132 +1481,142 @@ function DesktopOnboardingOverlay({
     return null;
   }
 
+  const needsAttention = apiUnavailable || !provider;
+  if (!needsAttention && desktopOnboardingDismissed) {
+    return null;
+  }
+
   const checklist = [
     {
-      label: "Desktop runtime bundle available",
+      label: "Desktop runtime bundle",
       complete:
         desktopStatus.runtimeSource === "bundled_resources" ||
         desktopStatus.runtimeSource === "repo_checkout",
       detail:
         desktopStatus.runtimeSource === "bundled_resources"
-          ? "The app is running against its bundled runtime payload."
-          : "The app is connected to a repo-backed desktop runtime.",
+          ? "Bundled runtime is available."
+          : "Repo-backed desktop runtime is connected.",
     },
     {
-      label: "Docker Desktop running",
+      label: "Docker Desktop",
       complete: desktopStatus.dockerAvailable,
       detail: desktopStatus.dockerAvailable
-        ? "Container runtime is available for backend and worker services."
-        : "Start Docker Desktop before continuing.",
+        ? "Container runtime is ready."
+        : "Start Docker Desktop before running the local stack.",
     },
     {
-      label: "Local backend reachable",
+      label: "Local backend",
       complete: desktopStatus.backendReachable && !apiUnavailable,
       detail:
         desktopStatus.backendReachable && !apiUnavailable
-          ? `Frontend can reach the API on ${desktopStatus.backendHost}:${desktopStatus.backendPort}.`
+          ? `Frontend can reach ${desktopStatus.backendHost}:${desktopStatus.backendPort}.`
           : `Backend is not yet reachable on ${desktopStatus.backendHost}:${desktopStatus.backendPort}.`,
     },
     {
-      label: "Default provider selected",
+      label: "Default provider",
       complete: Boolean(provider),
       detail: provider
-        ? `${provider.provider_type} (${provider.model}) is configured as the current default provider.`
-        : "Choose a local or cloud provider before running real extraction jobs.",
+        ? `${provider.provider_type} (${provider.model}) is ready for extraction.`
+        : "Pick a default provider before you run a real extraction job.",
     },
   ];
 
   return (
-    <div
-      className="desktop-onboarding-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="desktopOnboardingTitle"
+    <section
+      className="surface desktop-launch-surface"
+      role={needsAttention ? "alert" : "status"}
+      aria-live={needsAttention ? "assertive" : "polite"}
     >
-      <div className="desktop-onboarding-card">
-        <div className="desktop-onboarding-header">
-          <div>
-            <span className="hero-label">Desktop setup</span>
-            <h2 id="desktopOnboardingTitle">
-              Finish the runtime checks, then get back to the extraction
-              workspace.
-            </h2>
-            <p>
-              The desktop shell is packaged, but local runtime health still
-              determines whether extraction and review actually work.
-            </p>
+      <div className="desktop-launch-grid">
+        <div className="desktop-launch-copy">
+          <strong>
+            {needsAttention
+              ? "Desktop setup needs attention, but it no longer blocks the workspace."
+              : "Desktop runtime is ready. Confirm the defaults once, then get back to extraction."}
+          </strong>
+          <p>
+            {needsAttention
+              ? "Use these recovery controls when the local stack is down or the default provider is still missing."
+              : "This reminder is only here for first-run orientation. Dismiss it once the path is obvious."}
+          </p>
+        </div>
+        <div className="desktop-launch-metrics">
+          <div className="desktop-launch-pill">
+            <span>Backend</span>
+            <strong>{apiUnavailable ? "Needs recovery" : "Ready"}</strong>
           </div>
+          <div className="desktop-launch-pill">
+            <span>Provider</span>
+            <strong>{provider ? provider.provider_type : "Not set"}</strong>
+          </div>
+          <div className="desktop-launch-pill">
+            <span>Runtime root</span>
+            <strong>
+              {desktopStatus.projectRoot ? "Connected" : "Missing"}
+            </strong>
+          </div>
+        </div>
+        <div className="desktop-launch-actions">
           <button
             type="button"
-            className="icon-button"
-            onClick={onDismiss}
-            aria-label="Dismiss onboarding"
+            className="secondary-button"
+            onClick={() => void onRefresh()}
+            disabled={busyAction === "desktop-refresh"}
           >
-            ×
+            Refresh status
           </button>
-        </div>
-
-        <div className="desktop-onboarding-grid">
-          <div className="desktop-checklist">
-            {checklist.map((item) => (
-              <div
-                key={item.label}
-                className={classNames(
-                  "desktop-check-item",
-                  item.complete && "complete",
-                )}
-              >
-                <div className="desktop-check-state" aria-hidden="true">
-                  {item.complete ? "✓" : "!"}
-                </div>
-                <div>
-                  <strong>{item.label}</strong>
-                  <p>{item.detail}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="desktop-onboarding-side">
-            <div className="desktop-side-card">
-              <span className="eyebrow">Required sequence</span>
-              <ol className="desktop-step-list">
-                <li>Start Docker Desktop.</li>
-                <li>Start the local stack from the desktop shell.</li>
-                <li>Confirm backend reachability.</li>
-                <li>Choose the default LLM provider.</li>
-              </ol>
-            </div>
-            <div className="desktop-action-groups">
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void onStartDesktopStack()}
-                disabled={busyAction === "desktop-start"}
-              >
-                {busyAction === "desktop-start"
-                  ? "Starting..."
-                  : "Start local stack"}
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={onOpenSettings}
-              >
-                Open settings
-              </button>
-              <button
-                type="button"
-                className="tertiary-button"
-                onClick={onDismiss}
-              >
-                Continue to extraction workspace
-              </button>
-            </div>
-          </div>
+          {(apiUnavailable || !desktopStatus.backendReachable) && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void onStartDesktopStack()}
+              disabled={busyAction === "desktop-start"}
+            >
+              {busyAction === "desktop-start"
+                ? "Starting..."
+                : "Start local stack"}
+            </button>
+          )}
+          {!provider ? (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={onOpenSettings}
+            >
+              Open settings
+            </button>
+          ) : null}
+          {!needsAttention ? (
+            <button
+              type="button"
+              className="tertiary-button"
+              onClick={onDismiss}
+            >
+              Dismiss reminder
+            </button>
+          ) : null}
         </div>
       </div>
-    </div>
+      <div className="desktop-checklist top-gap">
+        {checklist.map((item) => (
+          <div
+            key={item.label}
+            className={classNames(
+              "desktop-check-item",
+              item.complete && "complete",
+            )}
+          >
+            <div className="desktop-check-state" aria-hidden="true">
+              {item.complete ? "✓" : "!"}
+            </div>
+            <div>
+              <strong>{item.label}</strong>
+              <p>{item.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -2144,6 +2167,7 @@ function ExtractionWorkspacePage({
   reviewDrafts,
   focusedFieldName,
   busyAction,
+  coreDataState,
   onSelectJob,
   onStartNew,
   onUpload,
@@ -2156,6 +2180,8 @@ function ExtractionWorkspacePage({
   onSaveReview,
   onExport,
   onOpenSchemas,
+  onOpenHelp,
+  onRetryConnection,
 }: {
   documents: DocumentRecord[];
   jobs: JobRecord[];
@@ -2170,6 +2196,7 @@ function ExtractionWorkspacePage({
   reviewDrafts: Record<string, string>;
   focusedFieldName: string | null;
   busyAction: string | null;
+  coreDataState: "loading" | "ready" | "unavailable";
   onSelectJob: (jobId: number) => void;
   onStartNew: () => void;
   onUpload: (file: File) => Promise<void>;
@@ -2182,6 +2209,8 @@ function ExtractionWorkspacePage({
   onSaveReview: () => Promise<void>;
   onExport: (format: "json" | "csv" | "excel") => Promise<void>;
   onOpenSchemas: () => void;
+  onOpenHelp: () => void;
+  onRetryConnection: () => Promise<void>;
 }) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const selectedJob = selectedJobId
@@ -2213,6 +2242,7 @@ function ExtractionWorkspacePage({
   const selectedSchemaVersions = templateVersions.filter(
     (item) => item.template_id === (selectedTemplate?.id ?? selectedTemplateId),
   );
+  const [showVersionSelector, setShowVersionSelector] = useState(false);
   const stage: WorkspaceStage = selectedJob
     ? selectedJob.status === "failed"
       ? "failed"
@@ -2229,6 +2259,7 @@ function ExtractionWorkspacePage({
   const fieldsNeedingReview = extractedFields.filter(
     (field) => field.requires_review || field.validation_status === "invalid",
   );
+  const workspaceInteractive = coreDataState === "ready";
   const validatedFields = extractedFields.filter(
     (field) =>
       !fieldsNeedingReview.some((item) => item.field_name === field.field_name),
@@ -2249,6 +2280,26 @@ function ExtractionWorkspacePage({
   const selectedRunProviderLabel = selectedRunProvider
     ? `${selectedRunProvider.provider_type} (${selectedRunProvider.model})`
     : "Unknown provider";
+  const recommendedTemplateVersion = selectedSchemaVersions[0] ?? null;
+  const hasMultipleSchemaVersions = selectedSchemaVersions.length > 1;
+
+  useEffect(() => {
+    if (!hasMultipleSchemaVersions) {
+      setShowVersionSelector(false);
+      return;
+    }
+    if (
+      selectedTemplateVersion &&
+      recommendedTemplateVersion &&
+      selectedTemplateVersion.id !== recommendedTemplateVersion.id
+    ) {
+      setShowVersionSelector(true);
+    }
+  }, [
+    hasMultipleSchemaVersions,
+    recommendedTemplateVersion,
+    selectedTemplateVersion,
+  ]);
 
   const jobGroups = [
     {
@@ -2318,8 +2369,8 @@ function ExtractionWorkspacePage({
       <div className="workspace-layout">
         <aside className="surface job-rail">
           <CardHeader
-            title="Extraction jobs"
-            subtitle="Treat each extraction as one object from upload to export."
+            title="Jobs"
+            subtitle="Switch runs without leaving the workspace."
           />
           <button
             type="button"
@@ -2349,6 +2400,9 @@ function ExtractionWorkspacePage({
                             "queue-item",
                             selectedJobId === job.id && "selected",
                           )}
+                          aria-current={
+                            selectedJobId === job.id ? "true" : undefined
+                          }
                           onClick={() => onSelectJob(job.id)}
                         >
                           <strong>
@@ -2372,10 +2426,20 @@ function ExtractionWorkspacePage({
                 </div>
               ))
             ) : (
-              <div className="note-card compact">
-                <strong>No extraction history yet</strong>
+              <div className="rail-empty-state">
+                <strong>
+                  {coreDataState === "loading"
+                    ? "Loading jobs..."
+                    : coreDataState === "unavailable"
+                      ? "Job history unavailable"
+                      : "No extraction history yet"}
+                </strong>
                 <p>
-                  Your first upload should not require a tour of the product.
+                  {coreDataState === "loading"
+                    ? "Hold this spot while the workspace loads the latest jobs and schemas."
+                    : coreDataState === "unavailable"
+                      ? "Reconnect the local API before job history and saved setup can load here."
+                      : "Your first upload should not require a tour of the product."}
                 </p>
               </div>
             )}
@@ -2395,11 +2459,13 @@ function ExtractionWorkspacePage({
                       type="button"
                       className="primary-button"
                       onClick={() => void onSaveReview()}
-                      disabled={busyAction === "save-review"}
+                      disabled={
+                        !workspaceInteractive || busyAction === "save-review"
+                      }
                     >
                       {busyAction === "save-review"
-                        ? "Saving..."
-                        : "Save changes"}
+                        ? "Saving review..."
+                        : "Save review"}
                     </button>
                   ) : null}
                   {stage === "ready" || stage === "review" ? (
@@ -2408,7 +2474,9 @@ function ExtractionWorkspacePage({
                         type="button"
                         className="secondary-button"
                         onClick={() => void onExport("json")}
-                        disabled={busyAction === "export-json"}
+                        disabled={
+                          !workspaceInteractive || busyAction === "export-json"
+                        }
                       >
                         {busyAction === "export-json"
                           ? "Exporting JSON..."
@@ -2418,7 +2486,9 @@ function ExtractionWorkspacePage({
                         type="button"
                         className="secondary-button"
                         onClick={() => void onExport("csv")}
-                        disabled={busyAction === "export-csv"}
+                        disabled={
+                          !workspaceInteractive || busyAction === "export-csv"
+                        }
                       >
                         {busyAction === "export-csv"
                           ? "Exporting CSV..."
@@ -2428,7 +2498,9 @@ function ExtractionWorkspacePage({
                         type="button"
                         className="secondary-button"
                         onClick={() => void onExport("excel")}
-                        disabled={busyAction === "export-excel"}
+                        disabled={
+                          !workspaceInteractive || busyAction === "export-excel"
+                        }
                       >
                         {busyAction === "export-excel"
                           ? "Exporting Excel..."
@@ -2445,6 +2517,7 @@ function ExtractionWorkspacePage({
                       disabled={
                         !selectedDocument ||
                         !selectedTemplateVersion ||
+                        !workspaceInteractive ||
                         busyAction === "run"
                       }
                     >
@@ -2454,6 +2527,39 @@ function ExtractionWorkspacePage({
                 </>
               }
             />
+
+            {stage === "draft" ? (
+              <div className="workspace-guide-bar">
+                <div className="workspace-guide-item">
+                  <span>Document</span>
+                  <strong>
+                    {selectedDocument?.original_filename ?? "Choose a file"}
+                  </strong>
+                </div>
+                <div className="workspace-guide-item">
+                  <span>Schema</span>
+                  <strong>
+                    {selectedTemplateVersion?.version
+                      ? `${selectedTemplate?.name ?? "Schema"} · ${selectedTemplateVersion.version}`
+                      : templates.length
+                        ? "Choose one schema"
+                        : "Create a schema first"}
+                  </strong>
+                </div>
+                <div className="workspace-guide-item workspace-guide-item-accent">
+                  <span>Next step</span>
+                  <strong>
+                    {!selectedDocument
+                      ? "Upload a file"
+                      : selectedTemplateVersion
+                        ? "Run extraction"
+                        : templates.length
+                          ? "Choose a schema"
+                          : "Open schema builder"}
+                  </strong>
+                </div>
+              </div>
+            ) : null}
 
             <div className="workspace-detail-grid">
               <section className="surface section-surface">
@@ -2471,8 +2577,13 @@ function ExtractionWorkspacePage({
                         type="button"
                         className="primary-button"
                         onClick={() => uploadInputRef.current?.click()}
+                        disabled={!workspaceInteractive}
                       >
-                        Choose file
+                        {coreDataState === "loading"
+                          ? "Loading workspace..."
+                          : coreDataState === "unavailable"
+                            ? "Reconnect backend to upload"
+                            : "Choose file"}
                       </button>
                       <span>
                         Stay in this workspace after upload. Do not get kicked
@@ -2483,6 +2594,7 @@ function ExtractionWorkspacePage({
                         type="file"
                         aria-label="Choose document file"
                         className="hidden-input"
+                        disabled={!workspaceInteractive}
                         onChange={(event) => {
                           const file = event.target.files?.[0];
                           if (file) {
@@ -2513,11 +2625,12 @@ function ExtractionWorkspacePage({
                       />
                     </div>
 
-                    {documents.length ? (
+                    {documents.length > 1 ? (
                       <label>
                         <span>Recent sources</span>
                         <select
                           value={selectedDocumentId ?? ""}
+                          disabled={!workspaceInteractive}
                           onChange={(event) =>
                             onSelectDocument(
                               parseOptionalId(event.target.value),
@@ -2540,6 +2653,7 @@ function ExtractionWorkspacePage({
                           <span>Schema</span>
                           <select
                             value={selectedTemplate?.id ?? ""}
+                            disabled={!workspaceInteractive}
                             onChange={(event) =>
                               onSelectTemplate(
                                 parseOptionalId(event.target.value),
@@ -2554,39 +2668,125 @@ function ExtractionWorkspacePage({
                             ))}
                           </select>
                         </label>
-                        <label>
-                          <span>Advanced: version</span>
-                          <select
-                            value={selectedTemplateVersion?.id ?? ""}
-                            onChange={(event) =>
-                              onSelectTemplateVersion(
-                                parseOptionalId(event.target.value),
-                              )
-                            }
+                        <div className="note-card compact full-line">
+                          <strong>Schema version</strong>
+                          <p>
+                            {selectedTemplateVersion
+                              ? `Using ${selectedTemplateVersion.version}.`
+                              : "The latest saved version will be used by default."}
+                          </p>
+                          {hasMultipleSchemaVersions ? (
+                            <>
+                              <div className="inline-actions top-gap">
+                                <span className="pill">
+                                  {selectedSchemaVersions.length} saved versions
+                                </span>
+                                <button
+                                  type="button"
+                                  className="text-link"
+                                  disabled={!workspaceInteractive}
+                                  aria-expanded={showVersionSelector}
+                                  aria-controls="schema-version-panel"
+                                  onClick={() =>
+                                    setShowVersionSelector(
+                                      (current) => !current,
+                                    )
+                                  }
+                                >
+                                  {showVersionSelector
+                                    ? "Hide versions"
+                                    : "Change version"}
+                                </button>
+                              </div>
+                              {showVersionSelector ? (
+                                <div
+                                  id="schema-version-panel"
+                                  className="top-gap"
+                                >
+                                  <label>
+                                    <span>Schema version</span>
+                                    <select
+                                      aria-label="Schema version"
+                                      value={selectedTemplateVersion?.id ?? ""}
+                                      disabled={!workspaceInteractive}
+                                      onChange={(event) =>
+                                        onSelectTemplateVersion(
+                                          parseOptionalId(event.target.value),
+                                        )
+                                      }
+                                    >
+                                      <option value="">Select version</option>
+                                      {selectedSchemaVersions.map((version) => (
+                                        <option
+                                          key={version.id}
+                                          value={version.id}
+                                        >
+                                          {version.version}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : coreDataState === "loading" ? (
+                      <div className="note-card">
+                        <strong>Loading workspace data...</strong>
+                        <p>
+                          Pulling schemas, documents, and job history into the
+                          extraction workspace now.
+                        </p>
+                      </div>
+                    ) : coreDataState === "unavailable" ? (
+                      <div className="note-card">
+                        <strong>Workspace data unavailable</strong>
+                        <p>
+                          The local API is down, so schemas and saved document
+                          history cannot load yet.
+                        </p>
+                        <div className="inline-actions top-gap">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={() => void onRetryConnection()}
                           >
-                            <option value="">Select version</option>
-                            {selectedSchemaVersions.map((version) => (
-                              <option key={version.id} value={version.id}>
-                                {version.version}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            Retry connection
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            onClick={onOpenHelp}
+                          >
+                            Open help
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className="note-card">
                         <strong>No schemas yet</strong>
                         <p>
-                          You only need to leave this workspace if a schema
-                          truly does not exist.
+                          Create one reusable schema, then come straight back
+                          here to run extraction on this document.
                         </p>
-                        <button
-                          type="button"
-                          className="secondary-button top-gap"
-                          onClick={onOpenSchemas}
-                        >
-                          Open schema builder
-                        </button>
+                        <div className="inline-actions top-gap">
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={onOpenSchemas}
+                          >
+                            Open schema builder
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button small"
+                            onClick={onOpenHelp}
+                          >
+                            Open help
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2640,6 +2840,11 @@ function ExtractionWorkspacePage({
                             focusedField?.field_name === field.field_name &&
                               "selected",
                           )}
+                          aria-current={
+                            focusedField?.field_name === field.field_name
+                              ? "true"
+                              : undefined
+                          }
                           onClick={() => onSetFocusedField(field.field_name)}
                         >
                           <div>
@@ -2778,7 +2983,11 @@ function ExtractionWorkspacePage({
                     ) : null}
                   </>
                 ) : stage === "processing" || stage === "failed" ? (
-                  <>
+                  <div
+                    className="progress-state"
+                    role={stage === "failed" ? "alert" : "status"}
+                    aria-live={stage === "failed" ? "assertive" : "polite"}
+                  >
                     <CardHeader
                       title="Progress"
                       subtitle="This replaces the old Runs page. Status belongs inside the active job."
@@ -2841,7 +3050,7 @@ function ExtractionWorkspacePage({
                           : "Web and desktop users both need live job progress without leaving the extraction workspace."}
                       </p>
                     </div>
-                  </>
+                  </div>
                 ) : (
                   <>
                     <CardHeader
@@ -3196,6 +3405,8 @@ function SettingsPage({
   onOpenDesktopAppDataDir,
   onLoadDesktopLogs,
   desktopLogs,
+  onOpenAudit,
+  onOpenHelp,
 }: {
   provider: ProviderSettings | null;
   providerCatalog: ProviderCatalogEntry[];
@@ -3225,175 +3436,80 @@ function SettingsPage({
   onOpenDesktopAppDataDir: () => Promise<void>;
   onLoadDesktopLogs: () => Promise<void>;
   desktopLogs: DesktopLogs | null;
+  onOpenAudit: () => void;
+  onOpenHelp: () => void;
 }) {
   const savedCustomProfiles = customProfiles ?? [];
   const probeMaxAgeHours =
     providerControls.custom_provider_probe_max_age_hours ||
     DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS;
+  const customProviderIsActive = Boolean(
+    provider &&
+    !providerCatalog.some(
+      (item) =>
+        item.settings.provider_type === provider.provider_type &&
+        item.settings.model === provider.model,
+    ),
+  );
+  const customDraftChanged =
+    JSON.stringify(customProviderDraft) !==
+    JSON.stringify(DEFAULT_CUSTOM_PROVIDER_DRAFT);
+  const [showCustomProviderDetails, setShowCustomProviderDetails] = useState(
+    () =>
+      customProviderIsActive ||
+      customDraftChanged ||
+      Boolean(selectedCustomProfileId) ||
+      Boolean(probeResults[CUSTOM_PROVIDER_KEY]),
+  );
+  const [expandedProviderKey, setExpandedProviderKey] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (
+      customProviderIsActive ||
+      customDraftChanged ||
+      Boolean(selectedCustomProfileId) ||
+      Boolean(probeResults[CUSTOM_PROVIDER_KEY])
+    ) {
+      setShowCustomProviderDetails(true);
+    }
+  }, [
+    customDraftChanged,
+    customProviderIsActive,
+    probeResults,
+    selectedCustomProfileId,
+  ]);
 
   return (
     <div className="page-stack">
       <section className="surface page-header-surface">
         <PageHeader
           eyebrow="Settings"
-          title="Provider and runtime controls belong here, not in the user’s first-run workflow."
-          description="Keep setup and admin power accessible without making every operator think about it on every extraction."
+          title="Confirm the current runtime, change it only if this workflow needs something else."
+          description="This page should answer one question fast: keep the default provider, or switch to a different runtime or private endpoint."
         />
       </section>
 
       <section className="surface">
         <CardHeader
-          title="Provider presets"
-          subtitle="Choose where extraction runs without hiding where documents are processed."
-        />
-        <div className="provider-grid">
-          {providerCatalog.map((item) => {
-            const selected =
-              provider?.provider_type === item.settings.provider_type &&
-              provider?.model === item.settings.model;
-            const health = providerHealth[item.key];
-            const probe = probeResults[item.key];
-            return (
-              <section key={item.key} className="provider-card">
-                <div className="provider-header">
-                  <div>
-                    <span
-                      className={classNames(
-                        "provider-mode",
-                        item.mode === "local" ? "local" : "cloud",
-                      )}
-                    >
-                      {item.mode === "local" ? "Local" : "Cloud"}
-                    </span>
-                    <h3>{item.label}</h3>
-                  </div>
-                  <StatusBadge
-                    tone={
-                      selected
-                        ? "info"
-                        : health?.ready
-                          ? "success"
-                          : health?.status === "probe_required"
-                            ? "warning"
-                            : item.recommended
-                              ? "indigo"
-                              : item.enabled
-                                ? "neutral"
-                                : "danger"
-                    }
-                  >
-                    {selected
-                      ? "Default"
-                      : health?.ready
-                        ? "Ready"
-                        : health?.status === "probe_required"
-                          ? "Probe required"
-                          : item.recommended
-                            ? "Recommended"
-                            : item.enabled
-                              ? "Available"
-                              : "Disabled"}
-                  </StatusBadge>
-                </div>
-                <div className="provider-body">
-                  <p>{item.description}</p>
-                  <div className="provider-item">
-                    <span>Base URL</span>
-                    <strong>{item.base_url ?? "No network endpoint"}</strong>
-                  </div>
-                  <div className="provider-item">
-                    <span>Model</span>
-                    <strong>{item.model}</strong>
-                  </div>
-                  {item.settings.deployment ? (
-                    <div className="provider-item">
-                      <span>Deployment</span>
-                      <strong>{item.settings.deployment}</strong>
-                    </div>
-                  ) : null}
-                  <div className="provider-item">
-                    <span>Controls</span>
-                    <strong>
-                      {item.capabilities.requires_api_key
-                        ? `API key via ${item.api_key_env_var}`
-                        : "No API key required"}
-                    </strong>
-                  </div>
-                  <div className="provider-item">
-                    <span>Policy</span>
-                    <strong>
-                      {item.settings.allow_external_processing
-                        ? "External processing allowed"
-                        : "Local-only processing"}
-                    </strong>
-                  </div>
-                  <div className="provider-item">
-                    <span>Readiness</span>
-                    <strong>
-                      {health
-                        ? health.checks.join(" • ")
-                        : "No health data loaded"}
-                    </strong>
-                  </div>
-                  <div className="provider-item">
-                    <span>Probe</span>
-                    <strong>
-                      {probe
-                        ? `${probe.reachable ? "Reachable" : "Not reachable"}${probe.status_code ? ` (HTTP ${probe.status_code})` : ""}: ${probe.detail}`
-                        : "No live probe run"}
-                    </strong>
-                  </div>
-                </div>
-                <div className="inline-actions">
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={() =>
-                      void onSetProvider(buildProviderPayload(item))
-                    }
-                    disabled={busyAction === "save-provider"}
-                  >
-                    {selected
-                      ? "Default provider"
-                      : busyAction === "save-provider"
-                        ? "Saving..."
-                        : "Set as default"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => void onProbeProvider(item)}
-                    disabled={busyAction === `probe-${item.key}`}
-                  >
-                    {busyAction === `probe-${item.key}`
-                      ? "Probing..."
-                      : "Probe"}
-                  </button>
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="surface">
-        <CardHeader
-          title="Product defaults"
-          subtitle="Keep the defaults predictable so users rarely need this page."
+          title="Current defaults"
+          subtitle="Start here. If these match the job, leave this page."
         />
         <div className="settings-grid settings-grid-wide">
           {[
             [
-              "App mode",
+              "Provider mode",
               provider?.mode === "cloud" ? "Cloud-assisted" : "Local",
             ],
-            ["Default provider", provider?.provider_type ?? "Not configured"],
+            [
+              "Default provider",
+              provider?.provider_label ??
+                provider?.provider_type ??
+                "Not configured",
+            ],
             ["Default model", provider?.model ?? "Not configured"],
-            ["Storage location", "/data"],
-            ["OCR settings", "Enabled for scanned PDFs"],
-            ["Export defaults", "JSON + CSV + Excel"],
             ["Profile reverify threshold", `${probeMaxAgeHours} hours`],
-            ["Logging preference", "Minimal document text logging"],
             [
               "Privacy mode",
               provider?.allow_external_processing
@@ -3408,374 +3524,611 @@ function SettingsPage({
 
       <section className="surface">
         <CardHeader
-          title="Custom provider"
-          subtitle="Register a private OpenAI-compatible or Azure endpoint without editing environment catalog JSON."
+          title="Provider presets"
+          subtitle="Only switch providers when the current defaults are wrong for this document policy or runtime."
         />
-        <div className="form-grid">
-          <label>
-            <span>Display label</span>
-            <input
-              value={customProviderDraft.label}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  label: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Provider type</span>
-            <input
-              value={customProviderDraft.provider_type}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  provider_type: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Mode</span>
-            <select
-              value={customProviderDraft.mode}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  mode: event.target.value as CustomProviderDraft["mode"],
-                  allow_external_processing: event.target.value === "cloud",
-                }))
-              }
-            >
-              <option value="local">Local</option>
-              <option value="cloud">Cloud</option>
-            </select>
-          </label>
-          <label>
-            <span>API style</span>
-            <select
-              value={customProviderDraft.api_style}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  api_style: event.target
-                    .value as CustomProviderDraft["api_style"],
-                }))
-              }
-            >
-              <option value="openai_compatible">OpenAI-compatible</option>
-              <option value="azure_openai">Azure OpenAI</option>
-            </select>
-          </label>
-          <label className="full-line">
-            <span>Base URL</span>
-            <input
-              value={customProviderDraft.base_url}
-              placeholder="https://llm.company.internal/v1"
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  base_url: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Model</span>
-            <input
-              value={customProviderDraft.model}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  model: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>API key env var</span>
-            <input
-              value={customProviderDraft.api_key_env_var}
-              placeholder="OPENAI_API_KEY"
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  api_key_env_var: event.target.value,
-                }))
-              }
-            />
-          </label>
-          {customProviderDraft.api_style === "azure_openai" ? (
-            <>
-              <label>
-                <span>Deployment</span>
-                <input
-                  value={customProviderDraft.deployment}
-                  onChange={(event) =>
-                    onCustomProviderDraftChange((current) => ({
-                      ...current,
-                      deployment: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>API version</span>
-                <input
-                  value={customProviderDraft.api_version}
-                  onChange={(event) =>
-                    onCustomProviderDraftChange((current) => ({
-                      ...current,
-                      api_version: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </>
-          ) : null}
-          <label>
-            <span>Temperature</span>
-            <input
-              value={customProviderDraft.temperature}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  temperature: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Max tokens</span>
-            <input
-              value={customProviderDraft.max_tokens}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  max_tokens: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Timeout seconds</span>
-            <input
-              value={customProviderDraft.timeout_seconds}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  timeout_seconds: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Retry count</span>
-            <input
-              value={customProviderDraft.retry_count}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  retry_count: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <label>
-            <span>Chunk size</span>
-            <input
-              value={customProviderDraft.chunk_size}
-              onChange={(event) =>
-                onCustomProviderDraftChange((current) => ({
-                  ...current,
-                  chunk_size: event.target.value,
-                }))
-              }
-            />
-          </label>
-          <SwitchField
-            label="External processing allowed"
-            checked={customProviderDraft.allow_external_processing}
-            hint="Turn this on only when documents may leave the local environment."
-            onToggle={() =>
-              onCustomProviderDraftChange((current) => ({
-                ...current,
-                allow_external_processing: !current.allow_external_processing,
-              }))
-            }
-          />
-          <SwitchField
-            label="JSON mode requested"
-            checked={customProviderDraft.supports_json_mode}
-            hint="Request structured JSON responses when the provider supports them."
-            onToggle={() =>
-              onCustomProviderDraftChange((current) => ({
-                ...current,
-                supports_json_mode: !current.supports_json_mode,
-              }))
-            }
-          />
-        </div>
-        <div className="provider-item top-gap">
-          <span>Current draft probe</span>
-          <strong>
-            {probeResults[CUSTOM_PROVIDER_KEY]
-              ? `${probeResults[CUSTOM_PROVIDER_KEY].reachable ? "Reachable" : "Not reachable"}: ${probeResults[CUSTOM_PROVIDER_KEY].detail}`
-              : "No live probe run"}
-          </strong>
-        </div>
-        <div className="inline-actions top-gap">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void onSaveCustomProfile()}
-            disabled={busyAction === "save-custom-profile"}
-          >
-            {busyAction === "save-custom-profile"
-              ? "Saving profile..."
-              : selectedCustomProfileId
-                ? "Update saved profile"
-                : "Save profile"}
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void onSetCustomProvider()}
-            disabled={busyAction === "save-provider"}
-          >
-            {busyAction === "save-provider"
-              ? "Saving..."
-              : "Set custom provider as default"}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => void onProbeCustomProvider()}
-            disabled={busyAction === `probe-${CUSTOM_PROVIDER_KEY}`}
-          >
-            {busyAction === `probe-${CUSTOM_PROVIDER_KEY}`
-              ? "Probing..."
-              : "Probe custom provider"}
-          </button>
-        </div>
-        {savedCustomProfiles.length ? (
-          <div className="provider-grid top-gap">
-            {savedCustomProfiles.map((profile) => {
-              const profileProbeIsStale = customProviderProfileProbeIsStale(
-                profile,
-                probeMaxAgeHours,
-              );
+        {providerCatalog.length ? (
+          <div className="provider-grid">
+            {providerCatalog.map((item) => {
+              const selected =
+                provider?.provider_type === item.settings.provider_type &&
+                provider?.model === item.settings.model;
+              const health = providerHealth[item.key];
+              const probe = probeResults[item.key];
+              const statusLabel = selected
+                ? "Default"
+                : health?.ready
+                  ? "Ready"
+                  : health?.status === "probe_required"
+                    ? "Probe required"
+                    : item.recommended
+                      ? "Recommended"
+                      : item.enabled
+                        ? "Available"
+                        : "Disabled";
+              const statusTone = selected
+                ? "info"
+                : health?.ready
+                  ? "success"
+                  : health?.status === "probe_required"
+                    ? "warning"
+                    : item.recommended
+                      ? "indigo"
+                      : item.enabled
+                        ? "neutral"
+                        : "danger";
+              const detailsVisible = expandedProviderKey === item.key;
               return (
-                <section key={profile.id} className="provider-card">
+                <section key={item.key} className="provider-card">
                   <div className="provider-header">
                     <div>
                       <span
                         className={classNames(
                           "provider-mode",
-                          profile.settings.mode === "local" ? "local" : "cloud",
+                          item.mode === "local" ? "local" : "cloud",
                         )}
                       >
-                        {profile.settings.mode === "local" ? "Local" : "Cloud"}
+                        {item.mode === "local" ? "Local" : "Cloud"}
                       </span>
-                      <h3>{profile.name}</h3>
+                      <h3>{item.label}</h3>
                     </div>
-                    <StatusBadge
-                      tone={
-                        selectedCustomProfileId === profile.id
-                          ? "info"
-                          : profile.last_probe_at && !profileProbeIsStale
-                            ? "success"
-                            : profile.last_probe_at
-                              ? "warning"
-                              : "neutral"
-                      }
-                    >
-                      {selectedCustomProfileId === profile.id
-                        ? "Loaded"
-                        : profile.last_probe_at && !profileProbeIsStale
-                          ? "Verified"
-                          : profile.last_probe_at
-                            ? "Stale"
-                            : "Saved"}
-                    </StatusBadge>
+                    <StatusBadge tone={statusTone}>{statusLabel}</StatusBadge>
                   </div>
                   <div className="provider-body">
-                    <div className="provider-item">
-                      <span>Provider type</span>
-                      <strong>{profile.settings.provider_type}</strong>
-                    </div>
+                    <p>{item.description}</p>
                     <div className="provider-item">
                       <span>Model</span>
-                      <strong>{profile.settings.model}</strong>
+                      <strong>{item.model}</strong>
                     </div>
                     <div className="provider-item">
-                      <span>Updated</span>
+                      <span>Document handling</span>
                       <strong>
-                        {new Date(profile.updated_at).toLocaleString()}
+                        {item.settings.allow_external_processing
+                          ? "Cloud processing allowed"
+                          : "Local-only processing"}
                       </strong>
                     </div>
                     <div className="provider-item">
-                      <span>Last verified</span>
+                      <span>Runtime</span>
                       <strong>
-                        {profile.last_probe_at
-                          ? `${formatTimestamp(profile.last_probe_at)}${profileProbeIsStale ? ` (${probeMaxAgeHours}h threshold exceeded)` : ""}`
-                          : "No successful probe recorded"}
+                        {item.mode === "local"
+                          ? "Runs against a local endpoint"
+                          : "Runs against a remote endpoint"}
                       </strong>
                     </div>
-                    <div className="provider-item">
-                      <span>Probe status</span>
-                      <strong>
-                        {profile.last_probe_status && profile.last_probe_detail
-                          ? `${profile.last_probe_status}: ${profile.last_probe_detail}`
-                          : "No successful probe recorded"}
-                      </strong>
-                    </div>
+                    {detailsVisible ? (
+                      <div
+                        id={`provider-details-${item.key}`}
+                        className="provider-details"
+                      >
+                        <div className="provider-item">
+                          <span>Base URL</span>
+                          <strong>
+                            {item.base_url ?? "No network endpoint"}
+                          </strong>
+                        </div>
+                        {item.settings.deployment ? (
+                          <div className="provider-item">
+                            <span>Deployment</span>
+                            <strong>{item.settings.deployment}</strong>
+                          </div>
+                        ) : null}
+                        <div className="provider-item">
+                          <span>API key</span>
+                          <strong>
+                            {item.capabilities.requires_api_key
+                              ? `Via ${item.api_key_env_var}`
+                              : "Not required"}
+                          </strong>
+                        </div>
+                        <div className="provider-item">
+                          <span>Readiness</span>
+                          <strong>
+                            {health
+                              ? health.checks.join(" • ")
+                              : "No health data loaded"}
+                          </strong>
+                        </div>
+                        <div className="provider-item">
+                          <span>Latest probe</span>
+                          <strong>
+                            {probe
+                              ? `${probe.reachable ? "Reachable" : "Not reachable"}${probe.status_code ? ` (HTTP ${probe.status_code})` : ""}: ${probe.detail}`
+                              : "No live probe run"}
+                          </strong>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="inline-actions">
                     <button
                       type="button"
-                      className="secondary-button"
-                      onClick={() => onLoadCustomProfile(profile)}
-                    >
-                      Load into form
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => void onReverifyCustomProfile(profile)}
-                      disabled={busyAction === `reverify-${profile.id}`}
-                    >
-                      {busyAction === `reverify-${profile.id}`
-                        ? "Reverifying..."
-                        : "Reverify"}
-                    </button>
-                    <button
-                      type="button"
                       className="primary-button"
-                      onClick={() => void onActivateCustomProfile(profile)}
-                      disabled={busyAction === `activate-${profile.id}`}
+                      onClick={() =>
+                        void onSetProvider(buildProviderPayload(item))
+                      }
+                      disabled={busyAction === "save-provider"}
                     >
-                      {busyAction === `activate-${profile.id}`
-                        ? "Activating..."
-                        : "Activate default"}
+                      {selected
+                        ? "Default provider"
+                        : busyAction === "save-provider"
+                          ? "Saving..."
+                          : "Set as default"}
                     </button>
                     <button
                       type="button"
                       className="secondary-button"
-                      onClick={() => void onDeleteCustomProfile(profile)}
-                      disabled={busyAction === `delete-${profile.id}`}
+                      onClick={() => void onProbeProvider(item)}
+                      disabled={busyAction === `probe-${item.key}`}
                     >
-                      {busyAction === `delete-${profile.id}`
-                        ? "Deleting..."
-                        : "Delete"}
+                      {busyAction === `probe-${item.key}`
+                        ? "Probing..."
+                        : "Probe"}
+                    </button>
+                    <button
+                      type="button"
+                      className="tertiary-button small"
+                      aria-expanded={detailsVisible}
+                      aria-controls={`provider-details-${item.key}`}
+                      onClick={() =>
+                        setExpandedProviderKey((current) =>
+                          current === item.key ? null : item.key,
+                        )
+                      }
+                    >
+                      {detailsVisible ? "Hide details" : "Show details"}
                     </button>
                   </div>
                 </section>
               );
             })}
           </div>
+        ) : (
+          <div className="note-card compact">
+            <strong>No provider presets available right now</strong>
+            <p>
+              Provider presets load from the backend. Retry once the local API
+              is reachable.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="surface">
+        <CardHeader
+          title="Advanced provider profiles"
+          subtitle="Keep private endpoints and raw provider plumbing out of the everyday settings path."
+        />
+        <div className="note-card compact">
+          <strong>Private endpoints and saved custom profiles</strong>
+          <p>
+            Open this only when you need to register a private OpenAI-compatible
+            or Azure endpoint.
+          </p>
+          <div className="inline-actions top-gap">
+            <span className="pill">
+              {savedCustomProfiles.length} saved
+              {savedCustomProfiles.length === 1 ? " profile" : " profiles"}
+            </span>
+            {customProviderIsActive ? (
+              <StatusBadge tone="info">Custom provider active</StatusBadge>
+            ) : null}
+            {customDraftChanged ? (
+              <StatusBadge tone="warning">Draft edited</StatusBadge>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button"
+              aria-expanded={showCustomProviderDetails}
+              aria-controls="advanced-provider-profiles-panel"
+              onClick={() =>
+                setShowCustomProviderDetails((current) => !current)
+              }
+            >
+              {showCustomProviderDetails
+                ? "Hide advanced provider profiles"
+                : "Open advanced provider profiles"}
+            </button>
+          </div>
+        </div>
+        {showCustomProviderDetails ? (
+          <div id="advanced-provider-profiles-panel">
+            <div className="form-grid top-gap">
+              <label>
+                <span>Display label</span>
+                <input
+                  value={customProviderDraft.label}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      label: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Provider type</span>
+                <input
+                  value={customProviderDraft.provider_type}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      provider_type: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Mode</span>
+                <select
+                  value={customProviderDraft.mode}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      mode: event.target.value as CustomProviderDraft["mode"],
+                      allow_external_processing: event.target.value === "cloud",
+                    }))
+                  }
+                >
+                  <option value="local">Local</option>
+                  <option value="cloud">Cloud</option>
+                </select>
+              </label>
+              <label>
+                <span>API style</span>
+                <select
+                  value={customProviderDraft.api_style}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      api_style: event.target
+                        .value as CustomProviderDraft["api_style"],
+                    }))
+                  }
+                >
+                  <option value="openai_compatible">OpenAI-compatible</option>
+                  <option value="azure_openai">Azure OpenAI</option>
+                </select>
+              </label>
+              <label className="full-line">
+                <span>Base URL</span>
+                <input
+                  value={customProviderDraft.base_url}
+                  placeholder="https://llm.company.internal/v1"
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      base_url: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Model</span>
+                <input
+                  value={customProviderDraft.model}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      model: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>API key env var</span>
+                <input
+                  value={customProviderDraft.api_key_env_var}
+                  placeholder="OPENAI_API_KEY"
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      api_key_env_var: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              {customProviderDraft.api_style === "azure_openai" ? (
+                <>
+                  <label>
+                    <span>Deployment</span>
+                    <input
+                      value={customProviderDraft.deployment}
+                      onChange={(event) =>
+                        onCustomProviderDraftChange((current) => ({
+                          ...current,
+                          deployment: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>API version</span>
+                    <input
+                      value={customProviderDraft.api_version}
+                      onChange={(event) =>
+                        onCustomProviderDraftChange((current) => ({
+                          ...current,
+                          api_version: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </>
+              ) : null}
+              <label>
+                <span>Temperature</span>
+                <input
+                  value={customProviderDraft.temperature}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      temperature: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Max tokens</span>
+                <input
+                  value={customProviderDraft.max_tokens}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      max_tokens: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Timeout seconds</span>
+                <input
+                  value={customProviderDraft.timeout_seconds}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      timeout_seconds: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Retry count</span>
+                <input
+                  value={customProviderDraft.retry_count}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      retry_count: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                <span>Chunk size</span>
+                <input
+                  value={customProviderDraft.chunk_size}
+                  onChange={(event) =>
+                    onCustomProviderDraftChange((current) => ({
+                      ...current,
+                      chunk_size: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <SwitchField
+                label="External processing allowed"
+                checked={customProviderDraft.allow_external_processing}
+                hint="Turn this on only when documents may leave the local environment."
+                onToggle={() =>
+                  onCustomProviderDraftChange((current) => ({
+                    ...current,
+                    allow_external_processing:
+                      !current.allow_external_processing,
+                  }))
+                }
+              />
+              <SwitchField
+                label="JSON mode requested"
+                checked={customProviderDraft.supports_json_mode}
+                hint="Request structured JSON responses when the provider supports them."
+                onToggle={() =>
+                  onCustomProviderDraftChange((current) => ({
+                    ...current,
+                    supports_json_mode: !current.supports_json_mode,
+                  }))
+                }
+              />
+            </div>
+            <div className="provider-item top-gap">
+              <span>Current draft probe</span>
+              <strong>
+                {probeResults[CUSTOM_PROVIDER_KEY]
+                  ? `${probeResults[CUSTOM_PROVIDER_KEY].reachable ? "Reachable" : "Not reachable"}: ${probeResults[CUSTOM_PROVIDER_KEY].detail}`
+                  : "No live probe run"}
+              </strong>
+            </div>
+            <div className="inline-actions top-gap">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onSaveCustomProfile()}
+                disabled={busyAction === "save-custom-profile"}
+              >
+                {busyAction === "save-custom-profile"
+                  ? "Saving profile..."
+                  : selectedCustomProfileId
+                    ? "Update saved profile"
+                    : "Save profile"}
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void onSetCustomProvider()}
+                disabled={busyAction === "save-provider"}
+              >
+                {busyAction === "save-provider"
+                  ? "Saving..."
+                  : "Set custom provider as default"}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void onProbeCustomProvider()}
+                disabled={busyAction === `probe-${CUSTOM_PROVIDER_KEY}`}
+              >
+                {busyAction === `probe-${CUSTOM_PROVIDER_KEY}`
+                  ? "Probing..."
+                  : "Probe custom provider"}
+              </button>
+            </div>
+            {savedCustomProfiles.length ? (
+              <div className="provider-grid top-gap">
+                {savedCustomProfiles.map((profile) => {
+                  const profileProbeIsStale = customProviderProfileProbeIsStale(
+                    profile,
+                    probeMaxAgeHours,
+                  );
+                  return (
+                    <section key={profile.id} className="provider-card">
+                      <div className="provider-header">
+                        <div>
+                          <span
+                            className={classNames(
+                              "provider-mode",
+                              profile.settings.mode === "local"
+                                ? "local"
+                                : "cloud",
+                            )}
+                          >
+                            {profile.settings.mode === "local"
+                              ? "Local"
+                              : "Cloud"}
+                          </span>
+                          <h3>{profile.name}</h3>
+                        </div>
+                        <StatusBadge
+                          tone={
+                            selectedCustomProfileId === profile.id
+                              ? "info"
+                              : profile.last_probe_at && !profileProbeIsStale
+                                ? "success"
+                                : profile.last_probe_at
+                                  ? "warning"
+                                  : "neutral"
+                          }
+                        >
+                          {selectedCustomProfileId === profile.id
+                            ? "Loaded"
+                            : profile.last_probe_at && !profileProbeIsStale
+                              ? "Verified"
+                              : profile.last_probe_at
+                                ? "Stale"
+                                : "Saved"}
+                        </StatusBadge>
+                      </div>
+                      <div className="provider-body">
+                        <div className="provider-item">
+                          <span>Provider type</span>
+                          <strong>{profile.settings.provider_type}</strong>
+                        </div>
+                        <div className="provider-item">
+                          <span>Model</span>
+                          <strong>{profile.settings.model}</strong>
+                        </div>
+                        <div className="provider-item">
+                          <span>Updated</span>
+                          <strong>
+                            {new Date(profile.updated_at).toLocaleString()}
+                          </strong>
+                        </div>
+                        <div className="provider-item">
+                          <span>Last verified</span>
+                          <strong>
+                            {profile.last_probe_at
+                              ? `${formatTimestamp(profile.last_probe_at)}${profileProbeIsStale ? ` (${probeMaxAgeHours}h threshold exceeded)` : ""}`
+                              : "No successful probe recorded"}
+                          </strong>
+                        </div>
+                        <div className="provider-item">
+                          <span>Probe status</span>
+                          <strong>
+                            {profile.last_probe_status &&
+                            profile.last_probe_detail
+                              ? `${profile.last_probe_status}: ${profile.last_probe_detail}`
+                              : "No successful probe recorded"}
+                          </strong>
+                        </div>
+                      </div>
+                      <div className="inline-actions">
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => onLoadCustomProfile(profile)}
+                        >
+                          Load into form
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void onReverifyCustomProfile(profile)}
+                          disabled={busyAction === `reverify-${profile.id}`}
+                        >
+                          {busyAction === `reverify-${profile.id}`
+                            ? "Reverifying..."
+                            : "Reverify"}
+                        </button>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() => void onActivateCustomProfile(profile)}
+                          disabled={busyAction === `activate-${profile.id}`}
+                        >
+                          {busyAction === `activate-${profile.id}`
+                            ? "Activating..."
+                            : "Activate default"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void onDeleteCustomProfile(profile)}
+                          disabled={busyAction === `delete-${profile.id}`}
+                        >
+                          {busyAction === `delete-${profile.id}`
+                            ? "Deleting..."
+                            : "Delete"}
+                        </button>
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         ) : null}
+      </section>
+
+      <section className="surface">
+        <CardHeader
+          title="Support and history"
+          subtitle="Use these only when you need to investigate or get unstuck."
+        />
+        <div className="inline-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onOpenAudit}
+          >
+            Open audit history
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onOpenHelp}
+          >
+            Open help
+          </button>
+        </div>
       </section>
 
       <DesktopSetupPanel
@@ -3800,13 +4153,13 @@ function AuditPage() {
       <section className="surface page-header-surface">
         <PageHeader
           eyebrow="Audit"
-          title="Track uploads, review edits, recalculations, and exports without turning audit into the main workflow."
+          title="See what happened to a document after upload, review, recalculation, and export."
         />
       </section>
       <section className="surface">
         <CardHeader
           title="Recent activity"
-          subtitle="Audit should be scannable at a glance without looking like another primary workspace."
+          subtitle="Keep the trail scannable so operators can answer what changed without digging through logs."
         />
         <div className="table-toolbar">
           <SummaryStat
@@ -3850,14 +4203,51 @@ function AuditPage() {
   );
 }
 
-function HelpPage() {
+function HelpPage({
+  onOpenExtractions,
+  onOpenSchemas,
+  onOpenSettings,
+}: {
+  onOpenExtractions: () => void;
+  onOpenSchemas: () => void;
+  onOpenSettings: () => void;
+}) {
   return (
     <div className="page-stack">
       <section className="surface page-header-surface">
         <PageHeader
           eyebrow="Help"
-          title="Support the extraction job after first value, not before it."
+          title="Get the next step when setup, review, or evidence is unclear."
         />
+      </section>
+      <section className="surface">
+        <CardHeader
+          title="Jump to the right surface"
+          subtitle="Use help to get unstuck, then leave it."
+        />
+        <div className="inline-actions">
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onOpenExtractions}
+          >
+            Open extraction workspace
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onOpenSchemas}
+          >
+            Open schema builder
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onOpenSettings}
+          >
+            Open settings
+          </button>
+        </div>
       </section>
       <div className="detail-grid">
         <section className="surface span-6">
@@ -3976,6 +4366,9 @@ export function App() {
     actionLabel?: string;
     onAction?: () => void;
   } | null>(null);
+  const [coreDataState, setCoreDataState] = useState<
+    "loading" | "ready" | "unavailable"
+  >("loading");
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
     null,
@@ -4008,22 +4401,8 @@ export function App() {
     }
     setApiUnavailable(!healthOk);
     if (!healthOk) {
-      setTemplates([]);
-      setTemplateVersions([]);
-      setDocuments([]);
-      setJobs([]);
-      setExportsList([]);
-      setProvider(null);
-      setProviderCatalog([]);
-      setProviderHealth({});
-      setProbeResults({});
-      setCustomProfiles([]);
-      setProviderControls({
-        custom_provider_probe_max_age_hours:
-          DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS,
-      });
-      setSelectedCustomProfileId(null);
       setDevStatus(null);
+      setCoreDataState("unavailable");
       setResultsByJob({});
       return;
     }
@@ -4134,6 +4513,7 @@ export function App() {
       resultPairs.filter(Boolean) as Array<readonly [number, ResultEnvelope]>,
     );
     setResultsByJob(nextResults);
+    setCoreDataState("ready");
 
     if (selectedJobId && !liveJobs.some((job) => job.id === selectedJobId)) {
       setSelectedJobId(null);
@@ -4223,9 +4603,11 @@ export function App() {
     (sum, result) => sum + result.result.fields_requiring_review.length,
     0,
   );
-  const showDesktopOnboarding =
-    Boolean(desktopStatus?.tauriMode) &&
-    (!desktopOnboardingDismissed || apiUnavailable || !provider);
+  const workspaceBusy =
+    busyAction === "upload" ||
+    busyAction === "run" ||
+    busyAction === "save-review" ||
+    busyAction?.startsWith("export-") === true;
 
   function applyLangExtractFeedback(
     feedback: LangExtractFeedbackSuggestionListResponse,
@@ -4587,11 +4969,6 @@ export function App() {
         })
         .filter(Boolean);
 
-      if (!edits.length) {
-        setBanner({ tone: "success", message: "No review changes to save." });
-        return;
-      }
-
       const updatedResult = await readJson<ResultPayload>(
         `/results/${selectedResult.result_id}/review`,
         {
@@ -4653,8 +5030,8 @@ export function App() {
               tone: "success",
               message:
                 feedback.suggestions.length === 1
-                  ? "Review edits saved and formulas recalculated. 1 reusable grounded example is ready for this schema."
-                  : `Review edits saved and formulas recalculated. ${feedback.suggestions.length} reusable grounded examples are ready for this schema.`,
+                  ? "Review saved and formulas recalculated. 1 reusable grounded example is ready for this schema."
+                  : `Review saved and formulas recalculated. ${feedback.suggestions.length} reusable grounded examples are ready for this schema.`,
               actionLabel: "Open schema draft",
               onAction: () => openSchemaDraft(reviewedTemplateVersionId),
             });
@@ -4664,7 +5041,7 @@ export function App() {
       }
       setBanner({
         tone: "success",
-        message: "Review edits saved and formulas recalculated.",
+        message: "Review saved and formulas recalculated.",
       });
     } catch (error) {
       setBanner({
@@ -5185,49 +5562,54 @@ export function App() {
       />
       <div className="main-shell">
         <TopBar activePage={activePage} />
-        <main className="workspace">
-          {showDesktopOnboarding ? (
-            <DesktopOnboardingOverlay
-              desktopStatus={desktopStatus}
-              provider={provider}
-              apiUnavailable={apiUnavailable}
-              busyAction={busyAction}
-              onStartDesktopStack={handleDesktopStart}
-              onOpenSettings={() => setActivePage("settings")}
-              onDismiss={dismissDesktopOnboarding}
-            />
-          ) : null}
+        <main className="workspace" aria-busy={workspaceBusy}>
+          <DesktopSetupNotice
+            desktopStatus={desktopStatus}
+            provider={provider}
+            apiUnavailable={apiUnavailable}
+            busyAction={busyAction}
+            desktopOnboardingDismissed={desktopOnboardingDismissed}
+            onRefresh={refreshDesktopStatus}
+            onStartDesktopStack={handleDesktopStart}
+            onOpenSettings={() => setActivePage("settings")}
+            onDismiss={dismissDesktopOnboarding}
+          />
 
-          {apiUnavailable ? (
-            <div className="banner banner-error">
+          {apiUnavailable && !desktopStatus?.tauriMode ? (
+            <div
+              className="banner banner-error"
+              role="alert"
+              aria-live="assertive"
+            >
               <span>
                 Backend unavailable. The extraction workspace is open, but the
                 local API is not reachable at {API_BASE}. Start the backend
                 stack or use
                 <code> npm run tauri:dev</code> for the managed desktop flow.
               </span>
-              {desktopStatus?.tauriMode ? (
-                <div className="inline-actions">
-                  <button
-                    type="button"
-                    className="secondary-button small"
-                    onClick={() => void refreshDesktopStatus()}
-                    disabled={busyAction === "desktop-refresh"}
-                  >
-                    Refresh
-                  </button>
-                  <button
-                    type="button"
-                    className="primary-button small"
-                    onClick={() => void handleDesktopStart()}
-                    disabled={busyAction === "desktop-start"}
-                  >
-                    {busyAction === "desktop-start"
-                      ? "Starting..."
-                      : "Start stack"}
-                  </button>
-                </div>
-              ) : null}
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => void refreshCoreData()}
+                >
+                  Retry connection
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setActivePage("settings")}
+                >
+                  Open settings
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button small"
+                  onClick={() => setActivePage("help")}
+                >
+                  Open help
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -5237,6 +5619,8 @@ export function App() {
                 "banner",
                 banner.tone === "error" ? "banner-error" : "banner-success",
               )}
+              role={banner.tone === "error" ? "alert" : "status"}
+              aria-live={banner.tone === "error" ? "assertive" : "polite"}
             >
               <span>{banner.message}</span>
               {banner.actionLabel && banner.onAction ? (
@@ -5273,6 +5657,7 @@ export function App() {
               reviewDrafts={reviewDrafts}
               focusedFieldName={focusedFieldName}
               busyAction={busyAction}
+              coreDataState={coreDataState}
               onSelectJob={handleSelectJob}
               onStartNew={handleStartNewExtraction}
               onUpload={handleUpload}
@@ -5290,6 +5675,8 @@ export function App() {
               onSaveReview={handleSaveReview}
               onExport={handleExport}
               onOpenSchemas={() => setActivePage("templates")}
+              onOpenHelp={() => setActivePage("help")}
+              onRetryConnection={refreshCoreData}
             />
           ) : null}
 
@@ -5353,11 +5740,19 @@ export function App() {
               onOpenDesktopAppDataDir={handleDesktopOpenAppDataDir}
               onLoadDesktopLogs={handleDesktopLoadLogs}
               desktopLogs={desktopLogs}
+              onOpenAudit={() => setActivePage("audit")}
+              onOpenHelp={() => setActivePage("help")}
             />
           ) : null}
 
           {activePage === "audit" ? <AuditPage /> : null}
-          {activePage === "help" ? <HelpPage /> : null}
+          {activePage === "help" ? (
+            <HelpPage
+              onOpenExtractions={() => setActivePage("extractions")}
+              onOpenSchemas={() => setActivePage("templates")}
+              onOpenSettings={() => setActivePage("settings")}
+            />
+          ) : null}
 
           {devStatus && activePage !== "extractions" ? (
             <div className="runtime-message">

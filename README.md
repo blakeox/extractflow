@@ -162,10 +162,11 @@ The Python services now fail fast on invalid configuration instead of starting w
 - `WORKER_STATUS_PATH` must remain under `DATA_DIR` so the worker health signal stays inside the shared app data volume
 - `PROVIDER_CATALOG_JSON`, when set, must be a JSON array
 - Provider base URLs must be explicit `http://` or `https://` URLs
-- `EXTRACTFLOW_USE_DOCLING` controls the worker's Docling-backed parser path for PDF, DOCX, HTML, and images; when disabled, those document types fail fast instead of silently falling back to removed legacy parsers
+- `EXTRACTFLOW_USE_DOCLING` controls the worker's Docling-backed parser path for PDF, DOCX, PPTX, HTML, and images; when disabled, those document types fail fast instead of silently falling back to removed legacy parsers
 - `DOCLING_PREWARM` controls whether the worker pre-initializes the cached Docling converters during startup to reduce first-document latency
 - `DOCLING_PDF_OCR_RETRY` controls whether PDFs get a second Docling pass with RapidOCR after the plain-text parse comes back weak
 - `DOCLING_IMAGE_OCR` controls whether image parsing uses Docling OCR or a plain non-OCR pass
+- Structured extraction fields can now enforce JSON Schema contracts at validation time, so `structured_object`, `json_object`, and `table` outputs can fail closed when the normalized payload shape is wrong
 
 Backend readiness surfaces:
 

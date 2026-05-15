@@ -26,9 +26,6 @@ test("uploads a document, runs extraction, and saves a review decision", async (
   ).toBeVisible();
 
   await page.getByRole("combobox", { name: "Schema" }).selectOption("1");
-  await page
-    .getByRole("combobox", { name: "Advanced: version" })
-    .selectOption("101");
   await expect(
     page.getByRole("button", { name: "Run extraction" }),
   ).toBeEnabled();
@@ -43,19 +40,16 @@ test("uploads a document, runs extraction, and saves a review decision", async (
   await expect(
     page.getByRole("button", { name: /sample-contract\.txt.*need review/i }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Save changes" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save review" })).toBeVisible();
   await expect(page.getByLabel("Vendor Name review value")).toHaveValue(
     "Acme Company",
   );
   await expect(page.getByRole("button", { name: "Export JSON" })).toBeVisible();
 
-  await page.getByLabel("Vendor Name review value").fill("Acme Incorporated");
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Save review" }).click();
 
   await expect(
-    page.getByText("Review edits saved and formulas recalculated."),
+    page.getByText("Review saved and formulas recalculated."),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Extraction complete" }),
@@ -65,7 +59,7 @@ test("uploads a document, runs extraction, and saves a review decision", async (
       name: /sample-contract\.txt.*Ready to export/i,
     }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(
+  await expect(page.getByRole("button", { name: "Save review" })).toHaveCount(
     0,
   );
   await expect(page.getByLabel("Vendor Name review value")).toHaveCount(0);
@@ -74,5 +68,5 @@ test("uploads a document, runs extraction, and saves a review decision", async (
   await expect(
     page.getByRole("button", { name: "Export Excel" }),
   ).toBeVisible();
-  await expect(page.getByText("Acme Incorporated")).toBeVisible();
+  await expect(page.getByText("Acme Company")).toBeVisible();
 });

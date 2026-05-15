@@ -23,7 +23,7 @@ def test_initialize_worker_runtime_records_docling_startup_details(monkeypatch) 
     monkeypatch.setattr(
         worker_main,
         "prewarm_docling_converters",
-        lambda: {"status": "completed", "attempted": True, "warmed_targets": ["pdf:plain"]},
+        lambda: {"status": "completed", "attempted": True, "warmed_targets": ["pdf:plain", "pptx:plain"]},
     )
 
     worker_main.initialize_worker_runtime()
@@ -47,7 +47,7 @@ def test_initialize_worker_runtime_records_docling_startup_details(monkeypatch) 
             "docling_prewarm_result": {
                 "status": "completed",
                 "attempted": True,
-                "warmed_targets": ["pdf:plain"],
+                "warmed_targets": ["pdf:plain", "pptx:plain"],
             },
         },
     )
