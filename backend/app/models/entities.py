@@ -13,10 +13,11 @@ def utc_now() -> datetime:
 
 class Template(Base):
     __tablename__ = "templates"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_template_tenant_name"),)
 
     id = Column(Integer, primary_key=True)
     tenant_id = Column(String(64), nullable=False, default="default")
-    name = Column(String(255), nullable=False, unique=True)
+    name = Column(String(255), nullable=False)
     description = Column(Text, nullable=False, default="")
     document_type = Column(String(255), nullable=False)
     is_locked = Column(Boolean, nullable=False, default=False)
