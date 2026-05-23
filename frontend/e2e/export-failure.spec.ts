@@ -21,13 +21,10 @@ test("keeps a trusted result in place when export generation fails", async ({
     });
 
   await page.getByRole("combobox", { name: "Schema" }).selectOption("1");
-  await page
-    .getByRole("combobox", { name: "Advanced: version" })
-    .selectOption("101");
   await page.getByRole("button", { name: "Run extraction" }).click();
 
   await page.getByLabel("Vendor Name review value").fill("Acme Incorporated");
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Save review" }).click();
 
   await expect(
     page.getByRole("heading", { name: "Extraction complete" }),

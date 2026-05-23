@@ -1,6 +1,12 @@
 import json
 from pathlib import Path
 
+from extraction_core.runtime import (
+    DeploymentMode,
+    tenant_mode_for_deployment,
+    validate_supported_database_url,
+)
+from extraction_core.tenancy import normalize_tenant_id
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,12 +14,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Schema-Driven Document Extraction"
     api_prefix: str = "/api"
+    deployment_mode: DeploymentMode = DeploymentMode.LOCAL
     database_url: str = "sqlite:////data/app.db"
     data_dir: str = "/data"
     uploads_dir: str = "/data/uploads"
     exports_dir: str = "/data/exports"
     parsed_dir: str = "/data/parsed"
+    worker_status_path: str | None = None
     seed_samples_on_startup: bool = False
+    allow_external_processing: bool = True
+    require_redaction_for_external_processing: bool = False
+    presidio_redaction_enabled: bool = True
+    require_authentication: bool = False
+    current_tenant_id: str = "default"
+    trust_tenant_header: bool = False
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://frontend:3000"])
     worker_poll_seconds: int = Field(default=5, ge=1, le=3600)
     provider_catalog_json: str | None = None
@@ -42,9 +56,7 @@ class Settings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
-        if not value.startswith("sqlite:///"):
-            raise ValueError("DATABASE_URL must use sqlite:/// because the current runtime only supports SQLite.")
-        return value
+        return validate_supported_database_url(value)
 
     @field_validator(
         "default_local_provider_base_url",
@@ -71,17 +83,33 @@ class Settings(BaseSettings):
             raise ValueError("PROVIDER_CATALOG_JSON must be a JSON array.")
         return value
 
+    @field_validator("current_tenant_id")
+    @classmethod
+    def validate_current_tenant_id(cls, value: str) -> str:
+        return normalize_tenant_id(value, source="CURRENT_TENANT_ID")
+
     @model_validator(mode="after")
     def validate_runtime_paths(self) -> "Settings":
         data_root = Path(self.data_dir).expanduser().resolve()
+        if not self.worker_status_path:
+            self.worker_status_path = str(data_root / "worker-status.json")
         runtime_paths = {
             "UPLOADS_DIR": Path(self.uploads_dir).expanduser().resolve(),
             "EXPORTS_DIR": Path(self.exports_dir).expanduser().resolve(),
             "PARSED_DIR": Path(self.parsed_dir).expanduser().resolve(),
+            "WORKER_STATUS_PATH": Path(self.worker_status_path).expanduser().resolve(),
         }
         for env_name, path in runtime_paths.items():
             if not path.is_relative_to(data_root):
                 raise ValueError(f"{env_name} must stay inside DATA_DIR.")
+        if self.deployment_mode == DeploymentMode.SAAS_MULTI_TENANT and not self.require_authentication:
+            raise ValueError("REQUIRE_AUTHENTICATION must be true for saas_multi_tenant deployments.")
+        if self.trust_tenant_header and (
+            self.deployment_mode != DeploymentMode.SAAS_MULTI_TENANT or not self.require_authentication
+        ):
+            raise ValueError(
+                "TRUST_TENANT_HEADER requires a saas_multi_tenant deployment with REQUIRE_AUTHENTICATION=true."
+            )
         return self
 
     def runtime_directories(self) -> dict[str, Path]:
@@ -95,6 +123,10 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for path in self.runtime_directories().values():
             path.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def tenant_mode(self) -> str:
+        return tenant_mode_for_deployment(self.deployment_mode)
 
 
 settings = Settings()

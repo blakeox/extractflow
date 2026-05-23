@@ -1,6 +1,25 @@
-# Schema-Driven Document Extraction
+# ExtractFlow
 
 Local-first document extraction and calculation platform for structured, schema-driven LLM workflows.
+
+## Project Status
+
+ExtractFlow is an open-source workspace for schema-driven document extraction with human review, deterministic calculations, and structured exports.
+
+Current release posture:
+
+- Best suited today for local and single-team deployments
+- Multi-tenant and external-processing controls exist, but those paths should be treated as operator-owned configuration surfaces rather than turnkey hosted guarantees
+- Desktop packaging is supported, but the Dockerized local web stack remains the primary development and verification path
+
+## Production roadmap (company self-host)
+
+ExtractFlow is open source for **teams running their own infrastructure**. The path to company-grade production (quality gates, audit, Postgres, auth, multi-worker) is tracked in [docs/PRODUCTION_ROADMAP.md](docs/PRODUCTION_ROADMAP.md) and on GitHub:
+
+- [Milestones P0–P4](https://github.com/blakeox/extractflow/milestones)
+- [Issues labeled `production-readiness`](https://github.com/blakeox/extractflow/issues?q=label%3Aproduction-readiness)
+
+Contributors: pick an unassigned issue in the earliest open milestone you can close; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Decision
 
@@ -48,6 +67,7 @@ Provider framework:
 - Remote providers use environment-backed API keys rather than storing secrets in app settings
 - Additional providers can be injected with `PROVIDER_CATALOG_JSON` as long as they expose an OpenAI-compatible `/chat/completions` endpoint
 - Azure OpenAI is handled separately because it is deployment-scoped and uses Azure `api-key` plus `api-version` routing
+- The worker currently pins `docling==2.93.0` as the known-good parser/OCR release; remaining deprecation warnings observed in tests are upstream `docling` internals, not active ExtractFlow parser calls
 
 ## Run
 
@@ -60,7 +80,7 @@ Open [http://localhost:3000](http://localhost:3000).
 What `make dev-up` hardens:
 
 - Verifies Docker and Compose are actually available
-- Creates `.env` from [.env.example](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/.env.example) on first run
+- Creates `.env` from [.env.example](/Users/blakepowell/Documents/GitHub/extractflow/.env.example) on first run
 - Automatically chooses free host ports when the defaults are already occupied
 - Starts services with container healthchecks and readiness-based dependencies
 - Seeds a generalized sample schema on backend startup unless disabled
@@ -125,6 +145,8 @@ make test-ui
 make test-e2e
 make eval-langextract
 PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m ruff check backend worker shared tests
+PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m pyright --project pyrightconfig.backend.json && "$PYTHON_BIN" -m pyright --project pyrightconfig.worker.json
+./scripts/verify-shell.sh
 npm --prefix frontend run lint
 npm run format:check
 PYTHONPATH=backend:shared python3 -m pytest tests/backend -k templates
@@ -137,26 +159,53 @@ Continuous enforcement:
 - GitHub Actions runs Python tests and frontend verification on every push, pull request, and manual dispatch
 - Local Lefthook hooks run the same verification scripts used by CI so contributor machines and GitHub Actions enforce the same contract
 - A separate browser E2E job runs Playwright against the Vite app and covers upload -> run -> review with mocked API traffic
-- Secret scanning also runs in-repo through `scripts/scan-secrets.py` locally and in `.github/workflows/secret-scan.yml`, which is the fallback because GitHub native secret scanning is unavailable on this private repository
-- Ruff now standardizes the Python surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
+- Secret scanning runs through `scripts/scan-secrets.py` locally and in the CI Python job; use the `Secret Scan` workflow for manual reruns only
+- For open source CI: public repositories get unlimited standard GitHub Actions minutes; see [docs/CI_AND_ACTIONS.md](docs/CI_AND_ACTIONS.md) if jobs fail with zero steps while the repo is private
+- Ruff, Pyright, and ShellCheck now standardize the Python and shell surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
 - Frontend CI uses `npm ci` against the checked-in lockfile for deterministic installs
 - PRs also run dependency review, CodeQL scans the Python and TypeScript surfaces, and Dependabot tracks npm, pip, cargo, and GitHub Actions updates
 - Workflow actions are pinned to exact commit SHAs, and `.github/CODEOWNERS` plus PR/issue templates keep review and change hygiene explicit
 - Vulnerability reports should go through GitHub Security Advisories as documented in [`SECURITY.md`](SECURITY.md)
 
+Dependency strategy:
+
+- Keep heavy extraction/runtime dependencies such as Docling, LangExtract, and OCR runtimes scoped to the worker environment instead of spreading them across services
+- Keep required CI deterministic with `./scripts/verify-python.sh` and frontend verification; use the LangExtract golden-set harness as an upgrade gate for extraction dependency bumps rather than a required per-PR job
+- Before bumping Docling, LangExtract, or OCR runtimes, run the normal Python verification contract first and then run `make eval-langextract` or `make benchmark-langextract` to catch extraction-quality regressions that unit tests cannot detect
+- `make verify-langextract-upgrade` bundles that local upgrade lane into one command by running Python verification first and then the LangExtract eval harness
+- Prefer narrow, domain-specific packages when the product expands (for example unit conversion or business-calendar logic) instead of adding a general math engine preemptively
+
+Formula authoring policy:
+
+- Calculated-field formulas are compiled during template validation, so syntax errors and unknown field references are rejected before a template version is saved
+- Extracted fields marked `usable_in_formulas=false` are rejected if a calculated field tries to reference them
+- `depends_on` must match the real field references used by the formula instead of drifting as stale metadata
+- Formulas may only call the built-in helper functions exposed by the shared formula engine; arbitrary method calls on field values are rejected
+- Calculated-field `error_handling` now supports `return_null_and_flag_review` and `return_null` for divide-by-zero and missing-input cases, so template policy matches runtime behavior
+
 ## Runtime Environment Contract
 
 The Python services now fail fast on invalid configuration instead of starting with ambiguous runtime state.
 
-- `DATABASE_URL` must use `sqlite:///...` because the current runtime and SQLAlchemy setup are SQLite-only
+- `DEPLOYMENT_MODE` can be `local`, `hosted_single_tenant`, or `saas_multi_tenant`
+- `ALLOW_EXTERNAL_PROCESSING` controls whether provider configurations that send document text off-box are allowed at all
+- `REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING` forces Presidio-backed text redaction before any external-provider call
+- `REQUIRE_AUTHENTICATION` must be `true` for `saas_multi_tenant` deployments
+- `CURRENT_TENANT_ID` sets the default tenant scope used by the backend and worker for tenant-owned rows
+- `TRUST_TENANT_HEADER` is disabled by default; when enabled it only works for authenticated `saas_multi_tenant` deployments and requires `X-Tenant-ID` on requests
+- `PRESIDIO_REDACTION_ENABLED` must stay enabled when redaction is required for external processing
+- `PRESIDIO_REDACTION_ENTITIES` configures the Presidio entity types masked before external-provider calls
+- `DATABASE_URL` must use `sqlite:///...` for local mode or a PostgreSQL URL for hosted/SaaS deployments
 - `UPLOADS_DIR`, `EXPORTS_DIR`, and `PARSED_DIR` must remain under `DATA_DIR`
+- New document uploads are persisted as managed references under `DATA_DIR` (for example `uploads/<uuid>-file.pdf`), while existing absolute paths inside `DATA_DIR` still resolve for backward compatibility
 - `WORKER_STATUS_PATH` must remain under `DATA_DIR` so the worker health signal stays inside the shared app data volume
 - `PROVIDER_CATALOG_JSON`, when set, must be a JSON array
 - Provider base URLs must be explicit `http://` or `https://` URLs
-- `EXTRACTFLOW_USE_DOCLING` controls the worker's Docling-backed parser path for PDF, DOCX, HTML, and images; when disabled, those document types fail fast instead of silently falling back to removed legacy parsers
+- `EXTRACTFLOW_USE_DOCLING` controls the worker's Docling-backed parser path for PDF, DOCX, PPTX, HTML, and images; when disabled, those document types fail fast instead of silently falling back to removed legacy parsers
 - `DOCLING_PREWARM` controls whether the worker pre-initializes the cached Docling converters during startup to reduce first-document latency
 - `DOCLING_PDF_OCR_RETRY` controls whether PDFs get a second Docling pass with RapidOCR after the plain-text parse comes back weak
 - `DOCLING_IMAGE_OCR` controls whether image parsing uses Docling OCR or a plain non-OCR pass
+- Structured extraction fields can now enforce JSON Schema contracts at validation time, so `structured_object`, `json_object`, and `table` outputs can fail closed when the normalized payload shape is wrong
 
 Backend readiness surfaces:
 
@@ -169,6 +218,7 @@ Observability surfaces:
 - backend responses include `X-Request-ID`; inbound request IDs are propagated when present, otherwise the API generates one
 - backend logs emit structured request events with method, path, status, duration, and request ID
 - worker logs emit structured lifecycle events for startup and non-idle job status transitions with job identifiers when available
+- worker status and failure details now carry `tenant_id`, and the worker fails jobs whose document/template/job tenant chain is inconsistent instead of crossing tenant boundaries implicitly
 - worker startup now emits Docling prewarm events so parser warmup failures are visible before the first document hits the queue
 - worker status writes now include the active Docling startup configuration, and when prewarm is enabled the `starting` status is updated with the prewarm result payload
 - LangExtract feedback generation now emits structured diagnostics with reviewed-result counts, generated suggestion counts, and skip reasons
@@ -179,6 +229,7 @@ Failure-path expectations:
 - provider probes surface transport failures as `status: error` with the timeout or connection detail preserved
 - worker provider adapters retry up to `retry_count + 1` total attempts before failing the extraction
 - worker jobs move to `failed` with `error_message` populated when the document/template is missing or extraction raises at runtime
+- external-provider runs now fail closed if Presidio redaction is required but unavailable, and spreadsheet documents still reject that path until cell-aware redaction exists
 - LangExtract uses `chunk_size` as its internal grounded window size, but `langextract_max_document_chars` is the separate safety ceiling for total document length; runs over that limit fail fast with an explicit error instead of truncating grounded evidence
 
 ## LangExtract Eval Harness
@@ -196,11 +247,28 @@ Run it with:
 make eval-langextract
 ```
 
+To persist benchmark history in DuckDB while keeping the same golden-set harness, run:
+
+```bash
+make benchmark-langextract
+```
+
+That stores per-run and per-case results in `evals/langextract/benchmarks.duckdb`.
+
 or point it at a specific case or directory:
 
 ```bash
 PYTHON_BIN="$(./scripts/resolve-python.sh)"
 "$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases
+```
+
+You can also record an ad hoc run with a custom label:
+
+```bash
+PYTHON_BIN="$(./scripts/resolve-python.sh)"
+"$PYTHON_BIN" ./scripts/evaluate-langextract.py evals/langextract/cases \
+  --duckdb ./evals/langextract/benchmarks.duckdb \
+  --label local-smoke
 ```
 
 Live image-OCR smoke test:
@@ -236,6 +304,14 @@ The app now separates three concerns:
 Environment variables:
 
 ```bash
+DEPLOYMENT_MODE=local
+ALLOW_EXTERNAL_PROCESSING=true
+REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING=false
+REQUIRE_AUTHENTICATION=false
+CURRENT_TENANT_ID=default
+TRUST_TENANT_HEADER=false
+PRESIDIO_REDACTION_ENABLED=true
+PRESIDIO_REDACTION_ENTITIES=EMAIL_ADDRESS,PHONE_NUMBER,CREDIT_CARD,US_SSN,IBAN_CODE,IP_ADDRESS
 EXTRACTFLOW_USE_DOCLING=true
 DOCLING_PREWARM=true
 DOCLING_PDF_OCR_RETRY=true
@@ -248,10 +324,11 @@ Readiness and control surfaces:
 
 - `/api/settings/providers` returns catalog entries and default settings
 - `/api/settings/providers/health` reports whether each provider is actually ready based on required endpoint and env configuration
-- `/api/settings/providers/controls` returns app-level provider controls including the custom-profile reverification threshold
+- `/api/settings/providers/controls` returns app-level provider controls including deployment mode, tenant mode, external-processing policy, auth requirement, and the custom-profile reverification threshold
 - the Settings page now includes a custom provider form for private OpenAI-compatible and Azure endpoints, with save and probe actions
 - extraction jobs use the selected schema version by default, but when a provider has been explicitly saved in Settings it is sent as a per-job provider override so the active default matches the queued run
 - saved custom provider profiles move between `Saved`, `Verified`, and `Stale` based on the configured `CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS` window
+- when `ALLOW_EXTERNAL_PROCESSING=false`, the provider catalog only returns local providers and the API rejects cloud/external provider saves, probes, activations, and job overrides
 - Azure readiness requires `base_url`, `deployment`, `api_version`, and `AZURE_OPENAI_API_KEY`
 - `LangExtract (Ollama)` is an experimental local-only option that uses stored template prompt/examples, now authored through a guided schema editor with a live saved-payload preview instead of raw example JSON, and verifies Ollama by issuing a minimal `/api/generate` request for the configured model before queueing
 - LangExtract preserves global grounded offsets by using its own internal windowing with `chunk_size`; this repo separately caps total LangExtract input with `langextract_max_document_chars` so very large documents fail explicitly instead of silently truncating or running unbounded
@@ -362,8 +439,8 @@ Rollback checklist:
 ## Workflow
 
 1. On first startup, the backend seeds a sample "General Document Extraction Schema" unless `SEED_SAMPLES_ON_STARTUP=false`.
-2. Save a schema in the Schema Builder or use the seeded schema. A generalized starter example lives in [samples/general-template.json](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/general-template.json), and a lease-specific example remains available in [samples/lease-template.json](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/lease-template.json).
-3. Upload a document. A generalized sample input lives in [samples/general-sample.txt](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/general-sample.txt), and a lease sample remains available in [samples/lease-sample.txt](/Users/blakepowell/Documents/GitHub/document-extraction-best-practice-llm/samples/lease-sample.txt).
+2. Save a schema in the Schema Builder or use the seeded schema. A generalized starter example lives in [samples/general-template.json](/Users/blakepowell/Documents/GitHub/extractflow/samples/general-template.json), and a lease-specific example remains available in [samples/lease-template.json](/Users/blakepowell/Documents/GitHub/extractflow/samples/lease-template.json).
+3. Upload a document. A generalized sample input lives in [samples/general-sample.txt](/Users/blakepowell/Documents/GitHub/extractflow/samples/general-sample.txt), and a lease sample remains available in [samples/lease-sample.txt](/Users/blakepowell/Documents/GitHub/extractflow/samples/lease-sample.txt).
 4. Select a schema version and document, then queue extraction.
 5. Wait for the worker to complete the job, open the result, review flagged fields, save edits, and export.
 

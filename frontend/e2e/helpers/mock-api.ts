@@ -103,6 +103,9 @@ type JobRecord = {
   template_version_id: number;
   status: string;
   error_message: string | null;
+  progress_stage?: string | null;
+  progress_pct?: number;
+  attempt_count?: number;
   created_at: string;
   updated_at: string;
 };
@@ -340,7 +343,7 @@ function buildInitialState(): State {
   };
 }
 
-export async function mockExtractionApiWithState(
+async function mockExtractionApiWithState(
   page: Page,
   state: State,
   options?: {
@@ -507,6 +510,47 @@ export async function mockExtractionApiWithState(
       state.documents = [document];
       return json(route, 200, document);
     }
+    if (method === "POST" && /^\/jobs\/\d+\/retry$/.test(path)) {
+      const jobId = Number(path.split("/")[2]);
+      const existing = state.jobs.find((item) => item.id === jobId);
+      if (!existing) {
+        return json(route, 404, { detail: "Job not found." });
+      }
+      if (existing.status !== "failed") {
+        return json(route, 409, { detail: "Only failed jobs can be retried." });
+      }
+      const now = "2026-05-02T12:07:00.000Z";
+      const scenario = jobScenarios.shift() ?? "review";
+      const retried: JobRecord = {
+        ...existing,
+        status: scenario === "failed" ? "failed" : "completed",
+        error_message:
+          scenario === "failed"
+            ? "Provider timed out while extracting vendor_name. Check local runtime and rerun."
+            : null,
+        progress_stage: scenario === "failed" ? "failed" : "completed",
+        progress_pct: scenario === "failed" ? 0 : 100,
+        updated_at: now,
+      };
+      state.jobs = state.jobs.map((job) => (job.id === jobId ? retried : job));
+      state.documents = state.documents.map((document) =>
+        document.id === retried.document_id
+          ? {
+              ...document,
+              status: scenario === "failed" ? "failed" : "completed",
+            }
+          : document,
+      );
+      if (scenario === "failed") {
+        delete state.results[retried.id];
+      } else {
+        state.results[retried.id] = buildReviewResult(
+          retried.id,
+          state.provider,
+        );
+      }
+      return json(route, 200, retried);
+    }
     if (method === "POST" && path === "/jobs") {
       const payload = request.postDataJSON() as {
         document_id: number;
@@ -523,6 +567,9 @@ export async function mockExtractionApiWithState(
           scenario === "failed"
             ? "Provider timed out while extracting vendor_name. Check local runtime and rerun."
             : null,
+        progress_stage: scenario === "failed" ? "failed" : "completed",
+        progress_pct: scenario === "failed" ? 0 : 100,
+        attempt_count: 1,
         created_at: now,
         updated_at: now,
       };
@@ -553,15 +600,24 @@ export async function mockExtractionApiWithState(
       const current = state.results[1];
       const edit = payload.edits[0];
       current.result.extracted_fields = current.result.extracted_fields.map(
-        (field) =>
-          field.field_name === edit.field_name
-            ? {
-                ...field,
-                normalized_value: edit.normalized_value,
-                validation_status: "reviewed",
-                requires_review: false,
-              }
-            : field,
+        (field) => {
+          if (edit && field.field_name === edit.field_name) {
+            return {
+              ...field,
+              normalized_value: edit.normalized_value,
+              validation_status: "reviewed",
+              requires_review: false,
+            };
+          }
+          if (field.requires_review) {
+            return {
+              ...field,
+              validation_status: "reviewed",
+              requires_review: false,
+            };
+          }
+          return field;
+        },
       );
       current.result.fields_requiring_review = [];
       current.result.reviewed_at = "2026-05-02T12:07:00.000Z";

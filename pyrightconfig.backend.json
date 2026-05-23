@@ -1,0 +1,28 @@
+{
+  "include": ["backend", "shared"],
+  "exclude": [
+    "**/__pycache__",
+    ".git",
+    ".venv",
+    "frontend",
+    "node_modules",
+    "src-tauri",
+    "tests"
+  ],
+  "ignore": [
+    "backend/app/api/routes.py",
+    "backend/app/services/langextract_feedback.py",
+    "backend/app/services/provider_profiles.py",
+    "backend/app/services/result_service.py",
+    "backend/app/services/job_service.py"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.11",
+  "reportMissingModuleSource": "none",
+  "executionEnvironments": [
+    { "root": "backend", "extraPaths": ["shared"] },
+    { "root": "shared" }
+  ]
+}

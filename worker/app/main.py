@@ -2,20 +2,27 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import socket
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from extraction_core.job_progress import JOB_STAGE_COMPLETED, JOB_STAGE_FAILED, JOB_STAGE_PARSING
 from extraction_core.observability import configure_logger, log_event
-from sqlalchemy import select
+from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
+from extraction_core.storage_refs import resolve_storage_path
+from sqlalchemy import select, update
 
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, engine
 from app.models import Document, ExtractionJob, ExtractionResult, TemplateVersion
 from app.services.executor import execute_extraction
+from app.services.job_progress import build_progress_reporter, update_job_progress
 from app.services.parser import prewarm_docling_converters
 
 logger = configure_logger("extractflow.worker")
+WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 
 
 def write_worker_status(state: str, details: dict | None = None) -> None:
@@ -35,14 +42,9 @@ def write_worker_status(state: str, details: dict | None = None) -> None:
 
 
 def process_once() -> None:
+    ensure_extraction_job_runtime_columns(engine)
     with SessionLocal() as db:
-        job = (
-            db.execute(
-                select(ExtractionJob).where(ExtractionJob.status == "queued").order_by(ExtractionJob.created_at.asc())
-            )
-            .scalars()
-            .first()
-        )
+        job = claim_next_job(db)
         if not job:
             write_worker_status("idle")
             return
@@ -51,33 +53,124 @@ def process_once() -> None:
         if not document or not template_version:
             job.status = "failed"
             job.error_message = "Document or template version missing."
+            job.progress_stage = JOB_STAGE_FAILED
+            job.progress_pct = 0
             db.commit()
-            write_worker_status("failed", {"job_id": job.id, "reason": job.error_message})
+            write_worker_status(
+                "failed",
+                {
+                    "job_id": job.id,
+                    "tenant_id": job.tenant_id,
+                    "worker_id": job.worker_id,
+                    "attempt_count": job.attempt_count,
+                    "reason": job.error_message,
+                },
+            )
             return
         try:
-            job.status = "running"
+            ensure_job_tenant_consistency(job, document, template_version)
             document.status = "processing"
+            update_job_progress(db, job.id, JOB_STAGE_PARSING)
             db.commit()
-            write_worker_status("running", {"job_id": job.id, "document_id": document.id})
+            write_worker_status(
+                "running",
+                {
+                    "job_id": job.id,
+                    "document_id": document.id,
+                    "tenant_id": job.tenant_id,
+                    "worker_id": job.worker_id,
+                    "attempt_count": job.attempt_count,
+                },
+            )
+            document_path = resolve_storage_path(document.stored_path, root=settings.data_dir)
 
             result_json = execute_extraction(
-                document_path=document.stored_path,
+                document_path=str(document_path),
                 document_id=document.id,
                 template_definition=template_version.definition,
                 provider_override=job.provider_override,
+                progress_reporter=build_progress_reporter(db, job.id),
             )
-            result = ExtractionResult(job_id=job.id, result_json=result_json, review_status="pending")
-            db.add(result)
+            result = db.query(ExtractionResult).filter(ExtractionResult.job_id == job.id).first()
+            if result is None:
+                result = ExtractionResult(
+                    tenant_id=job.tenant_id, job_id=job.id, result_json=result_json, review_status="pending"
+                )
+                db.add(result)
+            else:
+                result.tenant_id = job.tenant_id
+                result.result_json = result_json
+                result.review_status = "pending"
             job.status = "completed"
+            job.progress_stage = JOB_STAGE_COMPLETED
+            job.progress_pct = 100
             document.status = "completed"
             db.commit()
-            write_worker_status("completed", {"job_id": job.id, "document_id": document.id})
+            write_worker_status(
+                "completed",
+                {
+                    "job_id": job.id,
+                    "document_id": document.id,
+                    "tenant_id": job.tenant_id,
+                    "worker_id": job.worker_id,
+                    "attempt_count": job.attempt_count,
+                },
+            )
         except Exception as exc:  # noqa: BLE001
             job.status = "failed"
             job.error_message = str(exc)
+            job.progress_stage = JOB_STAGE_FAILED
+            job.progress_pct = 0
             document.status = "failed"
             db.commit()
-            write_worker_status("failed", {"job_id": job.id, "reason": str(exc)})
+            write_worker_status(
+                "failed",
+                {
+                    "job_id": job.id,
+                    "tenant_id": job.tenant_id,
+                    "worker_id": job.worker_id,
+                    "attempt_count": job.attempt_count,
+                    "reason": str(exc),
+                },
+            )
+
+
+def claim_next_job(db) -> ExtractionJob | None:
+    for _ in range(5):
+        candidate_id = db.execute(
+            select(ExtractionJob.id)
+            .where(ExtractionJob.status == "queued")
+            .order_by(ExtractionJob.created_at.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if candidate_id is None:
+            return None
+
+        claimed_at = datetime.now(UTC)
+        claim_result = db.execute(
+            update(ExtractionJob)
+            .where(ExtractionJob.id == candidate_id, ExtractionJob.status == "queued")
+            .values(
+                status="running",
+                claimed_at=claimed_at,
+                worker_id=WORKER_ID,
+                attempt_count=ExtractionJob.attempt_count + 1,
+            )
+        )
+        if claim_result.rowcount == 1:
+            db.commit()
+            return db.get(ExtractionJob, candidate_id)
+        db.rollback()
+    return None
+
+
+def ensure_job_tenant_consistency(job: ExtractionJob, document: Document, template_version: TemplateVersion) -> None:
+    tenant_ids = {job.tenant_id, document.tenant_id, template_version.tenant_id}
+    if len(tenant_ids) != 1:
+        raise ValueError(
+            "Tenant mismatch between job, document, and template version. "
+            f"job={job.tenant_id}, document={document.tenant_id}, template_version={template_version.tenant_id}."
+        )
 
 
 def build_docling_startup_details() -> dict[str, object]:

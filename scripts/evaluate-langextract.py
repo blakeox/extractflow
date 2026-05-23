@@ -22,6 +22,19 @@ def main() -> int:
         default=str(ROOT_DIR / "evals" / "langextract" / "cases"),
         help="JSON case file or directory of JSON cases. Defaults to evals/langextract/cases.",
     )
+    parser.add_argument(
+        "--duckdb",
+        help="Optional DuckDB path for storing benchmark run history.",
+    )
+    parser.add_argument(
+        "--label",
+        help="Optional freeform label stored with the DuckDB benchmark run.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Only load and validate eval case JSON; do not call a live LangExtract runtime.",
+    )
     args = parser.parse_args()
 
     case_path = Path(args.path)
@@ -33,8 +46,19 @@ def main() -> int:
         print(f"No LangExtract eval cases found under {case_path}.")
         return 1
 
+    if args.validate_only:
+        print(f"Validated {len(cases)} LangExtract eval case(s) under {case_path}.")
+        for case in cases:
+            print(f"- {case.name}")
+        return 0
+
     report = run_eval_cases(cases)
     print(render_eval_summary(report))
+    if args.duckdb:
+        from app.services.langextract_eval import store_eval_report
+
+        run_id = store_eval_report(Path(args.duckdb), report, source_path=case_path, label=args.label)
+        print(f"Stored benchmark run {run_id} in {Path(args.duckdb)}")
     return 0 if report.failed_cases == 0 and report.failed_checks == 0 else 1
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from unittest.mock import Mock
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -10,7 +12,12 @@ from app.services import parser as parser_service
 from app.services import provider as provider_service
 from app.services.executor import execute_extraction
 from app.services.parser import parse_document
-from app.services.provider import AzureOpenAIAdapter, ExtractionProvider, OpenAICompatibleAdapter
+from app.services.provider import (
+    AzureOpenAIAdapter,
+    ExtractionProvider,
+    OpenAICompatibleAdapter,
+    normalize_langextract_value,
+)
 from app.services.validator import validate_extracted_field
 from extraction_core.models import (
     ExtractionFieldDefinition,
@@ -91,6 +98,156 @@ def test_execute_extraction_runs_mock_pipeline_and_calculates_fields(tmp_path) -
     assert result["extraction_status"] == "completed"
     assert result["calculated_fields"][0]["calculated_value"] == {"amount": 1320.0, "currency": "USD"}
     assert "vendor_name" in result["fields_requiring_review"]
+
+
+def test_execute_extraction_rejects_external_processing_when_disabled(monkeypatch, tmp_path) -> None:
+    document = tmp_path / "invoice.txt"
+    document.write_text("Vendor Name: Acme Corp\nInvoice total is $1200.00", encoding="utf-8")
+    template = build_template_definition()
+    template["llm_provider_settings"] = {
+        "mode": "cloud",
+        "provider_type": "openai",
+        "provider_label": "OpenAI",
+        "api_style": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env_var": "OPENAI_API_KEY",
+        "api_key_required": True,
+        "model": "gpt-4.1",
+        "temperature": 0.1,
+        "max_tokens": 4000,
+        "supports_json_mode": True,
+        "allow_external_processing": True,
+        "timeout_seconds": 120,
+        "retry_count": 2,
+        "chunk_size": 16000,
+    }
+    monkeypatch.setattr("app.services.executor.app_settings.allow_external_processing", False)
+
+    with pytest.raises(ValueError, match="This deployment disables external provider processing"):
+        execute_extraction(str(document), 42, template)
+
+
+def test_execute_extraction_redacts_external_provider_text(monkeypatch, tmp_path) -> None:
+    document = tmp_path / "invoice.txt"
+    document.write_text("Contact jane@example.com or call 212-555-0199", encoding="utf-8")
+    template = build_template_definition()
+    template["calculated_fields"] = []
+    template["llm_provider_settings"] = {
+        "mode": "cloud",
+        "provider_type": "openai",
+        "provider_label": "OpenAI",
+        "api_style": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env_var": "OPENAI_API_KEY",
+        "api_key_required": True,
+        "model": "gpt-4.1",
+        "temperature": 0.1,
+        "max_tokens": 4000,
+        "supports_json_mode": True,
+        "allow_external_processing": True,
+        "timeout_seconds": 120,
+        "retry_count": 2,
+        "chunk_size": 16000,
+    }
+    monkeypatch.setattr("app.services.executor.app_settings.allow_external_processing", True)
+    monkeypatch.setattr("app.services.executor.app_settings.require_redaction_for_external_processing", True)
+    monkeypatch.setattr("app.services.executor.app_settings.presidio_redaction_enabled", True)
+    monkeypatch.setattr(
+        "app.services.executor.app_settings.presidio_redaction_entities",
+        "EMAIL_ADDRESS,PHONE_NUMBER",
+    )
+    captured: dict[str, str] = {}
+
+    def fake_extract(self, text, template, settings):
+        captured["text"] = text
+        return []
+
+    monkeypatch.setattr(ExtractionProvider, "extract", fake_extract)
+
+    result = execute_extraction(str(document), 42, template)
+
+    assert "jane@example.com" not in captured["text"]
+    assert "212-555-0199" not in captured["text"]
+    assert "********" in captured["text"]
+    assert "External provider text redaction applied" in result["document_level_notes"][0]
+
+
+def test_execute_extraction_keeps_local_provider_text_unredacted(monkeypatch, tmp_path) -> None:
+    document = tmp_path / "invoice.txt"
+    document.write_text("Contact jane@example.com", encoding="utf-8")
+    template = build_template_definition()
+    template["calculated_fields"] = []
+    monkeypatch.setattr("app.services.executor.app_settings.require_redaction_for_external_processing", True)
+    captured: dict[str, str] = {}
+
+    def fake_extract(self, text, template, settings):
+        captured["text"] = text
+        return []
+
+    monkeypatch.setattr(ExtractionProvider, "extract", fake_extract)
+
+    execute_extraction(str(document), 42, template)
+
+    assert captured["text"] == "Contact jane@example.com"
+
+
+def test_execute_extraction_fails_closed_when_redaction_errors(monkeypatch, tmp_path) -> None:
+    document = tmp_path / "invoice.txt"
+    document.write_text("Contact jane@example.com", encoding="utf-8")
+    template = build_template_definition()
+    template["llm_provider_settings"] = {
+        "mode": "cloud",
+        "provider_type": "openai",
+        "provider_label": "OpenAI",
+        "api_style": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env_var": "OPENAI_API_KEY",
+        "api_key_required": True,
+        "model": "gpt-4.1",
+        "temperature": 0.1,
+        "max_tokens": 4000,
+        "supports_json_mode": True,
+        "allow_external_processing": True,
+        "timeout_seconds": 120,
+        "retry_count": 2,
+        "chunk_size": 16000,
+    }
+    monkeypatch.setattr("app.services.executor.app_settings.allow_external_processing", True)
+    monkeypatch.setattr("app.services.executor.app_settings.require_redaction_for_external_processing", True)
+    monkeypatch.setattr("app.services.executor.app_settings.presidio_redaction_enabled", True)
+    monkeypatch.setattr("app.services.executor.redact_text", Mock(side_effect=RuntimeError("redaction unavailable")))
+
+    with pytest.raises(RuntimeError, match="redaction unavailable"):
+        execute_extraction(str(document), 42, template)
+
+
+def test_execute_extraction_blocks_spreadsheet_external_redaction_flow(monkeypatch, tmp_path) -> None:
+    document = tmp_path / "statement.csv"
+    document.write_text("email\njane@example.com\n", encoding="utf-8")
+    template = build_template_definition()
+    template["llm_provider_settings"] = {
+        "mode": "cloud",
+        "provider_type": "openai",
+        "provider_label": "OpenAI",
+        "api_style": "openai_compatible",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env_var": "OPENAI_API_KEY",
+        "api_key_required": True,
+        "model": "gpt-4.1",
+        "temperature": 0.1,
+        "max_tokens": 4000,
+        "supports_json_mode": True,
+        "allow_external_processing": True,
+        "timeout_seconds": 120,
+        "retry_count": 2,
+        "chunk_size": 16000,
+    }
+    monkeypatch.setattr("app.services.executor.app_settings.allow_external_processing", True)
+    monkeypatch.setattr("app.services.executor.app_settings.require_redaction_for_external_processing", True)
+    monkeypatch.setattr("app.services.executor.app_settings.presidio_redaction_enabled", True)
+
+    with pytest.raises(ValueError, match="spreadsheet documents are not yet supported"):
+        execute_extraction(str(document), 42, template)
 
 
 def test_execute_extraction_reconciles_fields_by_name_and_marks_missing(monkeypatch, tmp_path) -> None:
@@ -300,6 +457,78 @@ def test_validate_extracted_field_applies_required_allowed_and_regex_rules() -> 
     assert "Value exceeds maximum length." in validated.validation_errors
 
 
+def test_validate_extracted_field_canonicalizes_close_allowed_values_for_review() -> None:
+    field = ExtractionFieldDefinition.model_validate(
+        {
+            "name": "payment_terms",
+            "label": "Payment Terms",
+            "description": "Payment terms.",
+            "type": "category",
+            "allowed_values": ["Net 30", "Due on receipt"],
+        }
+    )
+    result = ExtractionFieldResult(
+        field_name="payment_terms",
+        label="Payment Terms",
+        data_type="category",
+        extracted_value="net30",
+        normalized_value={"value": "net30"},
+    )
+
+    validated = validate_extracted_field(field, result)
+
+    assert validated.validation_status == "valid"
+    assert validated.normalized_value == {"value": "Net 30"}
+    assert validated.requires_review is True
+    assert "Canonicalized allowed value" in validated.extraction_notes
+
+
+def test_validate_extracted_field_applies_json_schema_to_structured_values() -> None:
+    field = ExtractionFieldDefinition.model_validate(
+        {
+            "name": "line_item",
+            "label": "Line Item",
+            "description": "Structured line item.",
+            "type": "structured_object",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "quantity": {"type": "number", "minimum": 1},
+                },
+                "required": ["description", "quantity"],
+            },
+        }
+    )
+    result = ExtractionFieldResult(
+        field_name="line_item",
+        label="Line Item",
+        data_type="structured_object",
+        extracted_value='{"description":"Widget","quantity":0}',
+        normalized_value={"description": "Widget", "quantity": 0},
+    )
+
+    validated = validate_extracted_field(field, result)
+
+    assert validated.validation_status == "invalid"
+    assert any("Value does not satisfy schema" in error for error in validated.validation_errors)
+
+
+def test_normalize_langextract_value_normalizes_dates_to_iso() -> None:
+    field = ExtractionFieldDefinition.model_validate(
+        {
+            "name": "invoice_date",
+            "label": "Invoice Date",
+            "description": "Invoice date.",
+            "type": "date",
+        }
+    )
+
+    normalized = normalize_langextract_value(field, "03/14/2025", {})
+
+    assert normalized == {"value": "2025-03-14", "display_value": "03/14/2025"}
+
+
 def test_parse_document_reads_csv_and_unknown_text_extensions(tmp_path) -> None:
     csv_path = tmp_path / "invoice.csv"
     pd.DataFrame([{"vendor": "Acme", "amount": 1200}]).to_csv(csv_path, index=False)
@@ -312,6 +541,26 @@ def test_parse_document_reads_csv_and_unknown_text_extensions(tmp_path) -> None:
     assert "vendor,amount" in csv_text
     assert "Acme,1200" in csv_text
     assert fallback_text == "custom text input"
+
+
+def test_parse_document_reads_xlsx_spreadsheets(tmp_path) -> None:
+    xlsx_path = tmp_path / "invoice.xlsx"
+    pd.DataFrame([{"vendor": "Acme", "amount": 1200}]).to_excel(xlsx_path, index=False)
+
+    spreadsheet_text = parse_document(str(xlsx_path))
+
+    assert "vendor,amount" in spreadsheet_text
+    assert "Acme,1200" in spreadsheet_text
+
+
+@pytest.mark.parametrize("suffix", [".pdf", ".docx", ".html", ".png", ".pptx"])
+def test_parse_document_rejects_docling_backed_types_when_disabled(monkeypatch, tmp_path, suffix: str) -> None:
+    document_path = tmp_path / f"blocked{suffix}"
+    document_path.write_bytes(b"placeholder")
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", False)
+
+    with pytest.raises(parser_service.DocumentParseError, match=f"Docling parsing is disabled for {suffix} documents"):
+        parse_document(str(document_path))
 
 
 def test_parse_pdf_prefers_docling_without_ocr_when_it_returns_meaningful_text(monkeypatch, tmp_path) -> None:
@@ -369,6 +618,19 @@ def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) ->
             captured["image_pipeline_options"] = pipeline_options
 
     class FakeDocument:
+        def iterate_items(self):
+            class FakeProv:
+                def __init__(self, page_no: int) -> None:
+                    self.page_no = page_no
+
+            class FakeItem:
+                def __init__(self, text: str, page_no: int) -> None:
+                    self.text = text
+                    self.prov = [FakeProv(page_no)]
+
+            yield (FakeItem("Vendor Name Acme Corp", 1), 1)
+            yield (FakeItem("Total Amount $1,200.00", 2), 1)
+
         def export_to_text(self) -> str:
             return "Fallback text"
 
@@ -384,10 +646,6 @@ def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) ->
             captured["path"] = path
             return FakeConversion()
 
-    def fake_generate_multimodal_pages(_conversion):
-        yield ("Vendor Name Acme Corp", "", "", [], [], object())
-        yield ("Total Amount $1,200.00", "", "", [], [], object())
-
     monkeypatch.setattr(
         parser_service,
         "_import_docling_tools",
@@ -399,7 +657,6 @@ def test_parse_pdf_with_docling_preserves_page_markers(monkeypatch, tmp_path) ->
             FakePdfFormatOption,
             FakeImageFormatOption,
             FakeDocumentConverter,
-            fake_generate_multimodal_pages,
         ),
     )
 
@@ -460,7 +717,6 @@ def test_get_docling_converter_uses_rapidocr_for_ocr_pass(monkeypatch) -> None:
             FakePdfFormatOption,
             FakeImageFormatOption,
             FakeDocumentConverter,
-            lambda conversion: (),
         ),
     )
 
@@ -521,6 +777,48 @@ def test_parse_docx_uses_docling(monkeypatch, tmp_path) -> None:
     parsed = parse_document(str(docx_path))
 
     assert parsed == "Vendor Name\nAcme Corp"
+
+
+def test_parse_pptx_uses_docling(monkeypatch, tmp_path) -> None:
+    pptx_path = tmp_path / "invoice.pptx"
+    pptx_path.write_bytes(b"PK")
+
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service, "parse_pptx_with_docling", lambda path: "Slide 1\nInvoice total")
+
+    parsed = parse_document(str(pptx_path))
+
+    assert parsed == "Slide 1\nInvoice total"
+
+
+def test_prewarm_docling_converters_includes_pptx(monkeypatch) -> None:
+    parser_service.get_docling_converter.cache_clear()
+    monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
+    monkeypatch.setattr(parser_service.settings, "docling_pdf_ocr_retry", False)
+    monkeypatch.setattr(parser_service.settings, "docling_image_ocr", False)
+
+    class FakeInputFormat:
+        PDF = "pdf"
+        IMAGE = "image"
+        DOCX = "docx"
+        PPTX = "pptx"
+        HTML = "html"
+
+    class FakeConverter:
+        def initialize_pipeline(self, _input_format) -> None:
+            return None
+
+    monkeypatch.setattr(
+        parser_service,
+        "_import_docling_tools",
+        lambda: (FakeInputFormat, None, None, None, None, None, None, None),
+    )
+    monkeypatch.setattr(parser_service, "get_docling_converter", lambda kind, do_ocr: FakeConverter())
+
+    result = parser_service.prewarm_docling_converters()
+
+    assert result["status"] == "completed"
+    assert "pptx:plain" in result["warmed_targets"]
 
 
 def test_parse_docx_with_real_docling_dependency(monkeypatch, tmp_path) -> None:
@@ -1098,6 +1396,101 @@ def test_llm_provider_extract_propagates_invalid_json(monkeypatch) -> None:
         provider.extract("Vendor Name: Acme Corp", template, settings)
 
 
+def test_llm_provider_extract_accepts_preparsed_json_content(monkeypatch) -> None:
+    provider = ExtractionProvider()
+    template = ExtractionTemplate.model_validate(build_template_definition())
+    settings = LLMProviderSettings(
+        provider_type="openai",
+        base_url="http://llm.local/v1",
+        model="test-model",
+        api_style="openai_compatible",
+    )
+
+    mock_response = Mock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": {
+                        "extracted_fields": [
+                            {
+                                "field_name": "vendor_name",
+                                "label": "Vendor Name",
+                                "field_kind": "extracted",
+                                "data_type": "text",
+                                "extracted_value": "Acme Corp",
+                                "normalized_value": {"value": "Acme Corp"},
+                                "confidence_score": 0.9,
+                                "source_text": "Acme Corp",
+                                "page_number": 1,
+                                "location_reference": "Page 1",
+                                "validation_status": "valid",
+                                "validation_errors": [],
+                                "extraction_notes": "ok",
+                                "requires_review": False,
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+    }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url: str, json: dict, headers: dict):
+            return mock_response
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    results = provider.extract("Vendor Name: Acme Corp", template, settings)
+
+    assert results[0].field_name == "vendor_name"
+    assert results[0].normalized_value == {"value": "Acme Corp"}
+
+
+def test_llm_provider_extract_requires_extracted_fields_list(monkeypatch) -> None:
+    provider = ExtractionProvider()
+    template = ExtractionTemplate.model_validate(build_template_definition())
+    settings = LLMProviderSettings(
+        provider_type="openai",
+        base_url="http://llm.local/v1",
+        model="test-model",
+        api_style="openai_compatible",
+    )
+
+    mock_response = Mock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url: str, json: dict, headers: dict):
+            return mock_response
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    with pytest.raises(RuntimeError, match="Provider response must include an extracted_fields list"):
+        provider.extract("Vendor Name: Acme Corp", template, settings)
+
+
 def test_llm_provider_extract_retries_until_timeout_exhausted(monkeypatch) -> None:
     provider = ExtractionProvider()
     template = ExtractionTemplate.model_validate(build_template_definition())
@@ -1289,7 +1682,8 @@ def test_process_once_marks_job_and_document_failed_when_extraction_raises(tmp_p
     from app.main import process_once
     from app.models import Document, ExtractionJob, TemplateVersion
 
-    document_path = tmp_path / "invoice.txt"
+    uploads_dir = Path(os.environ["UPLOADS_DIR"])
+    document_path = uploads_dir / "invoice-failure.txt"
     document_path.write_text("Vendor Name: Acme Corp", encoding="utf-8")
 
     with SessionLocal() as db:
@@ -1333,7 +1727,8 @@ def test_process_once_marks_langextract_job_failed_when_document_exceeds_limit(t
     from app.models import Document, ExtractionJob, TemplateVersion
 
     document_text = "Vendor Name: Acme Corp"
-    document_path = tmp_path / "invoice.txt"
+    uploads_dir = Path(os.environ["UPLOADS_DIR"])
+    document_path = uploads_dir / "invoice-langextract-limit.txt"
     document_path.write_text(document_text, encoding="utf-8")
 
     definition = build_template_definition()
@@ -1386,3 +1781,126 @@ def test_process_once_marks_langextract_job_failed_when_document_exceeds_limit(t
         assert refreshed_job.status == "failed"
         assert refreshed_job.error_message == expected_error
         assert refreshed_document.status == "failed"
+
+
+def test_process_once_updates_existing_result_for_same_job(tmp_path, monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.main import process_once
+    from app.models import Document, ExtractionJob, ExtractionResult, TemplateVersion
+
+    uploads_dir = Path(os.environ["UPLOADS_DIR"])
+    document_path = uploads_dir / "invoice-existing-result.txt"
+    document_path.write_text("Vendor Name: Acme Corp", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(document_path),
+            status="uploaded",
+        )
+        db.add(document)
+        db.flush()
+        version = TemplateVersion(template_id=1, version="1.0.0", definition=build_template_definition())
+        db.add(version)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="queued")
+        db.add(job)
+        db.flush()
+        existing_result = ExtractionResult(
+            job_id=job.id,
+            result_json={"document_id": str(document.id), "extraction_status": "stale"},
+            review_status="reviewed",
+        )
+        db.add(existing_result)
+        db.commit()
+        result_id = existing_result.id
+        job_id = job.id
+
+    monkeypatch.setattr(
+        "app.main.execute_extraction",
+        lambda **kwargs: {
+            "document_id": str(kwargs["document_id"]),
+            "document_type": "invoice",
+            "template_name": "Invoice Extraction",
+            "template_version": "1.0.0",
+            "llm_provider": build_template_definition()["llm_provider_settings"],
+            "extraction_status": "completed",
+            "extracted_fields": [],
+            "calculated_fields": [],
+            "fields_requiring_review": [],
+            "document_level_notes": [],
+            "reviewed_at": None,
+        },
+    )
+
+    process_once()
+
+    with SessionLocal() as db:
+        refreshed_job = db.get(ExtractionJob, job_id)
+        refreshed_result = db.get(ExtractionResult, result_id)
+        assert refreshed_job is not None
+        assert refreshed_result is not None
+        assert refreshed_job.status == "completed"
+        assert refreshed_result.id == result_id
+        assert refreshed_result.review_status == "pending"
+        assert refreshed_result.result_json["extraction_status"] == "completed"
+
+
+def test_process_once_resolves_managed_document_reference(monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.main import process_once
+    from app.models import Document, ExtractionJob, TemplateVersion
+
+    uploads_dir = Path(os.environ["UPLOADS_DIR"])
+    document_path = uploads_dir / "managed-invoice.txt"
+    document_path.write_text("Vendor Name: Acme Corp", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = Document(
+            original_filename="managed-invoice.txt",
+            content_type="text/plain",
+            stored_path="uploads/managed-invoice.txt",
+            status="uploaded",
+        )
+        db.add(document)
+        db.flush()
+        version = TemplateVersion(template_id=1, version="1.0.0", definition=build_template_definition())
+        db.add(version)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="queued")
+        db.add(job)
+        db.commit()
+        document_id = document.id
+        job_id = job.id
+
+    captured: dict[str, str] = {}
+
+    def fake_execute_extraction(**kwargs):
+        captured["document_path"] = kwargs["document_path"]
+        return {
+            "document_id": str(kwargs["document_id"]),
+            "document_type": "invoice",
+            "template_name": "Invoice Extraction",
+            "template_version": "1.0.0",
+            "llm_provider": build_template_definition()["llm_provider_settings"],
+            "extraction_status": "completed",
+            "extracted_fields": [],
+            "calculated_fields": [],
+            "fields_requiring_review": [],
+            "document_level_notes": [],
+            "reviewed_at": None,
+        }
+
+    monkeypatch.setattr("app.main.execute_extraction", fake_execute_extraction)
+
+    process_once()
+
+    with SessionLocal() as db:
+        refreshed_job = db.get(ExtractionJob, job_id)
+        refreshed_document = db.get(Document, document_id)
+        assert refreshed_job is not None
+        assert refreshed_document is not None
+        assert refreshed_job.status == "completed"
+        assert refreshed_document.status == "completed"
+    assert captured["document_path"] == str(document_path.resolve())

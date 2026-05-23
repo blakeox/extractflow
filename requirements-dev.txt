@@ -3,3 +3,6 @@
 ruff==0.11.10
 pytest==8.3.5
 pytest-cov==6.0.0
+pyright==1.1.409
+shellcheck-py==0.11.0.1
+duckdb==1.4.0

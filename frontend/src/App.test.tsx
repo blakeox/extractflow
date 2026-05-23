@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { MOCK_PROVIDER_WARNING_DISMISS_KEY } from "./lib/mock-provider";
 
 const invokeMock = vi.fn();
 
@@ -113,12 +114,207 @@ describe("App", () => {
     });
 
     expect(
+      screen.queryByRole("button", { name: "Audit" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Help" }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getAllByRole("button", { name: "Open settings" }).length,
     ).toBeGreaterThan(0);
     expect(
       screen.getByRole("heading", { name: "New extraction" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Upload PDF or source file")).toBeInTheDocument();
+  });
+
+  it("shows a production warning when the bootstrap mock provider is active", async () => {
+    window.localStorage.removeItem(MOCK_PROVIDER_WARNING_DISMISS_KEY);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "mock",
+              provider_label: "Mock Extractor",
+              api_style: "mock",
+              base_url: null,
+              model: "mock-extractor",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: true,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /Bootstrap mock extractor is active/i,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/Bootstrap mock extractor is active/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the draft step focused when there is only one source", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                original_filename: "invoice.pdf",
+                content_type: "application/pdf",
+                status: "uploaded",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/dev/status"))
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 1, jobs: 0, results: 0 }),
+          );
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "New extraction" }),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Recent sources")).not.toBeInTheDocument();
+  });
+
+  it("turns the no-schema state into a direct help path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/dev/status"))
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open help" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Get the next step when setup, review, or evidence is unclear.",
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open schema builder" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Define what the model should look for before the document run starts.",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("saves edited LangExtract prompt and examples into the template payload", async () => {
@@ -510,7 +706,7 @@ describe("App", () => {
       }),
     );
 
-    const firstRender = render(<App />);
+    const view = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
@@ -528,7 +724,7 @@ describe("App", () => {
         screen.getByRole("button", { name: "Dismiss suggestion 1" }),
       ).toHaveFocus();
     });
-    firstRender.unmount();
+    view.unmount();
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Schemas" }));
@@ -2704,6 +2900,12 @@ describe("App", () => {
     expect(screen.getAllByText("Chars 13-22").length).toBeGreaterThan(0);
     expect(screen.getByText("Review signals")).toBeInTheDocument();
     expect(
+      screen.getByRole("button", { name: /invoice\.pdf/i }),
+    ).toHaveAttribute("aria-current", "true");
+    expect(
+      screen.getByRole("button", { name: /Vendor Name/i }),
+    ).toHaveAttribute("aria-current", "true");
+    expect(
       screen.getAllByText("Vendor name needs review.").length,
     ).toBeGreaterThan(0);
     expect(
@@ -2711,7 +2913,7 @@ describe("App", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("shows desktop onboarding when the tauri backend is unavailable and starts the local stack", async () => {
+  it("shows non-blocking desktop recovery guidance when the tauri backend is unavailable", async () => {
     (window as Window & { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ =
       {};
 
@@ -2793,9 +2995,12 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      await screen.findByRole("dialog", {
-        name: "Finish the runtime checks, then get back to the extraction workspace.",
-      }),
+      await screen.findByText(
+        "Desktop setup needs attention, but it no longer blocks the workspace.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "New extraction" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Backend is not yet reachable on 127.0.0.1:8000."),
@@ -2808,19 +3013,19 @@ describe("App", () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByText("Frontend can reach the API on 127.0.0.1:8000."),
+        screen.getByText(
+          "Desktop runtime is ready. Confirm the defaults once, then get back to extraction.",
+        ),
       ).toBeInTheDocument();
     });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Continue to extraction workspace" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss reminder" }));
 
     await waitFor(() => {
       expect(
-        screen.queryByRole("dialog", {
-          name: "Finish the runtime checks, then get back to the extraction workspace.",
-        }),
+        screen.queryByText(
+          "Desktop runtime is ready. Confirm the defaults once, then get back to extraction.",
+        ),
       ).not.toBeInTheDocument();
     });
   });
@@ -3065,6 +3270,98 @@ describe("App", () => {
     await waitFor(() => {
       expect(screen.getByText("Probe required")).toBeInTheDocument();
     });
+
+    expect(screen.queryByText("Base URL")).not.toBeInTheDocument();
+    const detailsButton = screen.getByRole("button", { name: "Show details" });
+    expect(detailsButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(detailsButton);
+    expect(
+      screen.getByRole("button", { name: "Hide details" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(await screen.findByText("Base URL")).toBeInTheDocument();
+  });
+
+  it("offers direct recovery actions when the web backend is unavailable", async () => {
+    const fetchMock = vi.fn((input: string | URL | Request) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+
+      if (url.endsWith("/health")) {
+        return Promise.resolve(
+          textResponse("Backend health check failed.", 503),
+        );
+      }
+      if (url.endsWith("/dev/status")) {
+        return Promise.resolve(
+          jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const outageBanner = await screen.findByRole("alert");
+    expect(outageBanner).toHaveTextContent(
+      /Backend unavailable\. The extraction workspace is open/,
+    );
+    expect(
+      screen.getAllByRole("button", { name: "Retry connection" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: "Open settings" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: "Open settings" }).length,
+    ).toBeGreaterThan(1);
+    expect(
+      screen.getAllByRole("button", { name: "Open help" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Workspace data unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reconnect backend to upload" }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Open help" })[0]);
+    expect(
+      await screen.findByRole("heading", {
+        name: "Get the next step when setup, review, or evidence is unclear.",
+      }),
+    ).toBeInTheDocument();
+
+    const healthCallsBeforeRetry = fetchMock.mock.calls.filter(([request]) => {
+      const url =
+        typeof request === "string"
+          ? request
+          : request instanceof URL
+            ? request.toString()
+            : request.url;
+      return url.endsWith("/health");
+    }).length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Extractions" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Retry connection" })[0],
+    );
+
+    await waitFor(() => {
+      const healthCallsAfterRetry = fetchMock.mock.calls.filter(([request]) => {
+        const url =
+          typeof request === "string"
+            ? request
+            : request instanceof URL
+              ? request.toString()
+              : request.url;
+        return url.endsWith("/health");
+      }).length;
+      expect(healthCallsAfterRetry).toBeGreaterThan(healthCallsBeforeRetry);
+    });
   });
 
   it("refreshes desktop runtime status from settings after onboarding is dismissed", async () => {
@@ -3143,7 +3440,7 @@ describe("App", () => {
     invokeMock.mockClear();
 
     fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+      within(screen.getAllByRole("navigation", { name: "Setup" })[0]).getByRole(
         "button",
         { name: "Settings" },
       ),
@@ -3197,23 +3494,30 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+      within(screen.getAllByRole("navigation", { name: "Setup" })[0]).getByRole(
         "button",
         { name: "Settings" },
       ),
     );
 
-    const customProviderSection = (
-      await screen.findAllByRole("heading", { name: "Custom provider" })
-    )[0].closest("section");
-    expect(customProviderSection).not.toBeNull();
-    const customProviderScope = within(customProviderSection as HTMLElement);
+    const advancedProfilesButton = screen.getByRole("button", {
+      name: "Open advanced provider profiles",
+    });
+    expect(advancedProfilesButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(advancedProfilesButton);
+    expect(
+      screen.getByRole("button", { name: "Hide advanced provider profiles" }),
+    ).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+    await screen.findByRole("heading", {
+      name: "Advanced provider profiles",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "" },
     });
     fireEvent.click(
-      customProviderScope.getByRole("button", {
+      screen.getByRole("button", {
         name: "Set custom provider as default",
       }),
     );
@@ -3291,26 +3595,28 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+      within(screen.getAllByRole("navigation", { name: "Setup" })[0]).getByRole(
         "button",
         { name: "Settings" },
       ),
     );
 
-    const customProviderSection = (
-      await screen.findAllByRole("heading", { name: "Custom provider" })
-    )[0].closest("section");
-    expect(customProviderSection).not.toBeNull();
-    const customProviderScope = within(customProviderSection as HTMLElement);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open advanced provider profiles" }),
+    );
 
-    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+    await screen.findByRole("heading", {
+      name: "Advanced provider profiles",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "QA Gateway" },
     });
-    fireEvent.change(customProviderScope.getByLabelText("Base URL"), {
+    fireEvent.change(screen.getByLabelText("Base URL"), {
       target: { value: "https://gateway.example/v1" },
     });
     fireEvent.click(
-      customProviderScope.getByRole("button", {
+      screen.getByRole("button", {
         name: "Probe custom provider",
       }),
     );
@@ -3394,30 +3700,30 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+      within(screen.getAllByRole("navigation", { name: "Setup" })[0]).getByRole(
         "button",
         { name: "Settings" },
       ),
     );
 
-    const customProviderSection = (
-      await screen.findAllByRole("heading", { name: "Custom provider" })
-    )[0].closest("section");
-    expect(customProviderSection).not.toBeNull();
-    const customProviderScope = within(customProviderSection as HTMLElement);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open advanced provider profiles" }),
+    );
 
-    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+    await screen.findByRole("heading", {
+      name: "Advanced provider profiles",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "QA Gateway" },
     });
-    fireEvent.change(customProviderScope.getByLabelText("Base URL"), {
+    fireEvent.change(screen.getByLabelText("Base URL"), {
       target: { value: "https://gateway.example/v1" },
     });
-    fireEvent.change(customProviderScope.getByLabelText("API key env var"), {
+    fireEvent.change(screen.getByLabelText("API key env var"), {
       target: { value: "OPENAI_API_KEY" },
     });
-    fireEvent.click(
-      customProviderScope.getByRole("button", { name: "Save profile" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
     expect(
       await screen.findByText(
@@ -3531,6 +3837,10 @@ describe("App", () => {
       fireEvent.click(button);
     }
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open advanced provider profiles" }),
+    );
+
     expect(await screen.findByText("Finance Gateway")).toBeInTheDocument();
     expect(
       screen.getByText("reachable: Endpoint responded with HTTP 200."),
@@ -3610,10 +3920,14 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+      within(screen.getAllByRole("navigation", { name: "Setup" })[0]).getByRole(
         "button",
         { name: "Settings" },
       ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open advanced provider profiles" }),
     );
 
     expect(await screen.findByText("Stale Gateway")).toBeInTheDocument();
@@ -3721,10 +4035,14 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: "Admin" })[0]).getByRole(
+      within(screen.getAllByRole("navigation", { name: "Setup" })[0]).getByRole(
         "button",
         { name: "Settings" },
       ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open advanced provider profiles" }),
     );
 
     expect(await screen.findByText("Stale Gateway")).toBeInTheDocument();

@@ -1,7 +1,7 @@
 COMPOSE ?= docker compose
 PYTHON ?= $(shell ./scripts/resolve-python.sh)
 
-.PHONY: doctor dev-up dev-down logs ps config test test-python test-ui test-e2e eval-langextract verify-frontend verify-python verify-pre-commit verify-pre-push format-check format-write lint-frontend release-package
+.PHONY: doctor dev-up dev-down logs ps config test test-python test-ui test-e2e eval-langextract benchmark-langextract verify-langextract-upgrade verify-frontend verify-python verify-pre-commit verify-pre-push format-check format-write lint-frontend release-package
 
 doctor:
 	./scripts/dev-doctor.sh
@@ -34,6 +34,12 @@ test-e2e:
 
 eval-langextract:
 	"$(PYTHON)" ./scripts/evaluate-langextract.py
+
+benchmark-langextract:
+	"$(PYTHON)" ./scripts/evaluate-langextract.py --duckdb ./evals/langextract/benchmarks.duckdb
+
+verify-langextract-upgrade:
+	./scripts/verify-langextract-upgrade.sh
 
 verify-python:
 	./scripts/verify-python.sh

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import tempfile
+from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +69,8 @@ class LangExtractEvalCaseResult:
 
 @dataclass
 class LangExtractEvalReport:
+    run_id: str
+    generated_at: datetime
     total_cases: int
     passed_cases: int
     failed_cases: int
@@ -91,6 +96,8 @@ def load_eval_cases(path: Path) -> list[LangExtractEvalCase]:
 def run_eval_cases(cases: list[LangExtractEvalCase]) -> LangExtractEvalReport:
     case_results = [run_eval_case(case) for case in cases]
     return LangExtractEvalReport(
+        run_id=datetime.now(UTC).strftime("%Y%m%d%H%M%S%f"),
+        generated_at=datetime.now(UTC),
         total_cases=len(case_results),
         passed_cases=sum(1 for result in case_results if result.passed),
         failed_cases=sum(1 for result in case_results if not result.passed),
@@ -100,14 +107,31 @@ def run_eval_cases(cases: list[LangExtractEvalCase]) -> LangExtractEvalReport:
     )
 
 
+def apply_eval_runtime_overrides(template_definition: dict[str, Any]) -> dict[str, Any]:
+    base_url = os.environ.get("LANGEXTRACT_EVAL_BASE_URL")
+    model = os.environ.get("LANGEXTRACT_EVAL_MODEL")
+    if not base_url and not model:
+        return template_definition
+
+    definition = deepcopy(template_definition)
+    settings = definition.setdefault("llm_provider_settings", {})
+    if base_url:
+        settings["base_url"] = base_url
+    if model:
+        settings["model"] = model
+    return definition
+
+
 def run_eval_case(case: LangExtractEvalCase) -> LangExtractEvalCaseResult:
+    template_definition = apply_eval_runtime_overrides(case.template_definition)
+
     with tempfile.TemporaryDirectory(prefix="langextract-eval-") as temp_dir:
         document_path = Path(temp_dir) / "document.txt"
         document_path.write_text(case.document_text, encoding="utf-8")
         summary = execute_extraction(
             document_path=str(document_path),
             document_id=1,
-            template_definition=case.template_definition,
+            template_definition=template_definition,
             provider_override=case.provider_override,
         )
 
@@ -315,3 +339,95 @@ def render_eval_summary(report: LangExtractEvalReport) -> str:
         for mismatch in result.mismatches:
             lines.append(f"    - {mismatch.category}:{mismatch.subject}: {mismatch.detail}")
     return "\n".join(lines)
+
+
+def store_eval_report(
+    database_path: Path,
+    report: LangExtractEvalReport,
+    *,
+    source_path: Path,
+    label: str | None = None,
+) -> str:
+    import duckdb
+
+    connection = duckdb.connect(str(database_path))
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS langextract_eval_runs (
+                run_id TEXT PRIMARY KEY,
+                generated_at TIMESTAMP NOT NULL,
+                label TEXT,
+                source_path TEXT NOT NULL,
+                total_cases INTEGER NOT NULL,
+                passed_cases INTEGER NOT NULL,
+                failed_cases INTEGER NOT NULL,
+                matched_checks INTEGER NOT NULL,
+                failed_checks INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS langextract_eval_case_results (
+                run_id TEXT NOT NULL,
+                case_name TEXT NOT NULL,
+                source_path TEXT,
+                provider_type TEXT,
+                provider_label TEXT,
+                model TEXT,
+                passed BOOLEAN NOT NULL,
+                matched_checks INTEGER NOT NULL,
+                failed_checks INTEGER NOT NULL,
+                mismatches_json TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO langextract_eval_runs
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                report.run_id,
+                report.generated_at,
+                label,
+                str(source_path),
+                report.total_cases,
+                report.passed_cases,
+                report.failed_cases,
+                report.matched_checks,
+                report.failed_checks,
+            ],
+        )
+        for case_result in report.case_results:
+            connection.execute(
+                """
+                INSERT INTO langextract_eval_case_results
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    report.run_id,
+                    case_result.name,
+                    case_result.source_path,
+                    case_result.provider_summary.get("provider_type"),
+                    case_result.provider_summary.get("provider_label"),
+                    case_result.provider_summary.get("model"),
+                    case_result.passed,
+                    case_result.matched_checks,
+                    case_result.failed_checks,
+                    json.dumps(
+                        [
+                            {
+                                "category": mismatch.category,
+                                "subject": mismatch.subject,
+                                "detail": mismatch.detail,
+                            }
+                            for mismatch in case_result.mismatches
+                        ]
+                    ),
+                ],
+            )
+    finally:
+        connection.close()
+    return report.run_id

@@ -20,7 +20,8 @@ read_env_value() {
   fi
 }
 
-export API_PORT="$(read_env_value "API_PORT" "8000")"
+API_PORT="$(read_env_value "API_PORT" "8000")"
+export API_PORT
 export VITE_API_BASE_URL="http://localhost:${API_PORT}/api"
 export EXTRACTFLOW_PROJECT_ROOT="$ROOT_DIR"
 

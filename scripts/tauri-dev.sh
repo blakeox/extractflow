@@ -36,9 +36,10 @@ requested_api_port="$(read_env_value "API_PORT" "8000")"
 requested_ollama_port="$(read_env_value "OLLAMA_PORT" "11434")"
 requested_tauri_port="$(read_env_value "TAURI_UI_PORT" "1420")"
 
-export API_PORT="$(find_available_port "$requested_api_port")"
-export OLLAMA_PORT="$(find_available_port "$requested_ollama_port")"
-export TAURI_UI_PORT="$(find_available_port "$requested_tauri_port")"
+API_PORT="$(find_available_port "$requested_api_port")"
+OLLAMA_PORT="$(find_available_port "$requested_ollama_port")"
+TAURI_UI_PORT="$(find_available_port "$requested_tauri_port")"
+export API_PORT OLLAMA_PORT TAURI_UI_PORT
 export VITE_API_BASE_URL="http://localhost:${API_PORT}/api"
 export EXTRACTFLOW_PROJECT_ROOT="$ROOT_DIR"
 export EXTRACTFLOW_APP_DATA_DIR="${ROOT_DIR}/.extractflow-desktop-data"

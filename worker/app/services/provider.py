@@ -8,11 +8,13 @@ from typing import Any, Protocol
 from urllib.parse import urlencode
 
 import httpx
+from dateutil import parser as date_parser
 from extraction_core.langextract import (
     normalize_langextract_base_url,
     uses_langextract_provider,
 )
 from extraction_core.models import (
+    DataType,
     ExtractionFieldDefinition,
     ExtractionFieldResult,
     ExtractionTemplate,
@@ -240,9 +242,7 @@ class OpenAICompatibleAdapter:
                         headers=headers,
                     )
                     response.raise_for_status()
-                    content = response.json()["choices"][0]["message"]["content"]
-                    parsed = json.loads(content)
-                    return [ExtractionFieldResult.model_validate(item) for item in parsed["extracted_fields"]]
+                    return parse_extraction_field_results(response.json())
                 except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
                     last_error = exc
             raise RuntimeError(f"Provider call failed for {settings.provider_type}: {last_error}") from last_error
@@ -285,12 +285,30 @@ class AzureOpenAIAdapter:
                 try:
                     response = client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
-                    content = response.json()["choices"][0]["message"]["content"]
-                    parsed = json.loads(content)
-                    return [ExtractionFieldResult.model_validate(item) for item in parsed["extracted_fields"]]
+                    return parse_extraction_field_results(response.json())
                 except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
                     last_error = exc
             raise RuntimeError(f"Provider call failed for {settings.provider_type}: {last_error}") from last_error
+
+
+def parse_extraction_field_results(response_payload: dict[str, Any]) -> list[ExtractionFieldResult]:
+    try:
+        content = response_payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("Provider response did not include choices[0].message.content.") from exc
+
+    if isinstance(content, str):
+        parsed = json.loads(content)
+    elif isinstance(content, dict):
+        parsed = content
+    else:
+        raise ValueError("Provider response content must be a JSON string or object.")
+
+    extracted_fields = parsed.get("extracted_fields")
+    if not isinstance(extracted_fields, list):
+        raise ValueError("Provider response must include an extracted_fields list.")
+
+    return [ExtractionFieldResult.model_validate(item) for item in extracted_fields]
 
 
 def _import_langextract() -> tuple[Any, Any, Any, Any]:
@@ -348,7 +366,7 @@ def build_langextract_result(
         return ExtractionFieldResult(
             field_name=extraction.extraction_class,
             label=extraction.extraction_class,
-            data_type="text",
+            data_type=DataType.TEXT,
             extracted_value=extracted_text,
             normalized_value={"value": extracted_text} if extracted_text else None,
             confidence_score=1.0 if grounded else 0.0,
@@ -392,7 +410,13 @@ def normalize_langextract_value(
 
     if field_type == "date":
         value = stringify_langextract_value(raw_value)
-        return {"value": value, "display_value": value} if value else None
+        if not value:
+            return None
+        try:
+            normalized_date = date_parser.parse(value).date().isoformat()
+        except (TypeError, ValueError, OverflowError):
+            normalized_date = value
+        return {"value": normalized_date, "display_value": value} if normalized_date else None
 
     if field_type == "number":
         number = parse_number(raw_value)

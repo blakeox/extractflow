@@ -4,8 +4,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from jsonschema import Draft202012Validator, SchemaError
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .formulas import (
+    FormulaEngine,
+    FormulaValidationError,
+    collect_formula_references,
+    topologically_sort_calculated_fields,
+)
 from .langextract import (
     LANGEXTRACT_API_STYLE,
     LANGEXTRACT_PROVIDER_TYPE,
@@ -51,8 +58,8 @@ class FormatRule(BaseModel):
 
 
 class ErrorHandlingRule(BaseModel):
-    on_divide_by_zero: str = "return_null_and_flag_review"
-    on_missing_input: str = "return_null_and_flag_review"
+    on_divide_by_zero: Literal["return_null_and_flag_review", "return_null"] = "return_null_and_flag_review"
+    on_missing_input: Literal["return_null_and_flag_review", "return_null"] = "return_null_and_flag_review"
 
 
 class ExtractionFieldDefinition(BaseModel):
@@ -73,6 +80,16 @@ class ExtractionFieldDefinition(BaseModel):
     output_format: FormatRule | None = None
     validation: ValidationRule = Field(default_factory=ValidationRule)
     field_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
+
+    @model_validator(mode="after")
+    def validate_field_schema_definition(self) -> ExtractionFieldDefinition:
+        if self.field_schema is None:
+            return self
+        try:
+            Draft202012Validator.check_schema(self.field_schema)
+        except SchemaError as exc:
+            raise ValueError(f"Field schema is not a valid JSON Schema: {exc.message}") from exc
+        return self
 
 
 class CalculatedFieldDefinition(BaseModel):
@@ -176,6 +193,50 @@ class ExtractionTemplate(BaseModel):
         names = [field.name for field in self.extracted_fields] + [field.name for field in self.calculated_fields]
         if len(names) != len(set(names)):
             raise ValueError("Field names must be unique across extracted and calculated fields.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_calculated_field_contract(self) -> ExtractionTemplate:
+        engine = FormulaEngine()
+        formula_usable_field_names = {field.name for field in self.extracted_fields if field.usable_in_formulas}
+        formula_blocked_field_names = {field.name for field in self.extracted_fields if not field.usable_in_formulas}
+        calculated_field_names = {field.name for field in self.calculated_fields}
+        all_field_names = {field.name for field in self.extracted_fields} | calculated_field_names
+        available_field_names = formula_usable_field_names | calculated_field_names
+
+        for definition in self.calculated_fields:
+            try:
+                engine.validate_formula(definition.formula, all_field_names)
+            except FormulaValidationError as exc:
+                raise ValueError(f"Calculated field '{definition.name}' formula is invalid: {exc}") from exc
+
+            blocked_references = sorted(
+                collect_formula_references(definition.formula, all_field_names) & formula_blocked_field_names
+            )
+            if blocked_references:
+                raise ValueError(
+                    f"Calculated field '{definition.name}' references extracted fields that are not usable in formulas: "
+                    + ", ".join(blocked_references)
+                    + "."
+                )
+
+            try:
+                engine.validate_formula(definition.formula, available_field_names)
+            except FormulaValidationError as exc:
+                raise ValueError(f"Calculated field '{definition.name}' formula is invalid: {exc}") from exc
+
+            referenced_fields = sorted(collect_formula_references(definition.formula, available_field_names))
+            if sorted(definition.depends_on) != referenced_fields:
+                raise ValueError(
+                    f"Calculated field '{definition.name}' depends_on must match referenced fields. "
+                    f"Declared: {sorted(definition.depends_on)}. Referenced: {referenced_fields}."
+                )
+
+        try:
+            topologically_sort_calculated_fields(self.calculated_fields)
+        except FormulaValidationError as exc:
+            raise ValueError(f"Calculated field dependency graph is invalid: {exc}") from exc
+
         return self
 
     @model_validator(mode="after")
@@ -295,10 +356,9 @@ class ReviewEditPayload(BaseModel):
     reviewer: str = "local-user"
     edits: list[ReviewFieldEdit] = Field(default_factory=list)
     recalculate: bool = True
-
-    @field_validator("edits")
-    @classmethod
-    def require_edits(cls, value: list[ReviewFieldEdit]) -> list[ReviewFieldEdit]:
-        if not value:
-            raise ValueError("At least one field edit is required.")
-        return value
+    approve_high_confidence_min: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="When set, auto-approve flagged fields at or above this confidence that are not invalid.",
+    )

@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from extraction_core.models import ExtractionTemplate, LLMProviderCatalogEntry, LLMProviderSettings
+from extraction_core.runtime import DeploymentMode
 from pydantic import BaseModel, Field
 
 
@@ -49,7 +50,10 @@ class JobResponse(BaseModel):
     template_version_id: int
     provider_override: LLMProviderSettings | None = None
     status: str
-    error_message: str | None
+    error_message: str | None = None
+    progress_stage: str | None = None
+    progress_pct: int = 0
+    attempt_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -98,7 +102,26 @@ class ProviderProbeResponse(BaseModel):
 
 
 class ProviderControlsResponse(BaseModel):
+    deployment_mode: DeploymentMode
+    tenant_mode: str
+    allow_external_processing: bool
+    require_redaction_for_external_processing: bool
+    require_authentication: bool
     custom_provider_probe_max_age_hours: int
+
+
+class ParserStatusResponse(BaseModel):
+    state: str
+    timestamp: str | None = None
+    docling_enabled: bool
+    docling_prewarm: bool
+    docling_pdf_ocr_retry: bool
+    docling_image_ocr: bool
+    prewarm_status: str | None = None
+    prewarm_attempted: bool = False
+    prewarm_error: str | None = None
+    supported_extensions: list[str]
+    supported_classes: list[str]
 
 
 class LangExtractFeedbackSuggestionExtractionResponse(BaseModel):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import shutil
 from copy import deepcopy
 from pathlib import Path
-from uuid import uuid4
 
+from extraction_core.job_progress import JOB_STAGE_QUEUED
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.tenant import build_tenant_setting_key, get_current_tenant_id
 from app.db.database import get_db
 from app.models import Document, ExportRecord, ExtractionJob, ExtractionResult, Setting, Template, TemplateVersion
 from app.schemas.api import (
@@ -25,6 +27,7 @@ from app.schemas.api import (
     LangExtractFeedbackSuggestionDismissalRequest,
     LangExtractFeedbackSuggestionDismissalResponse,
     LangExtractFeedbackSuggestionListResponse,
+    ParserStatusResponse,
     ProviderCatalogResponse,
     ProviderControlsResponse,
     ProviderHealthResponse,
@@ -37,6 +40,7 @@ from app.schemas.api import (
     TemplateVersionCreateRequest,
     TemplateVersionResponse,
 )
+from app.services.job_service import build_job_response, retry_failed_job
 from app.services.langextract_feedback import (
     list_langextract_feedback_suggestions,
     set_langextract_feedback_suggestion_dismissed,
@@ -54,6 +58,7 @@ from app.services.provider_profiles import (
     update_custom_provider_profile,
 )
 from app.services.result_service import apply_review_edits, export_result
+from app.services.storage import build_upload_target, resolve_export_download_path
 from app.services.template_service import create_template, create_template_version
 
 router = APIRouter()
@@ -65,18 +70,18 @@ def healthcheck():
 
 
 @router.get("/dev/status")
-def dev_status(db: Session = Depends(get_db)):
+def dev_status(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
     return {
-        "templates": db.query(Template).count(),
-        "documents": db.query(Document).count(),
-        "jobs": db.query(ExtractionJob).count(),
-        "results": db.query(ExtractionResult).count(),
+        "templates": db.query(Template).filter(Template.tenant_id == tenant_id).count(),
+        "documents": db.query(Document).filter(Document.tenant_id == tenant_id).count(),
+        "jobs": db.query(ExtractionJob).filter(ExtractionJob.tenant_id == tenant_id).count(),
+        "results": db.query(ExtractionResult).filter(ExtractionResult.tenant_id == tenant_id).count(),
     }
 
 
 @router.get("/templates", response_model=list[TemplateResponse])
-def list_templates(db: Session = Depends(get_db)):
-    templates = db.query(Template).all()
+def list_templates(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    templates = db.query(Template).filter(Template.tenant_id == tenant_id).all()
     responses = []
     for template in templates:
         latest = max(template.versions, key=lambda item: item.created_at) if template.versions else None
@@ -96,19 +101,26 @@ def list_templates(db: Session = Depends(get_db)):
 
 
 @router.post("/templates", response_model=TemplateResponse)
-def create_template_endpoint(payload: TemplateCreateRequest, db: Session = Depends(get_db)):
-    existing = db.query(Template).filter(Template.name == payload.name).first()
+def create_template_endpoint(
+    payload: TemplateCreateRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    existing = db.query(Template).filter(Template.tenant_id == tenant_id, Template.name == payload.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="Template name already exists.")
-    create_template(db, payload.name, payload.description, payload.document_type, payload.definition)
-    return list_templates(db)[-1]
+    create_template(db, payload.name, payload.description, payload.document_type, payload.definition, tenant_id)
+    return list_templates(db, tenant_id=tenant_id)[-1]
 
 
 @router.post("/templates/{template_id}/versions", response_model=TemplateVersionResponse)
 def create_template_version_endpoint(
-    template_id: int, payload: TemplateVersionCreateRequest, db: Session = Depends(get_db)
+    template_id: int,
+    payload: TemplateVersionCreateRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
 ):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = db.query(Template).filter(Template.id == template_id, Template.tenant_id == tenant_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found.")
     definition = ExtractionTemplate.model_validate(payload.definition)
@@ -123,10 +135,12 @@ def create_template_version_endpoint(
 
 
 @router.get("/templates/{template_id}/versions", response_model=list[TemplateVersionResponse])
-def list_template_versions(template_id: int, db: Session = Depends(get_db)):
+def list_template_versions(
+    template_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)
+):
     versions = (
         db.query(TemplateVersion)
-        .filter(TemplateVersion.template_id == template_id)
+        .filter(TemplateVersion.template_id == template_id, TemplateVersion.tenant_id == tenant_id)
         .order_by(TemplateVersion.created_at.desc())
         .all()
     )
@@ -146,8 +160,14 @@ def list_template_versions(template_id: int, db: Session = Depends(get_db)):
     "/template-versions/{template_version_id}/langextract-feedback-suggestions",
     response_model=LangExtractFeedbackSuggestionListResponse,
 )
-def get_langextract_feedback_suggestions(template_version_id: int, db: Session = Depends(get_db)):
-    template_version = db.query(TemplateVersion).filter(TemplateVersion.id == template_version_id).first()
+def get_langextract_feedback_suggestions(
+    template_version_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)
+):
+    template_version = (
+        db.query(TemplateVersion)
+        .filter(TemplateVersion.id == template_version_id, TemplateVersion.tenant_id == tenant_id)
+        .first()
+    )
     if not template_version:
         raise HTTPException(status_code=404, detail="Template version not found.")
     return list_langextract_feedback_suggestions(db, template_version)
@@ -162,8 +182,13 @@ def set_langextract_feedback_suggestion_dismissal(
     suggestion_key: str,
     payload: LangExtractFeedbackSuggestionDismissalRequest,
     db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
 ):
-    template_version = db.query(TemplateVersion).filter(TemplateVersion.id == template_version_id).first()
+    template_version = (
+        db.query(TemplateVersion)
+        .filter(TemplateVersion.id == template_version_id, TemplateVersion.tenant_id == tenant_id)
+        .first()
+    )
     if not template_version:
         raise HTTPException(status_code=404, detail="Template version not found.")
     return set_langextract_feedback_suggestion_dismissed(
@@ -175,18 +200,23 @@ def set_langextract_feedback_suggestion_dismissal(
 
 
 @router.post("/documents", response_model=DocumentResponse)
-def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_document(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
     original_filename = Path(file.filename or "").name
     if not original_filename:
         raise HTTPException(status_code=400, detail="Uploaded file must include a filename.")
 
-    target = Path(settings.uploads_dir) / f"{uuid4().hex}-{original_filename}"
+    reference, target = build_upload_target(original_filename)
     with target.open("wb") as handle:
         shutil.copyfileobj(file.file, handle)
     document = Document(
+        tenant_id=tenant_id,
         original_filename=original_filename,
         content_type=file.content_type or "application/octet-stream",
-        stored_path=str(target),
+        stored_path=reference,
     )
     db.add(document)
     db.commit()
@@ -201,8 +231,8 @@ def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db))
 
 
 @router.get("/documents", response_model=list[DocumentResponse])
-def list_documents(db: Session = Depends(get_db)):
-    docs = db.query(Document).order_by(Document.created_at.desc()).all()
+def list_documents(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    docs = db.query(Document).filter(Document.tenant_id == tenant_id).order_by(Document.created_at.desc()).all()
     return [
         DocumentResponse(
             id=doc.id,
@@ -216,66 +246,102 @@ def list_documents(db: Session = Depends(get_db)):
 
 
 @router.post("/jobs", response_model=JobResponse)
-def create_job(payload: JobCreateRequest, db: Session = Depends(get_db)):
-    document = db.query(Document).filter(Document.id == payload.document_id).first()
-    template_version = db.query(TemplateVersion).filter(TemplateVersion.id == payload.template_version_id).first()
+def create_job(
+    payload: JobCreateRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    document = db.query(Document).filter(Document.id == payload.document_id, Document.tenant_id == tenant_id).first()
+    template_version = (
+        db.query(TemplateVersion)
+        .filter(TemplateVersion.id == payload.template_version_id, TemplateVersion.tenant_id == tenant_id)
+        .first()
+    )
     if not document or not template_version:
         raise HTTPException(status_code=404, detail="Document or template version not found.")
     template_definition = ExtractionTemplate.model_validate(template_version.definition)
     effective_provider = payload.provider_override or template_definition.llm_provider_settings
     validate_job_provider(template_definition, effective_provider)
     job = ExtractionJob(
+        tenant_id=tenant_id,
         document_id=payload.document_id,
         template_version_id=payload.template_version_id,
         provider_override=payload.provider_override.model_dump() if payload.provider_override else None,
+        progress_stage=JOB_STAGE_QUEUED,
+        progress_pct=0,
     )
     db.add(job)
     document.status = "queued"
     db.commit()
     db.refresh(job)
-    return JobResponse(
-        id=job.id,
-        document_id=job.document_id,
-        template_version_id=job.template_version_id,
-        provider_override=LLMProviderSettings.model_validate(job.provider_override) if job.provider_override else None,
-        status=job.status,
-        error_message=job.error_message,
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-    )
+    return build_job_response(job)
 
 
 @router.get("/jobs", response_model=list[JobResponse])
-def list_jobs(db: Session = Depends(get_db)):
-    jobs = db.query(ExtractionJob).order_by(ExtractionJob.created_at.desc()).all()
-    return [
-        JobResponse(
-            id=job.id,
-            document_id=job.document_id,
-            template_version_id=job.template_version_id,
-            provider_override=LLMProviderSettings.model_validate(job.provider_override)
-            if job.provider_override
-            else None,
-            status=job.status,
-            error_message=job.error_message,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
-        )
-        for job in jobs
-    ]
+def list_jobs(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    jobs = (
+        db.query(ExtractionJob)
+        .filter(ExtractionJob.tenant_id == tenant_id)
+        .order_by(ExtractionJob.created_at.desc())
+        .all()
+    )
+    return [build_job_response(job) for job in jobs]
+
+
+@router.post("/jobs/{job_id}/retry", response_model=JobResponse)
+def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id, ExtractionJob.tenant_id == tenant_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.status != "failed":
+        raise HTTPException(status_code=409, detail="Only failed jobs can be retried.")
+    document = db.query(Document).filter(Document.id == job.document_id, Document.tenant_id == tenant_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    template_version = (
+        db.query(TemplateVersion)
+        .filter(TemplateVersion.id == job.template_version_id, TemplateVersion.tenant_id == tenant_id)
+        .first()
+    )
+    if not template_version:
+        raise HTTPException(status_code=404, detail="Template version not found.")
+    template_definition = ExtractionTemplate.model_validate(template_version.definition)
+    effective_provider = (
+        LLMProviderSettings.model_validate(job.provider_override)
+        if job.provider_override
+        else template_definition.llm_provider_settings
+    )
+    validate_job_provider(template_definition, effective_provider)
+    retry_failed_job(job, document)
+    db.commit()
+    db.refresh(job)
+    return build_job_response(job)
 
 
 @router.get("/jobs/{job_id}/result", response_model=ResultEnvelope)
-def get_job_result(job_id: int, db: Session = Depends(get_db)):
-    result = db.query(ExtractionResult).filter(ExtractionResult.job_id == job_id).first()
+def get_job_result(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    result = (
+        db.query(ExtractionResult)
+        .filter(ExtractionResult.job_id == job_id, ExtractionResult.tenant_id == tenant_id)
+        .first()
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
     return ResultEnvelope(result_id=result.id, job_id=job_id, result=result.result_json)
 
 
 @router.post("/results/{result_id}/review")
-def review_result(result_id: int, payload: ReviewEditPayload, db: Session = Depends(get_db)):
-    result = db.query(ExtractionResult).filter(ExtractionResult.id == result_id).first()
+def review_result(
+    result_id: int,
+    payload: ReviewEditPayload,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    result = (
+        db.query(ExtractionResult)
+        .filter(ExtractionResult.id == result_id, ExtractionResult.tenant_id == tenant_id)
+        .first()
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
     updated = apply_review_edits(db, result, payload)
@@ -283,8 +349,17 @@ def review_result(result_id: int, payload: ReviewEditPayload, db: Session = Depe
 
 
 @router.post("/results/{result_id}/exports/{export_format}")
-def export_result_endpoint(result_id: int, export_format: str, db: Session = Depends(get_db)):
-    result = db.query(ExtractionResult).filter(ExtractionResult.id == result_id).first()
+def export_result_endpoint(
+    result_id: int,
+    export_format: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    result = (
+        db.query(ExtractionResult)
+        .filter(ExtractionResult.id == result_id, ExtractionResult.tenant_id == tenant_id)
+        .first()
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
     record = export_result(db, result, export_format)
@@ -292,19 +367,32 @@ def export_result_endpoint(result_id: int, export_format: str, db: Session = Dep
 
 
 @router.get("/exports/{export_id}/download")
-def download_export(export_id: int, db: Session = Depends(get_db)):
-    record = db.query(ExportRecord).filter(ExportRecord.id == export_id).first()
+def download_export(export_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    record = db.query(ExportRecord).filter(ExportRecord.id == export_id, ExportRecord.tenant_id == tenant_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="Export not found.")
-    return FileResponse(record.file_path, filename=Path(record.file_path).name)
+    try:
+        download_path = resolve_export_download_path(record.file_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(download_path, filename=download_path.name)
 
 
 @router.get("/exports", response_model=list[ExportResponse])
-def list_exports(db: Session = Depends(get_db)):
-    records = db.query(ExportRecord).order_by(ExportRecord.created_at.desc()).all()
+def list_exports(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    records = (
+        db.query(ExportRecord)
+        .filter(ExportRecord.tenant_id == tenant_id)
+        .order_by(ExportRecord.created_at.desc())
+        .all()
+    )
     responses: list[ExportResponse] = []
     for record in records:
-        result = db.query(ExtractionResult).filter(ExtractionResult.id == record.result_id).first()
+        result = (
+            db.query(ExtractionResult)
+            .filter(ExtractionResult.id == record.result_id, ExtractionResult.tenant_id == tenant_id)
+            .first()
+        )
         responses.append(
             ExportResponse(
                 id=record.id,
@@ -319,8 +407,8 @@ def list_exports(db: Session = Depends(get_db)):
 
 
 @router.get("/settings/provider")
-def get_provider_settings(db: Session = Depends(get_db)):
-    setting = db.query(Setting).filter(Setting.key == "default_provider").first()
+def get_provider_settings(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    setting = db.query(Setting).filter(Setting.key == build_tenant_setting_key(tenant_id, "default_provider")).first()
     if setting:
         return {**setting.value, "is_persisted_default": True}
 
@@ -345,25 +433,80 @@ def get_provider_catalog_health():
 
 @router.get("/settings/providers/controls", response_model=ProviderControlsResponse)
 def get_provider_controls():
-    return ProviderControlsResponse(custom_provider_probe_max_age_hours=settings.custom_provider_probe_max_age_hours)
+    return ProviderControlsResponse(
+        deployment_mode=settings.deployment_mode,
+        tenant_mode=settings.tenant_mode,
+        allow_external_processing=settings.allow_external_processing,
+        require_redaction_for_external_processing=settings.require_redaction_for_external_processing,
+        require_authentication=settings.require_authentication,
+        custom_provider_probe_max_age_hours=settings.custom_provider_probe_max_age_hours,
+    )
+
+
+@router.get("/settings/parser-status", response_model=ParserStatusResponse)
+def get_parser_status():
+    details: dict[str, object] = {}
+    state = "unknown"
+    timestamp: str | None = None
+
+    status_path = Path(settings.worker_status_path)
+    if status_path.exists():
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+        state = str(payload.get("state") or state)
+        timestamp = payload.get("timestamp")
+        raw_details = payload.get("details")
+        if isinstance(raw_details, dict):
+            details = raw_details
+
+    prewarm_result = details.get("docling_prewarm_result")
+    prewarm_status = None
+    prewarm_attempted = False
+    prewarm_error = None
+    if isinstance(prewarm_result, dict):
+        prewarm_status = str(prewarm_result.get("status")) if prewarm_result.get("status") is not None else None
+        prewarm_attempted = bool(prewarm_result.get("attempted"))
+        prewarm_error = str(prewarm_result.get("error")) if prewarm_result.get("error") is not None else None
+
+    return ParserStatusResponse(
+        state=state,
+        timestamp=timestamp,
+        docling_enabled=bool(details.get("docling_enabled", True)),
+        docling_prewarm=bool(details.get("docling_prewarm", True)),
+        docling_pdf_ocr_retry=bool(details.get("docling_pdf_ocr_retry", True)),
+        docling_image_ocr=bool(details.get("docling_image_ocr", True)),
+        prewarm_status=prewarm_status,
+        prewarm_attempted=prewarm_attempted,
+        prewarm_error=prewarm_error,
+        supported_extensions=[".pdf", ".docx", ".pptx", ".html", ".htm", ".png", ".jpg", ".jpeg", ".tiff"],
+        supported_classes=["PDF", "DOCX", "PPTX", "HTML", "Images", "CSV", "Excel", "Plain text", "Markdown"],
+    )
 
 
 @router.post("/settings/providers/probe", response_model=ProviderProbeResponse)
 def probe_provider_endpoint(payload: ProviderProbeRequest):
+    enforce_provider_policy(payload.settings)
     return ProviderProbeResponse.model_validate(probe_provider(payload.settings))
 
 
 @router.get("/settings/providers/custom", response_model=CustomProviderProfileListResponse)
-def list_custom_provider_profiles_endpoint(db: Session = Depends(get_db)):
-    return CustomProviderProfileListResponse(profiles=list_custom_provider_profiles(db))
+def list_custom_provider_profiles_endpoint(
+    db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)
+):
+    return CustomProviderProfileListResponse(profiles=list_custom_provider_profiles(db, tenant_id))
 
 
 @router.post("/settings/providers/custom")
-def create_custom_provider_profile_endpoint(payload: CustomProviderProfileRequest, db: Session = Depends(get_db)):
+def create_custom_provider_profile_endpoint(
+    payload: CustomProviderProfileRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    enforce_provider_policy(payload.settings)
     probe_result = require_reachable_provider(payload.settings, "Custom provider save")
-    profile = create_custom_provider_profile(db, payload.name, payload.settings)
+    profile = create_custom_provider_profile(db, tenant_id, payload.name, payload.settings)
     return record_custom_provider_profile_probe(
         db,
+        tenant_id,
         profile.id,
         status=str(probe_result["status"]),
         detail=str(probe_result["detail"]),
@@ -372,12 +515,17 @@ def create_custom_provider_profile_endpoint(payload: CustomProviderProfileReques
 
 @router.put("/settings/providers/custom/{profile_id}")
 def update_custom_provider_profile_endpoint(
-    profile_id: str, payload: CustomProviderProfileRequest, db: Session = Depends(get_db)
+    profile_id: str,
+    payload: CustomProviderProfileRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
 ):
+    enforce_provider_policy(payload.settings)
     probe_result = require_reachable_provider(payload.settings, "Custom provider save")
-    update_custom_provider_profile(db, profile_id, payload.name, payload.settings)
+    update_custom_provider_profile(db, tenant_id, profile_id, payload.name, payload.settings)
     return record_custom_provider_profile_probe(
         db,
+        tenant_id,
         profile_id,
         status=str(probe_result["status"]),
         detail=str(probe_result["detail"]),
@@ -385,17 +533,22 @@ def update_custom_provider_profile_endpoint(
 
 
 @router.delete("/settings/providers/custom/{profile_id}")
-def delete_custom_provider_profile_endpoint(profile_id: str, db: Session = Depends(get_db)):
-    delete_custom_provider_profile(db, profile_id)
+def delete_custom_provider_profile_endpoint(
+    profile_id: str, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)
+):
+    delete_custom_provider_profile(db, tenant_id, profile_id)
     return {"deleted": True}
 
 
 @router.post("/settings/providers/custom/{profile_id}/reverify")
-def reverify_custom_provider_profile_endpoint(profile_id: str, db: Session = Depends(get_db)):
-    profile = get_custom_provider_profile(db, profile_id)
+def reverify_custom_provider_profile_endpoint(
+    profile_id: str, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)
+):
+    profile = get_custom_provider_profile(db, tenant_id, profile_id)
     probe_result = require_reachable_provider(profile.settings, "Custom provider reverification")
     return record_custom_provider_profile_probe(
         db,
+        tenant_id,
         profile_id,
         status=str(probe_result["status"]),
         detail=str(probe_result["detail"]),
@@ -403,20 +556,25 @@ def reverify_custom_provider_profile_endpoint(profile_id: str, db: Session = Dep
 
 
 @router.post("/settings/providers/custom/{profile_id}/activate")
-def activate_custom_provider_profile_endpoint(profile_id: str, db: Session = Depends(get_db)):
-    profile = get_custom_provider_profile(db, profile_id)
+def activate_custom_provider_profile_endpoint(
+    profile_id: str, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)
+):
+    profile = get_custom_provider_profile(db, tenant_id, profile_id)
+    enforce_provider_policy(profile.settings)
     require_fresh_custom_provider_profile_probe(profile)
     probe_result = require_reachable_provider(profile.settings, "Custom provider activation")
-    setting = db.query(Setting).filter(Setting.key == "default_provider").first()
+    setting_key = build_tenant_setting_key(tenant_id, "default_provider")
+    setting = db.query(Setting).filter(Setting.key == setting_key).first()
     data = profile.settings.model_dump(mode="json")
     if setting:
         setting.value = data
     else:
-        setting = Setting(key="default_provider", value=data)
+        setting = Setting(key=setting_key, value=data)
         db.add(setting)
     db.commit()
     record_custom_provider_profile_probe(
         db,
+        tenant_id,
         profile_id,
         status=str(probe_result["status"]),
         detail=str(probe_result["detail"]),
@@ -425,19 +583,26 @@ def activate_custom_provider_profile_endpoint(profile_id: str, db: Session = Dep
 
 
 @router.put("/settings/provider")
-def update_provider_settings(payload: ProviderSettingsRequest, db: Session = Depends(get_db)):
-    setting = db.query(Setting).filter(Setting.key == "default_provider").first()
+def update_provider_settings(
+    payload: ProviderSettingsRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    enforce_provider_policy(payload.settings)
+    setting_key = build_tenant_setting_key(tenant_id, "default_provider")
+    setting = db.query(Setting).filter(Setting.key == setting_key).first()
     data = payload.settings.model_dump()
     if setting:
         setting.value = data
     else:
-        setting = Setting(key="default_provider", value=data)
+        setting = Setting(key=setting_key, value=data)
         db.add(setting)
     db.commit()
     return {**data, "is_persisted_default": True}
 
 
 def validate_job_provider(template: ExtractionTemplate, effective_provider: LLMProviderSettings) -> ExtractionTemplate:
+    enforce_provider_policy(effective_provider)
     effective_definition = deepcopy(template.model_dump(mode="json"))
     effective_definition["llm_provider_settings"] = effective_provider.model_dump(mode="json")
     try:
@@ -447,3 +612,22 @@ def validate_job_provider(template: ExtractionTemplate, effective_provider: LLMP
     if uses_langextract_provider(effective_provider.provider_type, effective_provider.api_style):
         require_reachable_provider(effective_provider, "Job queueing")
     return effective_template
+
+
+def enforce_provider_policy(provider_settings: LLMProviderSettings) -> None:
+    if provider_settings.allow_external_processing and not settings.allow_external_processing:
+        raise HTTPException(
+            status_code=400,
+            detail="This deployment disables external provider processing. Choose a local provider or enable ALLOW_EXTERNAL_PROCESSING.",
+        )
+    if provider_settings.allow_external_processing and (
+        settings.require_redaction_for_external_processing and not settings.presidio_redaction_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This deployment requires document redaction before external provider processing, but Presidio "
+                "redaction is disabled. Enable PRESIDIO_REDACTION_ENABLED or disable "
+                "REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING."
+            ),
+        )

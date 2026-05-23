@@ -13,6 +13,8 @@ fi
 
 "$PYTHON_BIN" -m ruff format --check backend worker shared tests
 "$PYTHON_BIN" -m ruff check backend worker shared tests
+"$PYTHON_BIN" -m pyright --project pyrightconfig.backend.json
+"$PYTHON_BIN" -m pyright --project pyrightconfig.worker.json
 PYTHONPATH=shared "$PYTHON_BIN" -m pytest tests/shared
 PYTHONPATH=backend:shared "$PYTHON_BIN" -m pytest tests/backend
 PYTHONPATH=worker:shared "$PYTHON_BIN" -m pytest tests/worker

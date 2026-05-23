@@ -53,3 +53,30 @@ def test_worker_settings_allow_disabling_docling_ocr_paths(tmp_path) -> None:
 
     assert settings.docling_pdf_ocr_retry is False
     assert settings.docling_image_ocr is False
+
+
+def test_worker_settings_accept_postgres_database_urls(tmp_path) -> None:
+    settings = WorkerSettings(
+        **build_worker_settings(
+            tmp_path,
+            database_url="postgresql+psycopg://extractflow:secret@db.internal/extractflow",
+        )
+    )
+
+    assert settings.database_url == "postgresql+psycopg://extractflow:secret@db.internal/extractflow"
+
+
+def test_worker_saas_settings_require_authentication(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="REQUIRE_AUTHENTICATION must be true for saas_multi_tenant deployments"):
+        WorkerSettings(
+            **build_worker_settings(
+                tmp_path,
+                deployment_mode="saas_multi_tenant",
+                require_authentication=False,
+            )
+        )
+
+
+def test_worker_settings_reject_invalid_current_tenant_id(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="CURRENT_TENANT_ID"):
+        WorkerSettings(**build_worker_settings(tmp_path, current_tenant_id="bad tenant"))
