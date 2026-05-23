@@ -2,7 +2,23 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - master
+      - dev
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "LICENSE"
+      - ".github/CODEOWNERS"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "LICENSE"
+      - ".github/CODEOWNERS"
   workflow_dispatch:
 
 permissions:
@@ -37,6 +53,9 @@ jobs:
 
       - name: Run shell verification
         run: ./scripts/verify-shell.sh
+
+      - name: Run repository secret scan
+        run: ./scripts/scan-secrets.py
 
       - name: Validate LangExtract golden-set cases
         run: |

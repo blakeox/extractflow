@@ -159,7 +159,8 @@ Continuous enforcement:
 - GitHub Actions runs Python tests and frontend verification on every push, pull request, and manual dispatch
 - Local Lefthook hooks run the same verification scripts used by CI so contributor machines and GitHub Actions enforce the same contract
 - A separate browser E2E job runs Playwright against the Vite app and covers upload -> run -> review with mocked API traffic
-- Secret scanning also runs in-repo through `scripts/scan-secrets.py` locally and in `.github/workflows/secret-scan.yml` so tracked-file secret checks remain part of both local and CI verification
+- Secret scanning runs through `scripts/scan-secrets.py` locally and in the CI Python job; use the `Secret Scan` workflow for manual reruns only
+- For open source CI: public repositories get unlimited standard GitHub Actions minutes; see [docs/CI_AND_ACTIONS.md](docs/CI_AND_ACTIONS.md) if jobs fail with zero steps while the repo is private
 - Ruff, Pyright, and ShellCheck now standardize the Python and shell surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
 - Frontend CI uses `npm ci` against the checked-in lockfile for deterministic installs
 - PRs also run dependency review, CodeQL scans the Python and TypeScript surfaces, and Dependabot tracks npm, pip, cargo, and GitHub Actions updates
