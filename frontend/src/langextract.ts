@@ -60,6 +60,13 @@ export type LangExtractDraftGuidance = {
   messages: string[];
 };
 
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown): item is string => typeof item === "string")
+  );
+}
+
 export function createEmptyLangExtractAttribute(): DraftLangExtractAttribute {
   return {
     key: "",
@@ -260,10 +267,7 @@ function validateLangExtractAttributes(
     if (typeof attributeValue === "string") {
       continue;
     }
-    if (
-      Array.isArray(attributeValue) &&
-      attributeValue.every((item) => typeof item === "string")
-    ) {
+    if (isStringArray(attributeValue)) {
       continue;
     }
     throw new Error(
@@ -461,43 +465,44 @@ export function buildLangExtractExamples(
           );
         }
 
-        const attributes = Object.fromEntries(
-          extraction.attributes.map((attribute, attributeIndex) => {
-            const key = attribute.key.trim();
-            if (!key) {
-              throw new Error(
-                `LangExtract example ${exampleIndex + 1} extraction ${
-                  extractionIndex + 1
-                } attribute ${attributeIndex + 1} needs a name.`,
-              );
-            }
-
-            if (attribute.value_kind === "string_array") {
-              const values = attribute.value
-                .split("\n")
-                .map((value) => value.trim())
-                .filter(Boolean);
-              if (!values.length) {
+        const attributes: Record<string, string | string[]> =
+          Object.fromEntries(
+            extraction.attributes.map((attribute, attributeIndex) => {
+              const key = attribute.key.trim();
+              if (!key) {
                 throw new Error(
                   `LangExtract example ${exampleIndex + 1} extraction ${
                     extractionIndex + 1
-                  } attribute ${attributeIndex + 1} needs at least one value.`,
+                  } attribute ${attributeIndex + 1} needs a name.`,
                 );
               }
-              return [key, values] as const;
-            }
 
-            const value = attribute.value.trim();
-            if (!value) {
-              throw new Error(
-                `LangExtract example ${exampleIndex + 1} extraction ${
-                  extractionIndex + 1
-                } attribute ${attributeIndex + 1} needs a value.`,
-              );
-            }
-            return [key, value] as const;
-          }),
-        );
+              if (attribute.value_kind === "string_array") {
+                const values = attribute.value
+                  .split("\n")
+                  .map((value) => value.trim())
+                  .filter(Boolean);
+                if (!values.length) {
+                  throw new Error(
+                    `LangExtract example ${exampleIndex + 1} extraction ${
+                      extractionIndex + 1
+                    } attribute ${attributeIndex + 1} needs at least one value.`,
+                  );
+                }
+                return [key, values] as const;
+              }
+
+              const value = attribute.value.trim();
+              if (!value) {
+                throw new Error(
+                  `LangExtract example ${exampleIndex + 1} extraction ${
+                    extractionIndex + 1
+                  } attribute ${attributeIndex + 1} needs a value.`,
+                );
+              }
+              return [key, value] as const;
+            }),
+          );
 
         validateLangExtractAttributes(
           attributes,

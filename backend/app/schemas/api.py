@@ -50,7 +50,10 @@ class JobResponse(BaseModel):
     template_version_id: int
     provider_override: LLMProviderSettings | None = None
     status: str
-    error_message: str | None
+    error_message: str | None = None
+    progress_stage: str | None = None
+    progress_pct: int = 0
+    attempt_count: int = 0
     created_at: datetime
     updated_at: datetime
 

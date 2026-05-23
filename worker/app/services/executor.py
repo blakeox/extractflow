@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
-from extraction_core import FormulaEngine, topologically_sort_calculated_fields
-from extraction_core.formulas import FormulaValidationError
+from extraction_core import evaluate_calculated_fields
+from extraction_core.job_progress import (
+    JOB_STAGE_CALCULATING,
+    JOB_STAGE_EXTRACTING,
+    JOB_STAGE_PARSING,
+    JOB_STAGE_VALIDATING,
+)
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import (
     CalculatedFieldResult,
@@ -19,13 +25,17 @@ from app.core.config import settings as app_settings
 from app.services.parser import parse_document
 from app.services.provider import ExtractionProvider
 from app.services.redaction import MASK_CHAR, redact_text
-from app.services.validator import validate_calculated_field, validate_extracted_field
+from app.services.validator import validate_extracted_field
 
 logger = configure_logger("extractflow.worker.executor")
 
 
 def execute_extraction(
-    document_path: str, document_id: int, template_definition: dict, provider_override: dict | None = None
+    document_path: str,
+    document_id: int,
+    template_definition: dict,
+    provider_override: dict | None = None,
+    progress_reporter: Callable[[str], None] | None = None,
 ) -> dict:
     template = ExtractionTemplate.model_validate(template_definition)
     settings = (
@@ -46,6 +56,8 @@ def execute_extraction(
             "redaction is disabled. Enable PRESIDIO_REDACTION_ENABLED or disable "
             "REQUIRE_REDACTION_FOR_EXTERNAL_PROCESSING."
         )
+    if progress_reporter:
+        progress_reporter(JOB_STAGE_PARSING)
     text = parse_document(document_path)
     redaction_note: str | None = None
     if settings.allow_external_processing and app_settings.require_redaction_for_external_processing:
@@ -70,10 +82,14 @@ def execute_extraction(
             span_count=redaction_result.span_count,
             entity_counts=redaction_result.entity_counts,
         )
+    if progress_reporter:
+        progress_reporter(JOB_STAGE_EXTRACTING)
     provider = ExtractionProvider()
     provider_results = provider.extract(text, template, settings)
     if settings.allow_external_processing and app_settings.require_redaction_for_external_processing:
         provider_results = sanitize_redacted_provider_results(provider_results)
+    if progress_reporter:
+        progress_reporter(JOB_STAGE_VALIDATING)
     extracted_fields, document_level_notes = reconcile_extracted_fields(
         template.extracted_fields,
         provider_results,
@@ -83,50 +99,9 @@ def execute_extraction(
     if redaction_note:
         document_level_notes.append(redaction_note)
 
-    engine = FormulaEngine()
-    context = {field.field_name: field.normalized_value for field in extracted_fields}
-    calculated_fields: list[CalculatedFieldResult] = []
-    for definition in topologically_sort_calculated_fields(template.calculated_fields):
-        errors: list[str] = []
-        value = None
-        try:
-            engine.validate_formula(
-                definition.formula, set(context.keys()) | {item.name for item in template.calculated_fields}
-            )
-            value = engine.evaluate(definition.formula, context)
-        except ZeroDivisionError:
-            errors.append("Division by zero.")
-        except FormulaValidationError as exc:
-            errors.append(str(exc))
-
-        display_value = ""
-        if definition.output_type.value == "currency" and isinstance(value, int | float):
-            currency = (definition.format.currency if definition.format else "USD") or "USD"
-            value = {"amount": round(float(value), 2), "currency": currency}
-            display_value = f"{currency} {value['amount']:,.2f}"
-        elif value is not None:
-            display_value = str(value)
-
-        result = CalculatedFieldResult(
-            field_name=definition.name,
-            label=definition.label,
-            output_type=definition.output_type,
-            formula=definition.formula,
-            depends_on=definition.depends_on,
-            calculated_value=value,
-            display_value=display_value,
-            validation_errors=errors,
-            calculation_notes="Deterministic formula evaluation.",
-            requires_review=bool(errors) or definition.requires_review,
-        )
-        result = validate_calculated_field(
-            result,
-            allow_null=definition.validation.allow_null,
-            min_value=definition.validation.min,
-            max_value=definition.validation.max,
-        )
-        calculated_fields.append(result)
-        context[definition.name] = value
+    if progress_reporter:
+        progress_reporter(JOB_STAGE_CALCULATING)
+    calculated_fields = evaluate_calculated_fields(template.calculated_fields, extracted_fields)
 
     summary = ExtractionValidationSummary(
         document_id=str(document_id),

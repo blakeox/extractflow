@@ -96,3 +96,35 @@ def test_topological_sort_detects_cycles() -> None:
 
     with pytest.raises(FormulaValidationError, match="Circular dependency"):
         topologically_sort_calculated_fields(fields)
+
+
+def test_topological_sort_uses_formula_references_over_stale_depends_on_metadata() -> None:
+    fields = [
+        CalculatedFieldDefinition(
+            name="buffered_amount",
+            label="Buffered Amount",
+            description="Buffered amount.",
+            output_type=DataType.NUMBER,
+            formula="base_amount + 1",
+            depends_on=[],
+        ),
+        CalculatedFieldDefinition(
+            name="final_amount",
+            label="Final Amount",
+            description="Final amount.",
+            output_type=DataType.NUMBER,
+            formula="buffered_amount + 1",
+            depends_on=[],
+        ),
+    ]
+
+    ordered = topologically_sort_calculated_fields(list(reversed(fields)))
+
+    assert [field.name for field in ordered] == ["buffered_amount", "final_amount"]
+
+
+def test_formula_engine_rejects_method_calls_on_field_values() -> None:
+    engine = FormulaEngine()
+
+    with pytest.raises(FormulaValidationError, match="Only built-in formula helper functions are callable."):
+        engine.evaluate("total_amount.get('amount')", {"total_amount": {"amount": 12}})

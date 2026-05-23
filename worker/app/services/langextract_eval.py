@@ -132,7 +132,7 @@ def run_eval_case(case: LangExtractEvalCase) -> LangExtractEvalCaseResult:
             document_path=str(document_path),
             document_id=1,
             template_definition=template_definition,
-            provider_override=provider_override,
+            provider_override=case.provider_override,
         )
 
     mismatches: list[LangExtractEvalMismatch] = []

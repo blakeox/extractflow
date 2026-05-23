@@ -14,6 +14,7 @@ from extraction_core.langextract import (
     uses_langextract_provider,
 )
 from extraction_core.models import (
+    DataType,
     ExtractionFieldDefinition,
     ExtractionFieldResult,
     ExtractionTemplate,
@@ -365,7 +366,7 @@ def build_langextract_result(
         return ExtractionFieldResult(
             field_name=extraction.extraction_class,
             label=extraction.extraction_class,
-            data_type="text",
+            data_type=DataType.TEXT,
             extracted_value=extracted_text,
             normalized_value={"value": extracted_text} if extracted_text else None,
             confidence_score=1.0 if grounded else 0.0,
