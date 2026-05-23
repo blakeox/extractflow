@@ -298,6 +298,20 @@ def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depen
     document = db.query(Document).filter(Document.id == job.document_id, Document.tenant_id == tenant_id).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found.")
+    template_version = (
+        db.query(TemplateVersion)
+        .filter(TemplateVersion.id == job.template_version_id, TemplateVersion.tenant_id == tenant_id)
+        .first()
+    )
+    if not template_version:
+        raise HTTPException(status_code=404, detail="Template version not found.")
+    template_definition = ExtractionTemplate.model_validate(template_version.definition)
+    effective_provider = (
+        LLMProviderSettings.model_validate(job.provider_override)
+        if job.provider_override
+        else template_definition.llm_provider_settings
+    )
+    validate_job_provider(template_definition, effective_provider)
     retry_failed_job(job, document)
     db.commit()
     db.refresh(job)
