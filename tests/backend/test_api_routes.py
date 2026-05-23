@@ -2619,6 +2619,71 @@ def test_retry_failed_job_requeues_work(client) -> None:
         assert refreshed_document.status == "queued"
 
 
+def test_retry_failed_job_rejects_external_provider_when_processing_disabled(client, monkeypatch) -> None:
+    monkeypatch.setattr("app.api.routes.settings.allow_external_processing", False)
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="failed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(
+            document_id=document.id,
+            template_version_id=version.id,
+            status="failed",
+            error_message="Provider timed out.",
+            progress_stage="failed",
+            progress_pct=0,
+            attempt_count=2,
+            provider_override={
+                "mode": "cloud",
+                "provider_type": "openai",
+                "provider_label": "OpenAI",
+                "api_style": "openai_compatible",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_env_var": "OPENAI_API_KEY",
+                "api_key_required": True,
+                "model": "gpt-4.1",
+                "temperature": 0.1,
+                "max_tokens": 4000,
+                "supports_json_mode": True,
+                "allow_external_processing": True,
+                "timeout_seconds": 120,
+                "retry_count": 2,
+                "chunk_size": 16000,
+            },
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+        document_id = document.id
+
+    response = client.post(f"/api/jobs/{job_id}/retry")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "This deployment disables external provider processing. Choose a local provider or enable "
+        "ALLOW_EXTERNAL_PROCESSING."
+    )
+
+    with SessionLocal() as db:
+        refreshed_job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).one()
+        refreshed_document = db.query(Document).filter(Document.id == document_id).one()
+        assert refreshed_job.status == "failed"
+        assert refreshed_document.status == "failed"
+
+
 def test_retry_job_rejects_non_failed_status(client) -> None:
     template_definition = build_template_definition()
 
