@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import tempfile
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import duckdb
 from pydantic import BaseModel, Field, model_validator
 
 from app.services.executor import execute_extraction
@@ -106,15 +107,32 @@ def run_eval_cases(cases: list[LangExtractEvalCase]) -> LangExtractEvalReport:
     )
 
 
+def apply_eval_runtime_overrides(template_definition: dict[str, Any]) -> dict[str, Any]:
+    base_url = os.environ.get("LANGEXTRACT_EVAL_BASE_URL")
+    model = os.environ.get("LANGEXTRACT_EVAL_MODEL")
+    if not base_url and not model:
+        return template_definition
+
+    definition = deepcopy(template_definition)
+    settings = definition.setdefault("llm_provider_settings", {})
+    if base_url:
+        settings["base_url"] = base_url
+    if model:
+        settings["model"] = model
+    return definition
+
+
 def run_eval_case(case: LangExtractEvalCase) -> LangExtractEvalCaseResult:
+    template_definition = apply_eval_runtime_overrides(case.template_definition)
+
     with tempfile.TemporaryDirectory(prefix="langextract-eval-") as temp_dir:
         document_path = Path(temp_dir) / "document.txt"
         document_path.write_text(case.document_text, encoding="utf-8")
         summary = execute_extraction(
             document_path=str(document_path),
             document_id=1,
-            template_definition=case.template_definition,
-            provider_override=case.provider_override,
+            template_definition=template_definition,
+            provider_override=provider_override,
         )
 
     mismatches: list[LangExtractEvalMismatch] = []
@@ -330,6 +348,8 @@ def store_eval_report(
     source_path: Path,
     label: str | None = None,
 ) -> str:
+    import duckdb
+
     connection = duckdb.connect(str(database_path))
     try:
         connection.execute(
