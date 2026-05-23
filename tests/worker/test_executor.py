@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -28,6 +29,11 @@ from extraction_core.models import (
 from pydantic import ValidationError
 
 from tests.support.sample_data import build_template_definition
+
+_skip_docling_mps = pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="Docling PDF/image OCR integration fails on Apple MPS (float64); runs in Linux CI.",
+)
 
 
 def write_minimal_docx(path, *, lines: list[str]) -> None:
@@ -834,6 +840,7 @@ def test_parse_docx_with_real_docling_dependency(monkeypatch, tmp_path) -> None:
     assert "Total 1200" in parsed
 
 
+@_skip_docling_mps
 def test_parse_pdf_with_real_docling_dependency(monkeypatch, tmp_path) -> None:
     pdf_path = tmp_path / "invoice.pdf"
     write_minimal_pdf(pdf_path, lines=["Invoice", "Vendor Name Acme Corp", "Total 1200"])
@@ -887,6 +894,7 @@ def test_image_ocr_runtime_dependency_is_installed() -> None:
     assert onnxruntime.__version__
 
 
+@_skip_docling_mps
 def test_parse_image_with_real_docling_ocr_dependency(monkeypatch, tmp_path) -> None:
     from PIL import Image, ImageDraw
 

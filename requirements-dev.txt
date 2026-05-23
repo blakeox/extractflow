@@ -6,3 +6,4 @@ pytest-cov==6.0.0
 pyright==1.1.409
 shellcheck-py==0.11.0.1
 duckdb==1.4.0
+pip-audit==2.10.0

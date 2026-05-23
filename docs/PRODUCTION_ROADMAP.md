@@ -132,9 +132,10 @@ Or create a project manually at [github.com/blakeox?tab=projects](https://github
 
 ## Good first issues (starter tasks)
 
+Completed: [#57](https://github.com/blakeox/extractflow/issues/57) (golden-set eval CI), [#60](https://github.com/blakeox/extractflow/issues/60) (mock provider warning).
+
 | Issue                                                   | Title                                          |
 | ------------------------------------------------------- | ---------------------------------------------- |
-| [#60](https://github.com/blakeox/extractflow/issues/60) | Warn when mock provider is active              |
 | [#65](https://github.com/blakeox/extractflow/issues/65) | Block run when LangExtract examples incomplete |
 | [#71](https://github.com/blakeox/extractflow/issues/71) | Cancel queued extraction jobs                  |
 | [#73](https://github.com/blakeox/extractflow/issues/73) | Job list filters and deep links                |
