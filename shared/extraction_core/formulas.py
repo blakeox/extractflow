@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import math
+import re
 from datetime import date, datetime
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any
 
 from dateutil import parser as date_parser
@@ -11,6 +13,9 @@ from dateutil import parser as date_parser
 
 class FormulaValidationError(Exception):
     pass
+
+
+IF_CALL_PATTERN = re.compile(r"(?<![\w.])if\(")
 
 
 class AttrView:
@@ -209,12 +214,14 @@ class SafeEvaluator(ast.NodeVisitor):
         raise FormulaValidationError(f"Unknown identifier: {node.id}")
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
+        if node.attr.startswith("_"):
+            raise FormulaValidationError("Private attribute access is not allowed in formulas.")
         value = self.visit(node.value)
         if isinstance(value, AttrView):
             return getattr(value, node.attr)
         if isinstance(value, dict):
             return value.get(node.attr)
-        return getattr(value, node.attr)
+        raise FormulaValidationError("Attribute access is only supported on structured field values.")
 
     def visit_List(self, node: ast.List) -> Any:
         return [self.visit(element) for element in node.elts]
@@ -253,9 +260,15 @@ class SafeEvaluator(ast.NodeVisitor):
         return self.visit(node.body) if self.visit(node.test) else self.visit(node.orelse)
 
     def visit_Call(self, node: ast.Call) -> Any:
+        if not isinstance(node.func, ast.Name) or node.func.id not in ALLOWED_FUNCTIONS:
+            raise FormulaValidationError("Only built-in formula helper functions are callable.")
         fn = self.visit(node.func)
         args = [self.visit(arg) for arg in node.args]
-        kwargs = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+        kwargs: dict[str, Any] = {}
+        for kw in node.keywords:
+            if kw.arg is None:
+                raise FormulaValidationError("Keyword argument unpacking is not supported.")
+            kwargs[kw.arg] = self.visit(kw.value)
         return fn(*args, **kwargs)
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
@@ -285,7 +298,24 @@ class SafeEvaluator(ast.NodeVisitor):
 
 
 def normalize_formula(formula: str) -> str:
-    return formula.replace("if(", "iff(")
+    return IF_CALL_PATTERN.sub("iff(", formula)
+
+
+@lru_cache(maxsize=256)
+def compile_formula(formula: str) -> ast.Expression:
+    normalized = normalize_formula(formula)
+    try:
+        tree = ast.parse(normalized, mode="eval")
+    except SyntaxError as exc:
+        raise FormulaValidationError(f"Invalid formula syntax: {exc.msg}") from None
+    if not isinstance(tree, ast.Expression):
+        raise FormulaValidationError("Formula must be a single expression.")
+    return tree
+
+
+def collect_formula_references(formula: str, available_fields: set[str]) -> set[str]:
+    tree = compile_formula(formula)
+    return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id in available_fields}
 
 
 def detect_formula_cycles(calculated_fields: list[Any]) -> None:
@@ -312,6 +342,7 @@ def detect_formula_cycles(calculated_fields: list[Any]) -> None:
 def topologically_sort_calculated_fields(calculated_fields: list[Any]) -> list[Any]:
     detect_formula_cycles(calculated_fields)
     items = {field.name: field for field in calculated_fields}
+    calculated_names = set(items.keys())
     visited: set[str] = set()
     ordered: list[Any] = []
 
@@ -319,7 +350,11 @@ def topologically_sort_calculated_fields(calculated_fields: list[Any]) -> list[A
         if name in visited:
             return
         field = items[name]
-        for dependency in field.depends_on:
+        try:
+            dependencies = collect_formula_references(field.formula, calculated_names)
+        except FormulaValidationError:
+            dependencies = {dependency for dependency in field.depends_on if dependency in calculated_names}
+        for dependency in dependencies:
             if dependency in items:
                 visit(dependency)
         visited.add(name)
@@ -333,16 +368,14 @@ def topologically_sort_calculated_fields(calculated_fields: list[Any]) -> list[A
 
 class FormulaEngine:
     def validate_formula(self, formula: str, available_fields: set[str]) -> None:
-        normalized = normalize_formula(formula)
-        tree = ast.parse(normalized, mode="eval")
+        tree = compile_formula(formula)
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and node.id not in ALLOWED_FUNCTIONS and node.id not in available_fields:
                 raise FormulaValidationError(f"Unknown field reference: {node.id}")
 
     def evaluate(self, formula: str, context: dict[str, Any]) -> Any:
-        normalized = normalize_formula(formula)
         wrapped_context = {key: wrap_value(value) for key, value in context.items()}
-        tree = ast.parse(normalized, mode="eval")
+        tree = compile_formula(formula)
         evaluator = SafeEvaluator(wrapped_context)
         value = evaluator.visit(tree)
         return unwrap_value(value)

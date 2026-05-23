@@ -42,7 +42,7 @@ test("keeps a failed extraction in the workspace and allows rerun recovery", asy
     0,
   );
 
-  await page.getByRole("button", { name: "Run extraction" }).click();
+  await page.getByRole("button", { name: "Retry extraction" }).click();
 
   await expect(
     page.getByRole("heading", { name: "1 fields need review" }),

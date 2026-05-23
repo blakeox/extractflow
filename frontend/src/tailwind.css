@@ -1,0 +1,272 @@
+@layer theme, base, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+:root {
+  color-scheme: light;
+  --ds-font-sans: "IBM Plex Sans", "Inter", "Segoe UI", sans-serif;
+  --ds-font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-family: var(--ds-font-sans);
+  line-height: 1.4;
+  font-weight: 400;
+  color: #19233d;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(103, 80, 255, 0.09),
+      transparent 26%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(70, 146, 255, 0.08),
+      transparent 28%
+    ),
+    #f5f7fc;
+  --ds-color-accent: #4d60ff;
+  --ds-color-accent-strong: #3646d7;
+  --ds-color-accent-soft: rgba(77, 96, 255, 0.1);
+  --ds-color-success: #1f9f67;
+  --ds-color-success-soft: rgba(31, 159, 103, 0.1);
+  --ds-color-warning: #d18317;
+  --ds-color-warning-soft: rgba(209, 131, 23, 0.12);
+  --ds-color-danger: #d04656;
+  --ds-color-danger-ink: #b42318;
+  --ds-color-danger-soft: rgba(208, 70, 86, 0.12);
+  --ds-color-info: #3c78ff;
+  --ds-color-info-soft: rgba(60, 120, 255, 0.12);
+  --ds-color-neutral-soft: rgba(122, 138, 179, 0.12);
+  --ds-color-surface-page: #f5f7fc;
+  --ds-color-surface-panel: rgba(255, 255, 255, 0.88);
+  --ds-color-surface-card: rgba(255, 255, 255, 0.94);
+  --ds-color-surface-inset: #f9faff;
+  --ds-color-border-subtle: rgba(122, 138, 179, 0.14);
+  --ds-color-border-default: rgba(122, 138, 179, 0.18);
+  --ds-color-border-strong: rgba(122, 138, 179, 0.28);
+  --ds-color-text: #19233d;
+  --ds-color-text-soft: #627093;
+  --ds-color-text-faint: #8a96b3;
+  --accent: var(--ds-color-accent);
+  --accent-strong: var(--ds-color-accent-strong);
+  --accent-rgb: 77 96 255;
+  --accent-strong-rgb: 54 70 215;
+  --accent-soft: var(--ds-color-accent-soft);
+  --success: var(--ds-color-success);
+  --success-rgb: 31 159 103;
+  --success-soft: var(--ds-color-success-soft);
+  --warning: var(--ds-color-warning);
+  --warning-rgb: 209 131 23;
+  --warning-soft: var(--ds-color-warning-soft);
+  --danger: var(--ds-color-danger);
+  --danger-rgb: 208 70 86;
+  --danger-soft: var(--ds-color-danger-soft);
+  --info: var(--ds-color-info);
+  --info-rgb: 60 120 255;
+  --info-soft: var(--ds-color-info-soft);
+  --surface-page: var(--ds-color-surface-page);
+  --surface-panel: var(--ds-color-surface-panel);
+  --surface-card: var(--ds-color-surface-card);
+  --surface-inset: var(--ds-color-surface-inset);
+  --border-subtle: var(--ds-color-border-subtle);
+  --border-default: var(--ds-color-border-default);
+  --border-strong: var(--ds-color-border-strong);
+  --text: var(--ds-color-text);
+  --text-soft: var(--ds-color-text-soft);
+  --text-faint: var(--ds-color-text-faint);
+  --ds-text-size-xs: 0.76rem;
+  --ds-text-size-sm: 0.88rem;
+  --ds-text-size-md: 0.96rem;
+  --ds-text-size-lg: 1.1rem;
+  --ds-text-size-xl: 1.45rem;
+  --text-xs: var(--ds-text-size-xs);
+  --text-sm: var(--ds-text-size-sm);
+  --text-md: var(--ds-text-size-md);
+  --text-lg: var(--ds-text-size-lg);
+  --text-xl: var(--ds-text-size-xl);
+  --text-display: clamp(2rem, 3.2vw, 2.85rem);
+  --ds-space-1: 0.25rem;
+  --ds-space-2: 0.5rem;
+  --ds-space-3: 0.75rem;
+  --ds-space-4: 1rem;
+  --ds-space-5: 1.25rem;
+  --ds-space-6: 1.5rem;
+  --ds-space-8: 2rem;
+  --space-1: var(--ds-space-1);
+  --space-2: var(--ds-space-2);
+  --space-3: var(--ds-space-3);
+  --space-4: var(--ds-space-4);
+  --space-5: var(--ds-space-5);
+  --space-6: var(--ds-space-6);
+  --space-8: var(--ds-space-8);
+  --ds-radius-sm: 12px;
+  --ds-radius-md: 14px;
+  --ds-radius-lg: 18px;
+  --ds-radius-xl: 22px;
+  --radius-sm: var(--ds-radius-sm);
+  --radius-md: var(--ds-radius-md);
+  --radius-lg: var(--ds-radius-lg);
+  --radius-xl: var(--ds-radius-xl);
+  --radius-pill: 999px;
+  --control-height-sm: 38px;
+  --control-height-md: 44px;
+  --shadow-none: none;
+  --ds-shadow-sm: 0 10px 24px rgba(23, 37, 84, 0.06);
+  --ds-shadow-md: 0 18px 48px rgba(23, 37, 84, 0.08);
+  --ds-shadow-primary: 0 12px 24px rgba(77, 96, 255, 0.18);
+  --ds-focus-ring-color: rgba(77, 96, 255, 0.12);
+  --shadow-sm: var(--ds-shadow-sm);
+  --shadow-md: var(--ds-shadow-md);
+  --focus-ring: 0 0 0 4px var(--ds-focus-ring-color);
+  --bg: var(--surface-page);
+  --surface: var(--surface-panel);
+  --surface-strong: #ffffff;
+  --surface-muted: var(--surface-inset);
+  --line: var(--border-default);
+  --line-strong: var(--border-strong);
+  --shadow: var(--shadow-md);
+  --shadow-soft: var(--shadow-sm);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@theme inline {
+  --font-sans: var(--ds-font-sans);
+  --font-mono: var(--ds-font-mono);
+
+  --color-brand: var(--ds-color-accent);
+  --color-brand-strong: var(--ds-color-accent-strong);
+  --color-brand-soft: var(--ds-color-accent-soft);
+  --color-success: var(--ds-color-success);
+  --color-success-soft: var(--ds-color-success-soft);
+  --color-warning: var(--ds-color-warning);
+  --color-warning-soft: var(--ds-color-warning-soft);
+  --color-danger: var(--ds-color-danger);
+  --color-danger-ink: var(--ds-color-danger-ink);
+  --color-danger-soft: var(--ds-color-danger-soft);
+  --color-info: var(--ds-color-info);
+  --color-info-soft: var(--ds-color-info-soft);
+  --color-neutral-soft: var(--ds-color-neutral-soft);
+  --color-page: var(--ds-color-surface-page);
+  --color-panel: var(--ds-color-surface-panel);
+  --color-card: var(--ds-color-surface-card);
+  --color-inset: var(--ds-color-surface-inset);
+  --color-border-subtle: var(--ds-color-border-subtle);
+  --color-border: var(--ds-color-border-default);
+  --color-border-strong: var(--ds-color-border-strong);
+  --color-ink: var(--ds-color-text);
+  --color-muted: var(--ds-color-text-soft);
+  --color-faint: var(--ds-color-text-faint);
+
+  --text-xs: var(--ds-text-size-xs);
+  --text-sm: var(--ds-text-size-sm);
+  --text-base: var(--ds-text-size-md);
+  --text-lg: var(--ds-text-size-lg);
+  --text-xl: var(--ds-text-size-xl);
+
+  --spacing-1: var(--ds-space-1);
+  --spacing-2: var(--ds-space-2);
+  --spacing-3: var(--ds-space-3);
+  --spacing-4: var(--ds-space-4);
+  --spacing-5: var(--ds-space-5);
+  --spacing-6: var(--ds-space-6);
+  --spacing-8: var(--ds-space-8);
+
+  --radius-sm: var(--ds-radius-sm);
+  --radius-md: var(--ds-radius-md);
+  --radius-lg: var(--ds-radius-lg);
+  --radius-xl: var(--ds-radius-xl);
+
+  --shadow-sm: var(--ds-shadow-sm);
+  --shadow-md: var(--ds-shadow-md);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    margin: 0;
+    min-height: 100%;
+  }
+
+  body {
+    min-height: 100vh;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  input,
+  textarea,
+  select {
+    width: 100%;
+    min-height: var(--control-height-md);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 0.85rem 1rem;
+    background: var(--surface-strong);
+    color: var(--text);
+    outline: none;
+    transition:
+      border-color 140ms ease,
+      box-shadow 140ms ease;
+  }
+
+  input:focus,
+  textarea:focus,
+  select:focus,
+  button:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: var(--focus-ring);
+    outline: none;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--text-faint);
+  }
+
+  button:disabled,
+  input:disabled,
+  textarea:disabled,
+  select:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  textarea {
+    resize: vertical;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { MOCK_PROVIDER_WARNING_DISMISS_KEY } from "./lib/mock-provider";
 
 const invokeMock = vi.fn();
 
@@ -125,6 +126,80 @@ describe("App", () => {
       screen.getByRole("heading", { name: "New extraction" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Upload PDF or source file")).toBeInTheDocument();
+  });
+
+  it("shows a production warning when the bootstrap mock provider is active", async () => {
+    window.localStorage.removeItem(MOCK_PROVIDER_WARNING_DISMISS_KEY);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/health"))
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider")) {
+          return Promise.resolve(
+            jsonResponse({
+              mode: "local",
+              provider_type: "mock",
+              provider_label: "Mock Extractor",
+              api_style: "mock",
+              base_url: null,
+              model: "mock-extractor",
+              temperature: 0.1,
+              max_tokens: 6000,
+              supports_json_mode: true,
+              allow_external_processing: false,
+              api_key_required: false,
+              timeout_seconds: 120,
+              retry_count: 2,
+              chunk_size: 16000,
+            }),
+          );
+        }
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/providers/custom"))
+          return Promise.resolve(jsonResponse({ profiles: [] }));
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /Bootstrap mock extractor is active/i,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/Bootstrap mock extractor is active/i),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("keeps the draft step focused when there is only one source", async () => {
@@ -631,7 +706,7 @@ describe("App", () => {
       }),
     );
 
-    const firstRender = render(<App />);
+    const view = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
 
@@ -649,7 +724,7 @@ describe("App", () => {
         screen.getByRole("button", { name: "Dismiss suggestion 1" }),
       ).toHaveFocus();
     });
-    firstRender.unmount();
+    view.unmount();
 
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Schemas" }));
@@ -3434,19 +3509,15 @@ describe("App", () => {
       screen.getByRole("button", { name: "Hide advanced provider profiles" }),
     ).toHaveAttribute("aria-expanded", "true");
 
-    const customProviderSection = (
-      await screen.findAllByRole("heading", {
-        name: "Advanced provider profiles",
-      })
-    )[0].closest("section");
-    expect(customProviderSection).not.toBeNull();
-    const customProviderScope = within(customProviderSection as HTMLElement);
+    await screen.findByRole("heading", {
+      name: "Advanced provider profiles",
+    });
 
-    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+    fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "" },
     });
     fireEvent.click(
-      customProviderScope.getByRole("button", {
+      screen.getByRole("button", {
         name: "Set custom provider as default",
       }),
     );
@@ -3534,22 +3605,18 @@ describe("App", () => {
       screen.getByRole("button", { name: "Open advanced provider profiles" }),
     );
 
-    const customProviderSection = (
-      await screen.findAllByRole("heading", {
-        name: "Advanced provider profiles",
-      })
-    )[0].closest("section");
-    expect(customProviderSection).not.toBeNull();
-    const customProviderScope = within(customProviderSection as HTMLElement);
+    await screen.findByRole("heading", {
+      name: "Advanced provider profiles",
+    });
 
-    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+    fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "QA Gateway" },
     });
-    fireEvent.change(customProviderScope.getByLabelText("Base URL"), {
+    fireEvent.change(screen.getByLabelText("Base URL"), {
       target: { value: "https://gateway.example/v1" },
     });
     fireEvent.click(
-      customProviderScope.getByRole("button", {
+      screen.getByRole("button", {
         name: "Probe custom provider",
       }),
     );
@@ -3643,26 +3710,20 @@ describe("App", () => {
       screen.getByRole("button", { name: "Open advanced provider profiles" }),
     );
 
-    const customProviderSection = (
-      await screen.findAllByRole("heading", {
-        name: "Advanced provider profiles",
-      })
-    )[0].closest("section");
-    expect(customProviderSection).not.toBeNull();
-    const customProviderScope = within(customProviderSection as HTMLElement);
+    await screen.findByRole("heading", {
+      name: "Advanced provider profiles",
+    });
 
-    fireEvent.change(customProviderScope.getByLabelText("Display label"), {
+    fireEvent.change(screen.getByLabelText("Display label"), {
       target: { value: "QA Gateway" },
     });
-    fireEvent.change(customProviderScope.getByLabelText("Base URL"), {
+    fireEvent.change(screen.getByLabelText("Base URL"), {
       target: { value: "https://gateway.example/v1" },
     });
-    fireEvent.change(customProviderScope.getByLabelText("API key env var"), {
+    fireEvent.change(screen.getByLabelText("API key env var"), {
       target: { value: "OPENAI_API_KEY" },
     });
-    fireEvent.click(
-      customProviderScope.getByRole("button", { name: "Save profile" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
     expect(
       await screen.findByText(

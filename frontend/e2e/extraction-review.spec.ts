@@ -68,5 +68,9 @@ test("uploads a document, runs extraction, and saves a review decision", async (
   await expect(
     page.getByRole("button", { name: "Export Excel" }),
   ).toBeVisible();
-  await expect(page.getByText("Acme Company")).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Vendor Name.*Acme Company.*Valid/i,
+    }),
+  ).toBeVisible();
 });
