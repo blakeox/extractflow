@@ -2506,6 +2506,9 @@ describe("App", () => {
     const runButton = await screen.findByRole("button", {
       name: "Run extraction",
     });
+    await waitFor(() => {
+      expect(runButton).toBeEnabled();
+    });
     fireEvent.click(runButton);
 
     await waitFor(() => {
@@ -2535,6 +2538,9 @@ describe("App", () => {
               ? input.toString()
               : input.url;
 
+        if (url.endsWith("/health")) {
+          return Promise.resolve(jsonResponse({ status: "ok" }));
+        }
         if (url.endsWith("/templates")) {
           return Promise.resolve(
             jsonResponse([
@@ -2667,6 +2673,9 @@ describe("App", () => {
 
     const runButton = await screen.findByRole("button", {
       name: "Run extraction",
+    });
+    await waitFor(() => {
+      expect(runButton).toBeEnabled();
     });
     fireEvent.click(runButton);
 

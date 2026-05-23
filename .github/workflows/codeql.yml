@@ -40,11 +40,11 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Initialize CodeQL
         id: codeql_init
-        uses: github/codeql-action/init@0daab03d71ff584ef619d027a3fd9146679c5d84
+        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa
         with:
           languages: ${{ matrix.language }}
         continue-on-error: true
@@ -52,13 +52,13 @@ jobs:
       - name: Autobuild
         id: codeql_autobuild
         if: steps.codeql_init.outcome == 'success'
-        uses: github/codeql-action/autobuild@0daab03d71ff584ef619d027a3fd9146679c5d84
+        uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa
         continue-on-error: true
 
       - name: Analyze
         id: codeql_analyze
         if: steps.codeql_init.outcome == 'success'
-        uses: github/codeql-action/analyze@0daab03d71ff584ef619d027a3fd9146679c5d84
+        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa
         continue-on-error: true
 
       - name: Note unsupported CodeQL upload

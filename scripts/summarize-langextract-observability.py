@@ -148,10 +148,7 @@ def summarize_logs(paths: list[str]) -> dict[str, Any]:
             "generated_suggestion_total": feedback_totals["generated_suggestion_count"],
             "visible_suggestion_total": feedback_totals["visible_suggestion_count"],
             "dismissed_suggestion_total": feedback_totals["dismissed_suggestion_count"],
-            "skip_totals": {
-                field: feedback_totals[field]
-                for field in FEEDBACK_SKIP_FIELDS
-            },
+            "skip_totals": {field: feedback_totals[field] for field in FEEDBACK_SKIP_FIELDS},
         },
     }
 

@@ -17,13 +17,17 @@ export default defineConfig({
     restoreMocks: true,
     coverage: {
       provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/vite-env.d.ts"],
       reporter: ["text-summary", "json-summary"],
       reportsDirectory: "./test-results/coverage",
       thresholds: {
-        statements: 75,
-        branches: 76,
+        // Vitest 4 V8 coverage uses AST remapping and excludes non-runtime lines,
+        // so thresholds are lower than Vitest 2 reports for the same test suite.
+        statements: 68,
+        branches: 65,
         functions: 62,
-        lines: 75,
+        lines: 68,
       },
     },
   },

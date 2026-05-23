@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class DeploymentMode(str, Enum):
+class DeploymentMode(StrEnum):
     LOCAL = "local"
     HOSTED_SINGLE_TENANT = "hosted_single_tenant"
     SAAS_MULTI_TENANT = "saas_multi_tenant"

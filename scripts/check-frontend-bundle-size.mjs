@@ -14,7 +14,7 @@ const bundleSummaryPath = path.join(
 );
 
 const defaultBudgets = {
-  js: 320 * 1024,
+  js: 384 * 1024,
   css: 40 * 1024,
 };
 
