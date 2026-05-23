@@ -37,6 +37,12 @@ make dev-up
 
 4. Open `http://localhost:3000`.
 
+## GitHub Actions
+
+CI is defined under `.github/workflows/`. The repository must be **public** for standard open source Actions pricing (unlimited minutes on GitHub-hosted runners). While the repo is private, workflows can fail with **no steps run** when the account is out of Actions minutes.
+
+See [docs/CI_AND_ACTIONS.md](docs/CI_AND_ACTIONS.md) for visibility, cost profile, and troubleshooting.
+
 ## Verification
 
 Run the narrowest truthful slice for your change before opening a pull request.

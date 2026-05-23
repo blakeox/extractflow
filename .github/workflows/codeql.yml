@@ -4,7 +4,15 @@ on:
   push:
     branches:
       - main
+      - master
   pull_request:
+    branches:
+      - main
+      - master
+      - dev
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   schedule:
     - cron: "0 9 * * 1"
   workflow_dispatch:
