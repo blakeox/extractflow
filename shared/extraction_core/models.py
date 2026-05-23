@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from jsonschema import Draft202012Validator, SchemaError
@@ -20,7 +20,7 @@ from .langextract import (
 )
 
 
-class DataType(str, Enum):
+class DataType(StrEnum):
     TEXT = "text"
     PARAGRAPH = "paragraph"
     NUMBER = "number"
