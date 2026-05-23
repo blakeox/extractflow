@@ -10,6 +10,59 @@ ExtractFlow is open source for **companies self-hosting** the stack. Planned wor
 - Do not skip **P0** (extraction quality) before claiming production deployment work.
 - Regenerate issues after editing the roadmap script: `SKIP_MILESTONES=1 ./scripts/create-production-roadmap-issues.sh` (avoid duplicates).
 
+## Branch workflow (`dev` → `master`)
+
+Day-to-day work happens on **`dev`**. **`master`** is the release branch (what you ship / tag).
+
+| Branch   | Role                                                              |
+| -------- | ----------------------------------------------------------------- |
+| `dev`    | Integration: features, fixes, dependency batches, docs            |
+| `master` | Release line: merge from `dev` when you want a shippable snapshot |
+
+### Daily work
+
+```bash
+git checkout dev
+git pull origin dev
+# edit, then:
+npm run verify:pre-commit   # or verify:pre-push before push
+git add … && git commit -m "…"
+git push origin dev
+```
+
+Use a short-lived feature branch off `dev` if you prefer review before landing on `dev`:
+
+```bash
+git checkout -b feat/my-change dev
+# … commit …
+git push -u origin feat/my-change
+gh pr create --base dev --head feat/my-change
+```
+
+Repository rules on `dev` require **linear history** (no merge commits on push). Rebase feature branches onto `dev` before merging.
+
+### Promote `dev` to `master`
+
+After `dev` is green locally and on CI:
+
+```bash
+./scripts/release-dev-to-master.sh
+```
+
+Review the GitHub PR into `master`, wait for required checks, then **squash merge**.
+
+Then align `dev` with the release tip:
+
+```bash
+./scripts/sync-master-to-dev.sh
+```
+
+Merge that follow-up PR so both branches stay in sync.
+
+### Tags and releases
+
+Create version tags from **`master`** after the release PR merges (for example `v0.2.0`).
+
 ## Ground rules
 
 - Open an issue or draft pull request before large feature work.
