@@ -1,63 +1,40 @@
-# GitHub Actions and open source CI
+# GitHub Actions and CI
 
-## Why CI was failing with zero steps
+## Repository visibility
 
-`extractflow` is currently a **private** repository. On private repos, GitHub Actions uses your account or organization **minutes quota** (typically 2,000 minutes/month on Free). When quota is exhausted or a spending limit blocks usage, jobs are **queued and then fail immediately** with **no runner assigned** and **0 workflow steps** executed.
+`extractflow` is a **public** repository. GitHub-hosted runners are free for public repos, and CodeQL plus dependency review run without Advanced Security on private.
 
-That failure mode looks like a broken workflow but is usually **billing / visibility**, not a bad `test.yml`.
+If the repo is ever switched back to private, Actions consume account minutes and some security features may require Advanced Security. See [GitHub billing for Actions](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions).
 
-## Open source fix: make the repository public
+## What runs in CI
 
-For a **public** open source project, standard GitHub-hosted runners (`ubuntu-latest`, etc.) are **free and unlimited** for public repositories. You should not hit the same private-repo minutes wall for normal CI.
+| Workflow            | When                                                                  | Purpose                                    |
+| ------------------- | --------------------------------------------------------------------- | ------------------------------------------ |
+| `CI` (`test.yml`)   | PR + push to `main` / `dev` / `master` (non-doc paths)                | Tests, secret scan, dependency audits, E2E |
+| `Secret Scan`       | Same branches as CI (standalone job for branch protection check name) | `scripts/scan-secrets.py`                  |
+| `CodeQL`            | PR + push to `main` / `dev` / `master`; weekly schedule               | Static analysis (JS/TS + Python)           |
+| `Dependency Review` | Pull requests only                                                    | Block vulnerable dependency changes        |
+| `LangExtract Eval`  | Path-filtered; nightly Ollama eval on public repos only               | Golden-set validate / optional live eval   |
+| `Release Gate`      | Version tags / manual                                                 | Release verification                       |
 
-To switch visibility (repo owner only):
+Expensive jobs are path-filtered or gated so doc-only changes and private-repo nightlies do not burn minutes unnecessarily.
 
-```bash
-gh repo edit blakeox/extractflow --visibility public
-```
+## Security scans (local parity)
 
-Or: **GitHub → Settings → General → Danger zone → Change repository visibility → Public**.
-
-After going public:
-
-1. Re-run the latest failed workflows on `dev` (**Actions → workflow → Re-run all jobs**).
-2. Confirm jobs show a runner name and non-zero steps.
-3. CodeQL and dependency review work on public repos without GitHub Advanced Security on private.
-
-Forks of public repos do not charge your minutes for their Actions runs (they use the fork owner's quota if enabled).
-
-## What runs in CI (and cost profile)
-
-| Workflow            | When                                                                | Relative cost                                                   |
-| ------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `CI` (`test.yml`)   | PR + push to `main` / `dev` / `master` (non-doc paths)              | Medium — Python + frontend verify; E2E when frontend job passes |
-| `Secret Scan`       | Same as CI (in-repo script, also in Python job)                     | Low                                                             |
-| `LangExtract Eval`  | Path-filtered PR/push; **nightly Ollama eval only on public repos** | Low validate; **high** nightly (model pull + LLM)               |
-| `CodeQL`            | PR to default branch, push `main`, weekly schedule                  | Medium (matrix: JS + Python)                                    |
-| `Dependency Review` | Pull requests only                                                  | Low                                                             |
-| `Release Gate`      | Version tags / manual                                               | Medium                                                          |
-
-Expensive jobs are gated or path-filtered so doc-only changes and private-repo nightlies do not burn minutes unnecessarily.
-
-## Local parity
-
-Contributors should run the same scripts CI uses so failures are caught before push:
+Run the same checks CI uses before pushing:
 
 ```bash
-npm run verify:pre-commit
-npm run verify:pre-push
+npm run verify:secrets          # tracked files
+npm run verify:dependencies     # npm audit + pip-audit
+npm run verify:pre-push         # full gate (includes both)
 ```
 
 Lefthook runs `verify-pre-commit` on commit; `verify-pre-push` mirrors the heavier pre-push gate.
 
+`pip-audit` is installed via `requirements-dev.txt`. `npm audit` uses the frontend lockfile.
+
 ## Optional: reduce Actions further
 
-If you still want lighter automation on a public repo:
-
-- Require E2E only on `main` / release branches (edit `e2e` job `if:` in `test.yml`).
-- Run CodeQL only on schedule + `main` (already limited on push).
+- Require E2E only on `master` (edit `e2e` job `if:` in `test.yml`).
+- Run CodeQL only on schedule + `master` / `dev` (already limited on push).
 - Disable scheduled LangExtract nightly if you rely on manual `workflow_dispatch` eval runs.
-
-## Monitoring usage (private repos only)
-
-While the repo remains private: **Settings → Billing and plans → Plans and usage → Actions**.

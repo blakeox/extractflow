@@ -57,6 +57,12 @@ jobs:
       - name: Run repository secret scan
         run: ./scripts/scan-secrets.py
 
+      - name: Audit Python dependencies
+        run: |
+          python -m pip_audit \
+            -r backend/requirements.txt \
+            -r worker/requirements.txt
+
       - name: Validate LangExtract golden-set cases
         run: |
           PYTHONPATH=worker:shared python ./scripts/evaluate-langextract.py \
@@ -89,6 +95,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
+
+      - name: Audit npm dependencies
+        run: npm --prefix frontend audit --audit-level=moderate
 
       - name: Run frontend verification
         run: ./scripts/verify-frontend.sh

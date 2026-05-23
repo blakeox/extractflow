@@ -24,6 +24,7 @@
     "lint:frontend": "npm --prefix frontend run lint",
     "verify:secrets": "./scripts/scan-secrets.py",
     "verify:secrets-staged": "./scripts/scan-secrets.py --staged",
+    "verify:dependencies": "./scripts/verify-dependencies.sh",
     "verify:shell": "./scripts/verify-shell.sh",
     "verify:frontend": "./scripts/verify-frontend.sh",
     "verify:python": "./scripts/verify-python.sh",

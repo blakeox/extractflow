@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - dev
   pull_request:
     branches:
       - main
@@ -43,26 +44,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Initialize CodeQL
-        id: codeql_init
         uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa
         with:
           languages: ${{ matrix.language }}
-        continue-on-error: true
 
       - name: Autobuild
-        id: codeql_autobuild
-        if: steps.codeql_init.outcome == 'success'
         uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa
-        continue-on-error: true
 
       - name: Analyze
-        id: codeql_analyze
-        if: steps.codeql_init.outcome == 'success'
         uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa
-        continue-on-error: true
-
-      - name: Note unsupported CodeQL upload
-        if: steps.codeql_init.outcome == 'failure' || steps.codeql_autobuild.outcome == 'failure' || steps.codeql_analyze.outcome == 'failure'
-        run: |
-          echo "Native CodeQL upload is not supported for this repository configuration."
-          echo "Treating this as informational until GitHub code scanning is available for the repository."

@@ -25,7 +25,7 @@ Day-to-day work happens on **`dev`**. **`master`** is the release branch (what y
 git checkout dev
 git pull origin dev
 # edit, then:
-npm run verify:pre-commit   # or verify:pre-push before push
+npm run verify:pre-commit   # or verify:pre-push before push (secrets + dependency audits)
 git add … && git commit -m "…"
 git push origin dev
 ```
