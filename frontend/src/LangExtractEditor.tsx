@@ -11,6 +11,17 @@ import {
   type DraftLangExtractExample,
   type DraftLangExtractExtraction,
 } from "./langextract";
+import { Badge } from "./components/ui/Badge";
+import { Button } from "./components/ui/Button";
+import { Checklist } from "./components/ui/Checklist";
+import { FormGrid } from "./components/ui/FormGrid";
+import { InlineGroup } from "./components/ui/InlineGroup";
+import { MetricLabel } from "./components/ui/MetricLabel";
+import { PanelCard } from "./components/ui/PanelCard";
+import { SectionHeader, SectionStack } from "./components/ui/SectionLayout";
+import { SectionTitle } from "./components/ui/SectionTitle";
+import { SupportingText } from "./components/ui/SupportingText";
+import { cn } from "./lib/cn";
 
 export type LangExtractDraftState = {
   langextract_prompt_description: string;
@@ -304,44 +315,46 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
   }
 
   return (
-    <div className="langextract-editor full-line">
+    <div className="col-span-full grid gap-[0.9rem]">
       <section
-        className="langextract-editor-header"
+        className="flex flex-wrap items-start justify-between gap-4 pt-[0.2rem] pb-[0.1rem]"
         aria-labelledby={introHeadingId}
       >
-        <div className="langextract-editor-heading">
-          <span className="metric-label">Grounded schema examples</span>
-          <h3 id={introHeadingId}>
+        <div className="grid gap-[0.75rem]">
+          <MetricLabel>Grounded schema examples</MetricLabel>
+          <SectionTitle id={introHeadingId}>
             Teach this schema with the smallest set of reliable examples.
-          </h3>
-          <p className="langextract-editor-copy">
+          </SectionTitle>
+          <SupportingText>
             Start with grounded examples that prove the field behavior you want.
             Then promote reviewed suggestions only when they clearly improve the
             next saved version.
-          </p>
+          </SupportingText>
         </div>
-        <div className="langextract-editor-header-actions">
-          <span className="pill">
+        <div className="grid gap-[0.75rem] justify-items-end max-[820px]:justify-items-stretch">
+          <Badge tone="indigo">
             {completeExampleCount} complete example
             {completeExampleCount === 1 ? "" : "s"}
-          </span>
+          </Badge>
           {actionableSuggestions.length ? (
-            <span className="pill">
+            <Badge tone="indigo">
               {actionableSuggestions.length} reviewed suggestion
               {actionableSuggestions.length === 1 ? "" : "s"} ready
-            </span>
+            </Badge>
           ) : null}
         </div>
       </section>
 
-      <div className="langextract-workspace">
-        <div className="langextract-main">
-          <section
-            className="langextract-panel langextract-prompt-card"
+      <div className="grid items-start gap-4 [grid-template-columns:minmax(0,1.45fr)_minmax(280px,0.85fr)] max-[820px]:grid-cols-1">
+        <div className="grid gap-[0.95rem]">
+          <PanelCard
+            as="section"
+            tone="soft"
+            spacing="cozy"
             aria-labelledby={promptHeadingId}
           >
-            <h3 id={promptHeadingId}>Extraction goal</h3>
-            <label className="full-line">
+            <SectionTitle id={promptHeadingId}>Extraction goal</SectionTitle>
+            <label className="col-span-full">
               <span>What should LangExtract return?</span>
               <textarea
                 aria-label="LangExtract prompt"
@@ -356,26 +369,24 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                 }
               />
             </label>
-          </section>
+          </PanelCard>
 
-          <section
-            className="langextract-section"
-            aria-labelledby={examplesHeadingId}
-          >
-            <div className="langextract-section-header">
+          <SectionStack aria-labelledby={examplesHeadingId}>
+            <SectionHeader>
               <div>
-                <span className="metric-label">Examples</span>
-                <h3 id={examplesHeadingId}>Grounded example set</h3>
-                <p className="langextract-editor-copy">
+                <MetricLabel>Examples</MetricLabel>
+                <SectionTitle id={examplesHeadingId} className="mt-[0.35rem]">
+                  Grounded example set
+                </SectionTitle>
+                <SupportingText>
                   Paste a representative excerpt, choose the schema fields it
                   proves, and capture only the grounded spans LangExtract should
                   learn from.
-                </p>
+                </SupportingText>
               </div>
-              <div className="langextract-feedback-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
+              <InlineGroup spacing="relaxed">
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     setPendingFocus({
                       kind: "example-source",
@@ -391,34 +402,36 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                   }}
                 >
                   Add example
-                </button>
-              </div>
-            </div>
-            <div className="langextract-example-list">
+                </Button>
+              </InlineGroup>
+            </SectionHeader>
+            <div className="grid gap-[0.9rem]">
               {hasExamples ? (
                 draft.langextract_examples.map((example, exampleIndex) => (
-                  <section
+                  <PanelCard
+                    as="section"
                     key={`langextract-example-${exampleIndex}`}
-                    className="langextract-example-card"
+                    spacing="spacious"
+                    tone="plain"
                     data-testid={`langextract-example-${exampleIndex + 1}`}
                     aria-labelledby={`langextract-example-title-${exampleIndex + 1}`}
                   >
-                    <div className="builder-item-topline">
+                    <SectionHeader className="gap-4">
                       <div>
-                        <h4
+                        <SectionTitle
                           id={`langextract-example-title-${exampleIndex + 1}`}
+                          as="h4"
                         >
                           Example {exampleIndex + 1}
-                        </h4>
-                        <p className="langextract-editor-copy">
+                        </SectionTitle>
+                        <SupportingText>
                           {isDraftExampleComplete(example)
                             ? "Ready to save."
                             : "Still needs source text, grounded spans, or attribute values."}
-                        </p>
+                        </SupportingText>
                       </div>
-                      <button
-                        type="button"
-                        className="danger-button"
+                      <Button
+                        variant="danger"
                         onClick={() => {
                           setPendingFocus({
                             kind: "example-source",
@@ -440,9 +453,9 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                         aria-label={`Remove example ${exampleIndex + 1}`}
                       >
                         Remove example
-                      </button>
-                    </div>
-                    <label className="full-line">
+                      </Button>
+                    </SectionHeader>
+                    <label className="col-span-full">
                       <span>Source text</span>
                       <textarea
                         aria-label={`LangExtract example ${exampleIndex + 1} source text`}
@@ -458,31 +471,35 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                         }
                       />
                     </label>
-                    <div className="langextract-extraction-list">
+                    <div className="mt-[0.95rem] grid gap-[0.9rem]">
                       {example.extractions.map(
                         (extraction, extractionIndex) => (
                           <div
                             key={`langextract-example-${exampleIndex}-extraction-${extractionIndex}`}
-                            className="langextract-extraction-block"
+                            className={cn(
+                              "grid gap-[0.85rem]",
+                              extractionIndex > 0 &&
+                                "border-t border-[rgba(122,138,179,0.16)] pt-4",
+                            )}
                             data-testid={`langextract-example-${exampleIndex + 1}-extraction-${extractionIndex + 1}`}
                             role="group"
                             aria-labelledby={`langextract-example-${exampleIndex + 1}-extraction-title-${extractionIndex + 1}`}
                           >
-                            <div className="builder-item-topline">
+                            <SectionHeader className="gap-4">
                               <div>
-                                <h5
+                                <SectionTitle
                                   id={`langextract-example-${exampleIndex + 1}-extraction-title-${extractionIndex + 1}`}
+                                  as="h5"
                                 >
                                   Extraction {extractionIndex + 1}
-                                </h5>
-                                <p className="langextract-editor-copy">
+                                </SectionTitle>
+                                <SupportingText>
                                   Choose the saved field and the grounded span
                                   that proves it.
-                                </p>
+                                </SupportingText>
                               </div>
-                              <button
-                                type="button"
-                                className="danger-button"
+                              <Button
+                                variant="danger"
                                 onClick={() => {
                                   setPendingFocus({
                                     kind: "extraction-field",
@@ -504,9 +521,9 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                 aria-label={`Remove extraction ${extractionIndex + 1} from example ${exampleIndex + 1}`}
                               >
                                 Remove extraction
-                              </button>
-                            </div>
-                            <div className="form-grid">
+                              </Button>
+                            </SectionHeader>
+                            <FormGrid>
                               <label>
                                 <span>Field</span>
                                 {validFieldNames.length ? (
@@ -571,13 +588,18 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                   }
                                 />
                               </label>
-                            </div>
-                            <div className="langextract-attribute-list">
+                            </FormGrid>
+                            <div className="grid gap-[0.9rem]">
                               {extraction.attributes.map(
                                 (attribute, attributeIndex) => (
                                   <div
                                     key={`langextract-example-${exampleIndex}-extraction-${extractionIndex}-attribute-${attributeIndex}`}
-                                    className="langextract-attribute-row"
+                                    className={cn(
+                                      "grid items-start gap-[0.75rem] [grid-template-columns:minmax(0,1fr)_minmax(140px,180px)_auto] max-[820px]:grid-cols-1",
+                                      attributeIndex === 0
+                                        ? "pt-0"
+                                        : "border-t border-[rgba(122,138,179,0.12)] pt-[0.8rem]",
+                                    )}
                                   >
                                     <label>
                                       <span>Attribute</span>
@@ -625,7 +647,7 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                         </option>
                                       </select>
                                     </label>
-                                    <label className="full-line">
+                                    <label className="col-span-full">
                                       <span>
                                         {attribute.value_kind === "string_array"
                                           ? "Values (one per line)"
@@ -659,9 +681,8 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                         }
                                       />
                                     </label>
-                                    <button
-                                      type="button"
-                                      className="danger-button"
+                                    <Button
+                                      variant="danger"
                                       onClick={() => {
                                         setPendingFocus(
                                           extraction.attributes.length > 1
@@ -698,13 +719,12 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                       aria-label={`Remove attribute ${attributeIndex + 1} from extraction ${extractionIndex + 1} in example ${exampleIndex + 1}`}
                                     >
                                       Remove attribute
-                                    </button>
+                                    </Button>
                                   </div>
                                 ),
                               )}
-                              <button
-                                type="button"
-                                className="secondary-button"
+                              <Button
+                                variant="secondary"
                                 onClick={() => {
                                   setPendingFocus({
                                     kind: "attribute-name",
@@ -729,15 +749,14 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                 data-focus-id={`langextract-example-${exampleIndex + 1}-extraction-${extractionIndex + 1}-add-attribute`}
                               >
                                 Add attribute
-                              </button>
+                              </Button>
                             </div>
                           </div>
                         ),
                       )}
                     </div>
-                    <button
-                      type="button"
-                      className="secondary-button"
+                    <Button
+                      variant="secondary"
                       onClick={() => {
                         setPendingFocus({
                           kind: "extraction-field",
@@ -755,63 +774,61 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                       aria-label={`Add extraction to example ${exampleIndex + 1}`}
                     >
                       Add extraction
-                    </button>
-                  </section>
+                    </Button>
+                  </PanelCard>
                 ))
               ) : (
-                <div className="langextract-panel">
+                <PanelCard tone="soft" spacing="cozy">
                   <strong>No grounded examples yet.</strong>
-                  <p className="langextract-editor-copy">
+                  <SupportingText>
                     Add one reliable example before you trust reviewed
                     suggestions or save a new schema version.
-                  </p>
-                </div>
+                  </SupportingText>
+                </PanelCard>
               )}
             </div>
-          </section>
+          </SectionStack>
 
           {feedbackStatus !== "idle" || visibleSuggestions.length ? (
-            <section
-              className="langextract-section langextract-feedback-section"
-              aria-labelledby={feedbackHeadingId}
-            >
-              <div className="langextract-section-header">
+            <SectionStack aria-labelledby={feedbackHeadingId}>
+              <SectionHeader>
                 <div>
-                  <span className="metric-label">Reviewed run feedback</span>
-                  <h3
+                  <MetricLabel>Reviewed run feedback</MetricLabel>
+                  <SectionTitle
                     id={feedbackHeadingId}
                     tabIndex={-1}
                     data-focus-id="langextract-feedback-heading"
+                    className="mt-[0.35rem]"
                   >
                     Suggestions ready to promote
-                  </h3>
-                  <p className="langextract-editor-copy">
+                  </SectionTitle>
+                  <SupportingText>
                     These came from grounded review edits. Promote them one at a
                     time when they clearly strengthen the draft you plan to save
                     next.
-                  </p>
+                  </SupportingText>
                 </div>
-                <div className="langextract-feedback-actions">
-                  <span className="pill">
+                <InlineGroup spacing="relaxed">
+                  <Badge tone="indigo">
                     {feedbackStatus === "loading"
                       ? "Loading"
                       : `${visibleSuggestions.length} suggestion${visibleSuggestions.length === 1 ? "" : "s"}`}
-                  </span>
-                </div>
-              </div>
+                  </Badge>
+                </InlineGroup>
+              </SectionHeader>
               {feedbackStatus === "error" ? (
-                <div className="langextract-panel">
+                <PanelCard tone="soft" spacing="cozy">
                   <strong>Could not load reviewed suggestions.</strong>
-                  <p className="langextract-editor-copy">
+                  <SupportingText>
                     Keep shaping the draft below. Reload reviewed feedback when
                     the schema version is reachable again.
-                  </p>
-                </div>
+                  </SupportingText>
+                </PanelCard>
               ) : null}
               {feedbackStatus !== "error" && feedbackIssues.length ? (
-                <div className="langextract-panel">
+                <PanelCard tone="soft" spacing="cozy">
                   <strong>Some reviewed runs were not reusable.</strong>
-                  <p className="langextract-editor-copy">
+                  <SupportingText>
                     {feedbackDiagnostics.reviewed_edit_count} reviewed edit
                     {feedbackDiagnostics.reviewed_edit_count === 1
                       ? ""
@@ -823,52 +840,54 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                       ? ""
                       : "s"}{" "}
                     were generated.
-                  </p>
-                  <ul className="schema-checklist">
+                  </SupportingText>
+                  <Checklist>
                     {feedbackIssues.map((issue) => (
                       <li key={issue.label}>
                         {issue.count} {issue.label}
                       </li>
                     ))}
-                  </ul>
-                </div>
+                  </Checklist>
+                </PanelCard>
               ) : null}
               {feedbackStatus !== "error" && visibleSuggestions.length ? (
-                <div className="langextract-feedback-list">
+                <div className="grid gap-[0.9rem]">
                   {visibleSuggestions.map((suggestion, index) => {
                     const alreadyApplied = appliedSuggestionKeys.includes(
                       suggestion.key,
                     );
                     return (
-                      <section
+                      <PanelCard
+                        as="section"
                         key={suggestion.key}
-                        className="langextract-feedback-card"
+                        spacing="roomy"
+                        tone="soft"
                         data-testid={`langextract-feedback-suggestion-${index + 1}`}
                       >
-                        <div className="langextract-feedback-card-header">
-                          <details className="langextract-feedback-disclosure">
-                            <summary className="langextract-feedback-summary">
-                              <span className="langextract-feedback-summary-copy">
+                        <div className="flex flex-wrap items-start justify-between gap-4 max-[820px]:flex-col max-[820px]:items-stretch">
+                          <details className="min-w-0">
+                            <summary className="flex list-none items-start justify-between gap-4 cursor-pointer focus-visible:rounded-[12px] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] max-[820px]:flex-col max-[820px]:items-stretch">
+                              <span className="grid gap-[0.2rem]">
                                 <strong>Suggestion {index + 1}</strong>
-                                <span className="langextract-editor-copy">
+                                <SupportingText as="span">
                                   Fields:{" "}
                                   {suggestion.source_field_names.join(", ")}
-                                </span>
+                                </SupportingText>
                               </span>
-                              <span className="langextract-feedback-summary-meta">
-                                <span className="pill">
+                              <span className="flex flex-wrap justify-end gap-[0.45rem] max-[820px]:justify-start">
+                                <Badge tone="indigo">
                                   Seen in {suggestion.occurrence_count} reviewed
                                   run
                                   {suggestion.occurrence_count === 1 ? "" : "s"}
-                                </span>
-                                <span className="pill">Open details</span>
+                                </Badge>
+                                <Badge tone="indigo">Open details</Badge>
                               </span>
                             </summary>
-                            <div className="langextract-feedback-body">
-                              <pre>
+                            <div className="mt-[0.85rem] grid gap-[0.75rem]">
+                              <pre className="mb-[0.85rem] overflow-x-auto rounded-[14px] bg-[rgba(15,23,42,0.95)] px-4 py-[0.95rem] text-[0.84rem] leading-[1.55] text-[rgba(241,245,249,0.96)]">
                                 <code>{suggestion.example_text}</code>
                               </pre>
-                              <ul className="schema-checklist">
+                              <Checklist>
                                 {suggestion.extractions.map((extraction) => (
                                   <li
                                     key={`${suggestion.key}-${extraction.extraction_class}-${extraction.extraction_text}`}
@@ -879,18 +898,15 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                     : {extraction.extraction_text}
                                   </li>
                                 ))}
-                              </ul>
+                              </Checklist>
                             </div>
                           </details>
-                          <div className="langextract-feedback-card-actions">
+                          <div className="flex flex-wrap items-center gap-[0.65rem] max-[820px]:[&>button]:w-full">
                             {alreadyApplied ? (
-                              <span className="langextract-state-pill">
-                                Added to draft
-                              </span>
+                              <Badge tone="success">Added to draft</Badge>
                             ) : (
-                              <button
-                                type="button"
-                                className="secondary-button"
+                              <Button
+                                variant="secondary"
                                 onClick={() => {
                                   setPendingFocus({
                                     kind: "example-source",
@@ -902,11 +918,10 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                                 aria-label={`Promote suggestion ${index + 1} to the draft`}
                               >
                                 Promote to draft
-                              </button>
+                              </Button>
                             )}
-                            <button
-                              type="button"
-                              className="danger-button"
+                            <Button
+                              variant="danger"
                               onClick={() => {
                                 setPendingFocus({
                                   kind: "feedback-dismiss",
@@ -920,98 +935,97 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                               data-focus-id={`langextract-feedback-dismiss-${index + 1}`}
                             >
                               Dismiss suggestion
-                            </button>
+                            </Button>
                           </div>
                         </div>
-                      </section>
+                      </PanelCard>
                     );
                   })}
                 </div>
               ) : feedbackStatus !== "error" ? (
-                <div className="langextract-panel">
+                <PanelCard tone="soft" spacing="cozy">
                   <strong>
                     {feedbackDiagnostics.reviewed_edit_count
                       ? "No reusable reviewed examples right now."
                       : "No reviewed examples yet."}
                   </strong>
-                  <p className="langextract-editor-copy">
+                  <SupportingText>
                     {feedbackDiagnostics.dismissed_suggestion_count
                       ? "Every reusable suggestion for this schema version is currently dismissed."
                       : feedbackDiagnostics.reviewed_edit_count
                         ? "Reviewed runs exist, but none produced a reusable grounded example for this schema version."
                         : "Approve grounded review edits first. Safe suggestions appear here automatically."}
-                  </p>
-                </div>
+                  </SupportingText>
+                </PanelCard>
               ) : null}
-            </section>
+            </SectionStack>
           ) : null}
         </div>
 
-        <aside className="langextract-sidebar">
-          <section
-            className="langextract-panel langextract-status-card"
+        <aside className="grid gap-[0.95rem]">
+          <PanelCard
+            as="section"
+            tone="soft"
+            spacing="relaxed"
             aria-labelledby={statusHeadingId}
           >
-            <span className="metric-label">Draft status</span>
-            <h3 id={statusHeadingId}>
+            <MetricLabel>Draft status</MetricLabel>
+            <SectionTitle id={statusHeadingId}>
               {blockingMessages.length
                 ? "Fix these issues before saving"
                 : "Ready for the next saved version"}
-            </h3>
-            <p className="langextract-editor-copy">
+            </SectionTitle>
+            <SupportingText>
               Based on schema version {sourceVersionLabel}. Save a new version
               only when this draft reflects the behavior you want future runs to
               inherit.
-            </p>
-            <div className="langextract-status-pills">
-              <span className="pill">
+            </SupportingText>
+            <InlineGroup>
+              <Badge tone="indigo">
                 {completeExampleCount} complete example
                 {completeExampleCount === 1 ? "" : "s"}
-              </span>
+              </Badge>
               {requiredFieldNames.length ? (
-                <span className="pill">
+                <Badge tone="indigo">
                   {coverage.coveredRequiredFields.length}/
                   {requiredFieldNames.length} required fields covered
-                </span>
+                </Badge>
               ) : null}
-            </div>
+            </InlineGroup>
             {blockingMessages.length ? (
-              <ul className="schema-checklist">
+              <Checklist>
                 {blockingMessages.map((message) => (
                   <li key={message}>{message}</li>
                 ))}
-              </ul>
+              </Checklist>
             ) : (
-              <p className="langextract-editor-copy">
+              <SupportingText>
                 No blocking payload issues are visible in this draft.
-              </p>
+              </SupportingText>
             )}
-            <button
-              type="button"
-              className="primary-button"
+            <Button
+              variant="primary"
               onClick={onSaveSchema}
               disabled={saveBusy || blockingMessages.length > 0}
             >
               {saveBusy ? "Saving..." : "Save schema version"}
-            </button>
-          </section>
+            </Button>
+          </PanelCard>
 
           {requiredFieldNames.length ? (
-            <section
-              className="langextract-panel langextract-coverage-card"
+            <PanelCard
+              as="section"
+              tone="soft"
+              spacing="cozy"
               aria-labelledby={coverageHeadingId}
             >
-              <span className="metric-label">Required field coverage</span>
-              <h3 id={coverageHeadingId}>
+              <MetricLabel>Required field coverage</MetricLabel>
+              <SectionTitle id={coverageHeadingId}>
                 {hasExamples
                   ? `${coverage.coveredRequiredFields.length} of ${requiredFieldNames.length} required fields covered`
                   : `Add examples to cover ${requiredFieldNames.length} required field${requiredFieldNames.length === 1 ? "" : "s"}`}
-              </h3>
-              <p
-                className="langextract-editor-copy"
-                role="status"
-                aria-live="polite"
-              >
+              </SectionTitle>
+              <SupportingText role="status" aria-live="polite">
                 {hasExamples
                   ? coverage.missingRequiredFields.length
                     ? `Missing required examples: ${coverage.missingRequiredFields.join(
@@ -1019,49 +1033,54 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                       )}.`
                     : "Every required extracted field appears in at least one grounded example."
                   : "Coverage updates as soon as grounded examples mention each required extracted field."}
-              </p>
-            </section>
+              </SupportingText>
+            </PanelCard>
           ) : null}
 
-          <section
-            className="langextract-panel langextract-guidance-card"
+          <PanelCard
+            as="section"
+            tone="soft"
+            spacing="cozy"
             aria-labelledby={guidanceHeadingId}
           >
-            <span className="metric-label">Quality guidance</span>
-            <h3 id={guidanceHeadingId}>
+            <MetricLabel>Quality guidance</MetricLabel>
+            <SectionTitle id={guidanceHeadingId}>
               {qualityGuidance.isReady
                 ? "The draft structure is in good shape."
                 : "Strengthen this draft before you trust it."}
-            </h3>
-            <ul className="schema-checklist">
+            </SectionTitle>
+            <Checklist>
               {qualityGuidance.messages.map((message) => (
                 <li key={message}>{message}</li>
               ))}
-            </ul>
-          </section>
+            </Checklist>
+          </PanelCard>
 
-          <details
-            className="langextract-panel langextract-advanced-panel"
+          <PanelCard
+            as="details"
+            tone="soft"
+            spacing="relaxed"
+            className="open:bg-[rgba(255,255,255,0.94)]"
             aria-labelledby={previewHeadingId}
           >
-            <summary className="langextract-advanced-summary">
-              <span className="langextract-feedback-summary-copy">
-                <span className="metric-label">Advanced</span>
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-[0.85rem] max-[820px]:flex-col max-[820px]:items-stretch">
+              <span className="grid gap-[0.2rem]">
+                <MetricLabel>Advanced</MetricLabel>
                 <strong id={previewHeadingId}>Saved payload preview</strong>
               </span>
-              <span className="pill">langextract_config</span>
+              <Badge tone="indigo">langextract_config</Badge>
             </summary>
-            <p className="langextract-editor-copy">
+            <SupportingText>
               Open this only when you need to inspect the exact persisted
               structure for the next schema version.
-            </p>
+            </SupportingText>
             {preview.content ? (
               <pre aria-label="LangExtract payload preview">
                 <code>{preview.content}</code>
               </pre>
             ) : (
               <p
-                className="langextract-preview-empty"
+                className="mt-[0.85rem] text-[0.9rem] text-muted"
                 role="status"
                 aria-live="polite"
               >
@@ -1069,7 +1088,7 @@ export function LangExtractEditor<T extends LangExtractDraftState>({
                   "Add a prompt or at least one complete example to inspect the saved payload."}
               </p>
             )}
-          </details>
+          </PanelCard>
         </aside>
       </div>
     </div>

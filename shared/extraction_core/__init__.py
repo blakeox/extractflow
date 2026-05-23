@@ -1,6 +1,9 @@
+from .calculations import evaluate_calculated_fields, validate_calculated_field
 from .formulas import (
     FormulaEngine,
     FormulaValidationError,
+    collect_formula_references,
+    compile_formula,
     detect_formula_cycles,
     topologically_sort_calculated_fields,
 )
@@ -29,8 +32,11 @@ __all__ = [
     "CalculatedFieldDefinition",
     "CalculatedFieldResult",
     "build_langextract_feedback_attributes",
+    "collect_formula_references",
+    "compile_formula",
     "configure_logger",
     "DataType",
+    "evaluate_calculated_fields",
     "ExtractionFieldDefinition",
     "ExtractionFieldResult",
     "ExtractionTemplate",
@@ -50,4 +56,5 @@ __all__ = [
     "detect_formula_cycles",
     "topologically_sort_calculated_fields",
     "uses_langextract_provider",
+    "validate_calculated_field",
 ]

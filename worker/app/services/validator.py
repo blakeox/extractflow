@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from extraction_core.models import CalculatedFieldResult, ExtractionFieldDefinition, ExtractionFieldResult
+from extraction_core.models import ExtractionFieldDefinition, ExtractionFieldResult
 from jsonschema import Draft202012Validator, FormatChecker
 from rapidfuzz import fuzz, process
 
@@ -124,24 +124,3 @@ def append_validation_note(current: str, note: str) -> str:
 
 def normalize_allowed_value_key(value: str) -> str:
     return "".join(char.lower() for char in value if char.isalnum())
-
-
-def validate_calculated_field(
-    result: CalculatedFieldResult,
-    allow_null: bool = True,
-    min_value: float | None = None,
-    max_value: float | None = None,
-) -> CalculatedFieldResult:
-    errors: list[str] = list(result.validation_errors)
-    value = result.calculated_value
-    if value is None and not allow_null:
-        errors.append("Calculated value is null.")
-    candidate: Any = value.get("amount") if isinstance(value, dict) and "amount" in value else value
-    if candidate is not None and min_value is not None and candidate < min_value:
-        errors.append("Calculated value is below minimum.")
-    if candidate is not None and max_value is not None and candidate > max_value:
-        errors.append("Calculated value is above maximum.")
-    result.validation_errors = errors
-    result.validation_status = "valid" if not errors else "invalid"
-    result.requires_review = result.requires_review or bool(errors)
-    return result

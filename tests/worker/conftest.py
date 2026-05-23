@@ -78,6 +78,8 @@ def reset_worker_state() -> None:
                     claimed_at DATETIME,
                     worker_id VARCHAR(255),
                     attempt_count INTEGER NOT NULL DEFAULT 0,
+                    progress_stage VARCHAR(50),
+                    progress_pct INTEGER NOT NULL DEFAULT 0,
                     created_at DATETIME,
                     updated_at DATETIME
                 )

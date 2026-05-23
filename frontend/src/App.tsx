@@ -10,12 +10,47 @@ import {
   type SetStateAction,
 } from "react";
 
+import { MockProviderProductionNotice } from "./components/MockProviderProductionNotice";
+import { ReviewFieldEditor } from "./components/review/ReviewFieldEditor";
+import { reviewFieldHint } from "./components/review/review-field-hint";
+import { SourceEvidencePanel } from "./components/review/SourceEvidencePanel";
 import { API_BASE } from "./lib/config";
+import { clampProgressPct, getJobStageLabel } from "./lib/job-progress";
+import {
+  dismissMockProviderWarning,
+  isBootstrapMockProvider,
+  readMockProviderWarningDismissed,
+} from "./lib/mock-provider";
+import {
+  isHighConfidenceField,
+  REVIEW_HIGH_CONFIDENCE_MIN,
+} from "./lib/review-helpers";
 import {
   LangExtractEditor,
   type LangExtractFeedbackDiagnostics,
   type LangExtractFeedbackSuggestion,
 } from "./LangExtractEditor";
+import { Badge } from "./components/ui/Badge";
+import { Button } from "./components/ui/Button";
+import { DetailPair } from "./components/ui/DetailPair";
+import { DetailTile } from "./components/ui/DetailTile";
+import { FormGrid } from "./components/ui/FormGrid";
+import { InlineGroup } from "./components/ui/InlineGroup";
+import { MetricLabel } from "./components/ui/MetricLabel";
+import { NoteCard } from "./components/ui/NoteCard";
+import { PageIntro, PageStack } from "./components/ui/PageLayout";
+import { PanelCard } from "./components/ui/PanelCard";
+import { ProgressList } from "./components/ui/ProgressList";
+import { ProviderModeBadge } from "./components/ui/ProviderModeBadge";
+import { SectionHeader } from "./components/ui/SectionLayout";
+import { StatusRow } from "./components/ui/StatusRow";
+import { StepCard } from "./components/ui/StepCard";
+import { StepMarker } from "./components/ui/StepMarker";
+import { SupportingText } from "./components/ui/SupportingText";
+import { SummaryGrid } from "./components/ui/SummaryGrid";
+import { Surface } from "./components/ui/Surface";
+import { TableDataCell, TableHeaderCell } from "./components/ui/TableCell";
+import { TitledSurface } from "./components/ui/TitledSurface";
 import {
   buildDraftLangExtractExampleFromSuggestion,
   buildDraftLangExtractExamples,
@@ -218,6 +253,9 @@ type JobRecord = {
   provider_override?: ProviderSettings | null;
   status: string;
   error_message?: string | null;
+  progress_stage?: string | null;
+  progress_pct?: number;
+  attempt_count?: number;
   created_at: string;
   updated_at: string;
 };
@@ -1060,54 +1098,84 @@ function AppSidebar({
   reviewCount: number;
 }) {
   return (
-    <aside className="sidebar">
-      <div className="brand-block">
-        <div className="brand-mark">E</div>
+    <aside className="sticky top-0 flex min-h-screen flex-col gap-5 border-r border-line bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(248,250,255,0.88))] px-4 py-6">
+      <div className="flex items-center gap-[0.9rem] px-2 py-[0.25rem] pb-[0.9rem]">
+        <div className="grid h-11 w-11 place-items-center rounded-[14px] bg-[linear-gradient(135deg,#5d6eff,#7b5cff)] text-[1.2rem] font-bold text-white shadow-[0_10px_24px_rgba(77,96,255,0.22)]">
+          E
+        </div>
         <div>
-          <h1>ExtractFlow</h1>
-          <p>One workspace from PDF to trusted export.</p>
+          <h1 className="m-0 text-[1.45rem] tracking-[-0.03em]">ExtractFlow</h1>
+          <p className="m-[0.2rem_0_0] text-[0.95rem] text-muted">
+            One workspace from PDF to trusted export.
+          </p>
         </div>
       </div>
 
-      <div className="nav-section">
-        <span className="nav-section-label">Primary</span>
-        <nav className="nav-list" aria-label="Primary">
+      <div className="grid gap-[0.55rem]">
+        <MetricLabel className="text-[0.76rem] tracking-[0.08em] text-faint">
+          Primary
+        </MetricLabel>
+        <nav className="grid gap-[0.28rem]" aria-label="Primary">
           {primaryNavigation.map((item) => (
             <button
               key={item.id}
               type="button"
               className={classNames(
-                "nav-item",
-                activePage === item.id && "active",
+                "group flex w-full items-center gap-[0.9rem] rounded-[14px] px-[0.95rem] py-[0.85rem] text-left transition-[background,color,transform,box-shadow] duration-150",
+                activePage === item.id
+                  ? "bg-[linear-gradient(180deg,rgba(77,96,255,0.12),rgba(77,96,255,0.06))] text-brand-strong shadow-[inset_0_0_0_1px_rgba(77,96,255,0.12),0_8px_18px_rgba(77,96,255,0.08)]"
+                  : "text-muted hover:bg-[linear-gradient(180deg,rgba(77,96,255,0.12),rgba(77,96,255,0.06))] hover:text-brand-strong",
               )}
               onClick={() => onSelectPage(item.id)}
             >
-              <span className="nav-icon" aria-hidden="true">
+              <span
+                className={classNames(
+                  "grid h-8 w-8 flex-none place-items-center rounded-[11px] transition-[background,color,transform] duration-150 [&_svg]:block [&_svg]:h-[17px] [&_svg]:w-[17px]",
+                  activePage === item.id
+                    ? "scale-[1.02] bg-[rgba(77,96,255,0.12)] text-brand-strong"
+                    : "bg-[rgba(122,138,179,0.08)] text-[#7280a2] group-hover:bg-[rgba(77,96,255,0.12)] group-hover:text-brand-strong",
+                )}
+                aria-hidden="true"
+              >
                 <NavGlyph icon={item.icon} />
               </span>
               <span>{item.label}</span>
               {item.id === "extractions" && reviewCount > 0 ? (
-                <span className="nav-badge">{reviewCount}</span>
+                <span className="ml-auto rounded-full bg-[rgba(77,96,255,0.12)] px-[0.5rem] py-[0.18rem] text-[0.78rem] font-bold text-brand-strong">
+                  {reviewCount}
+                </span>
               ) : null}
             </button>
           ))}
         </nav>
       </div>
 
-      <div className="nav-section">
-        <span className="nav-section-label">Setup</span>
-        <nav className="nav-list" aria-label="Setup">
+      <div className="grid gap-[0.55rem]">
+        <MetricLabel className="text-[0.76rem] tracking-[0.08em] text-faint">
+          Setup
+        </MetricLabel>
+        <nav className="grid gap-[0.28rem]" aria-label="Setup">
           {secondaryNavigation.map((item) => (
             <button
               key={item.id}
               type="button"
               className={classNames(
-                "nav-item",
-                activePage === item.id && "active",
+                "group flex w-full items-center gap-[0.9rem] rounded-[14px] px-[0.95rem] py-[0.85rem] text-left transition-[background,color,transform,box-shadow] duration-150",
+                activePage === item.id
+                  ? "bg-[linear-gradient(180deg,rgba(77,96,255,0.12),rgba(77,96,255,0.06))] text-brand-strong shadow-[inset_0_0_0_1px_rgba(77,96,255,0.12),0_8px_18px_rgba(77,96,255,0.08)]"
+                  : "text-muted hover:bg-[linear-gradient(180deg,rgba(77,96,255,0.12),rgba(77,96,255,0.06))] hover:text-brand-strong",
               )}
               onClick={() => onSelectPage(item.id)}
             >
-              <span className="nav-icon" aria-hidden="true">
+              <span
+                className={classNames(
+                  "grid h-8 w-8 flex-none place-items-center rounded-[11px] transition-[background,color,transform] duration-150 [&_svg]:block [&_svg]:h-[17px] [&_svg]:w-[17px]",
+                  activePage === item.id
+                    ? "scale-[1.02] bg-[rgba(77,96,255,0.12)] text-brand-strong"
+                    : "bg-[rgba(122,138,179,0.08)] text-[#7280a2] group-hover:bg-[rgba(77,96,255,0.12)] group-hover:text-brand-strong",
+                )}
+                aria-hidden="true"
+              >
                 <NavGlyph icon={item.icon} />
               </span>
               <span>{item.label}</span>
@@ -1116,29 +1184,25 @@ function AppSidebar({
         </nav>
       </div>
 
-      <div className="local-mode-card">
-        <div className="local-mode-dot" />
+      <div className="mt-auto grid grid-cols-[auto_1fr] gap-[0.85rem] rounded-[18px] border border-border bg-[rgba(255,255,255,0.72)] p-[0.9rem] shadow-none">
+        <div className="mt-[0.35rem] h-[9px] w-[9px] rounded-full bg-success shadow-[0_0_0_3px_rgba(31,159,103,0.1)]" />
         <div>
-          <strong>
+          <strong className="mb-[0.25rem] block">
             {provider?.mode === "cloud" ? "Cloud Mode" : "Local Mode"}
           </strong>
-          <p>
+          <p className="m-0 block text-[0.88rem] text-muted">
             {provider?.provider_type ?? "mock"} (
             {provider?.model ?? "qwen3.5:27b"})
           </p>
-          <span>
+          <span className="block text-[0.88rem] text-muted">
             {reviewCount
               ? `${reviewCount} fields waiting on review`
               : "No review backlog right now"}
           </span>
         </div>
-        <button
-          type="button"
-          className="tertiary-button"
-          onClick={() => onSelectPage("settings")}
-        >
+        <Button variant="tertiary" onClick={() => onSelectPage("settings")}>
           Open settings
-        </button>
+        </Button>
       </div>
     </aside>
   );
@@ -1160,10 +1224,12 @@ function TopBar({ activePage }: { activePage: PageId }) {
   };
 
   return (
-    <header className="topbar">
-      <div className="topbar-copy">
-        <strong>{activeLabel}</strong>
-        <span>{subtitles[activePage]}</span>
+    <header className="sticky top-0 z-10 flex items-center justify-start gap-4 border-b border-line bg-[rgba(245,247,252,0.78)] px-[1.8rem] py-[1.4rem] backdrop-blur-[18px]">
+      <div className="grid gap-[0.18rem]">
+        <strong className="text-base tracking-[-0.02em]">{activeLabel}</strong>
+        <span className="text-[0.88rem] text-muted">
+          {subtitles[activePage]}
+        </span>
       </div>
     </header>
   );
@@ -1176,9 +1242,7 @@ function StatusBadge({
   children: string;
   tone: "success" | "warning" | "danger" | "info" | "indigo" | "neutral";
 }) {
-  return (
-    <span className={classNames("badge", `badge-${tone}`)}>{children}</span>
-  );
+  return <Badge tone={tone}>{children}</Badge>;
 }
 
 function SummaryStat({
@@ -1195,13 +1259,24 @@ function SummaryStat({
   return (
     <div
       className={classNames(
-        "metric-card",
-        tone !== "default" && `metric-card-${tone}`,
+        "grid min-w-0 gap-1 rounded-[var(--ds-radius-lg)] border border-[rgba(122,138,179,0.16)] bg-card p-4 shadow-sm",
+        tone === "accent" &&
+          "border-[rgba(var(--accent-rgb),0.16)] bg-[linear-gradient(180deg,rgba(var(--accent-rgb),0.05),var(--surface-card))]",
+        tone === "success" &&
+          "border-[rgba(var(--success-rgb),0.2)] bg-[rgba(var(--success-rgb),0.08)]",
+        tone === "warning" &&
+          "border-[rgba(var(--warning-rgb),0.2)] bg-[rgba(var(--warning-rgb),0.08)]",
+        tone === "danger" &&
+          "border-[rgba(var(--danger-rgb),0.2)] bg-[rgba(var(--danger-rgb),0.08)]",
       )}
     >
-      <span className="metric-label">{label}</span>
-      <strong className="metric-value">{value}</strong>
-      {support ? <p className="metric-support">{support}</p> : null}
+      <span className="text-xs font-bold tracking-[0.05em] text-muted uppercase">
+        {label}
+      </span>
+      <strong className="block text-lg tracking-[-0.03em] text-ink">
+        {value}
+      </strong>
+      {support ? <p className="m-0 text-xs text-muted">{support}</p> : null}
     </div>
   );
 }
@@ -1221,38 +1296,49 @@ function SwitchField({
   const hintId = useId();
 
   return (
-    <div className="switch-field">
-      <div className="switch-copy">
-        <span id={labelId}>{label}</span>
-        {hint ? <p id={hintId}>{hint}</p> : null}
+    <div className="flex items-center justify-between gap-4 rounded-[16px] border border-[rgba(122,138,179,0.16)] bg-[rgba(255,255,255,0.92)] px-4 py-[0.95rem]">
+      <div className="grid gap-[0.3rem]">
+        <span id={labelId} className="text-[0.88rem] font-semibold text-ink">
+          {label}
+        </span>
+        {hint ? (
+          <SupportingText id={hintId} className="m-0" size="sm">
+            {hint}
+          </SupportingText>
+        ) : null}
       </div>
-      {checked ? (
-        <button
-          type="button"
-          role="switch"
-          aria-checked="true"
-          aria-labelledby={labelId}
-          aria-describedby={hint ? hintId : undefined}
-          className={classNames("switch-control", "active")}
-          onClick={onToggle}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-labelledby={labelId}
+        aria-describedby={hint ? hintId : undefined}
+        className={classNames(
+          "inline-flex min-h-[var(--control-height-sm)] items-center gap-2 rounded-full border px-[0.4rem] py-[0.3rem] pl-[0.3rem] shadow-sm transition-colors",
+          checked
+            ? "border-[rgba(var(--accent-rgb),0.22)] bg-[rgba(var(--accent-rgb),0.12)]"
+            : "border-border bg-panel",
+        )}
+        onClick={onToggle}
+      >
+        <span
+          aria-hidden="true"
+          className={classNames(
+            "h-[1.2rem] w-[1.2rem] rounded-full transition-all",
+            checked
+              ? "translate-x-[0.2rem] bg-brand"
+              : "bg-[rgba(122,138,179,0.56)]",
+          )}
+        />
+        <span
+          className={classNames(
+            "min-w-[1.5rem] text-center text-xs font-bold",
+            checked ? "text-brand-strong" : "text-muted",
+          )}
         >
-          <span className="switch-thumb" aria-hidden="true" />
-          <span className="switch-state">On</span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          role="switch"
-          aria-checked="false"
-          aria-labelledby={labelId}
-          aria-describedby={hint ? hintId : undefined}
-          className="switch-control"
-          onClick={onToggle}
-        >
-          <span className="switch-thumb" aria-hidden="true" />
-          <span className="switch-state">Off</span>
-        </button>
-      )}
+          {checked ? "On" : "Off"}
+        </span>
+      </button>
     </div>
   );
 }
@@ -1267,10 +1353,10 @@ function FieldShell({
   children: ReactNode;
 }) {
   return (
-    <label className="field-shell">
-      <span className="field-shell-label">{label}</span>
+    <label className="grid gap-2">
+      <span className="text-sm font-semibold text-muted">{label}</span>
       {children}
-      {hint ? <span className="field-shell-hint">{hint}</span> : null}
+      {hint ? <span className="text-xs text-muted">{hint}</span> : null}
     </label>
   );
 }
@@ -1287,32 +1373,58 @@ function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="page-section-header">
-      <div className="page-section-copy">
-        <span className="hero-label">{eyebrow}</span>
-        <h2>{title}</h2>
-        {description ? <p>{description}</p> : null}
+    <div className="flex flex-col items-start justify-between gap-5 md:flex-row">
+      <div className="grid min-w-0 gap-2">
+        <span className="inline-flex items-center gap-2 text-[0.82rem] font-bold tracking-[0.11em] text-brand-strong uppercase">
+          {eyebrow}
+        </span>
+        <h2 className="m-0 max-w-[17ch] text-[var(--text-display)] leading-[1.02] tracking-[-0.05em]">
+          {title}
+        </h2>
+        {description ? (
+          <p className="m-0 max-w-[64ch] text-[0.98rem] text-muted">
+            {description}
+          </p>
+        ) : null}
       </div>
-      {actions ? <div className="page-section-actions">{actions}</div> : null}
+      {actions ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function CardHeader({
+function PreviewList({ children }: { children: ReactNode }) {
+  return <div className="grid gap-[0.8rem]">{children}</div>;
+}
+
+function PreviewRow({
+  token,
   title,
   subtitle,
-  titleId,
+  meta,
 }: {
-  title: string;
-  subtitle?: string;
-  titleId?: string;
+  token: ReactNode;
+  title: ReactNode;
+  subtitle: ReactNode;
+  meta?: ReactNode;
 }) {
   return (
-    <div className="card-header">
-      <div className="card-header-copy">
-        <h2 id={titleId}>{title}</h2>
-        {subtitle ? <p>{subtitle}</p> : null}
+    <div className="flex items-center gap-[0.9rem] rounded-[var(--ds-radius-lg)] border border-border bg-panel px-4 py-[0.85rem] shadow-sm">
+      <div className="grid h-[34px] w-[34px] flex-none place-items-center rounded-[12px] bg-[rgba(77,96,255,0.1)] font-bold text-brand-strong">
+        {token}
       </div>
+      <div className="grid min-w-0 flex-1 gap-[0.25rem]">
+        <strong>{title}</strong>
+        <SupportingText as="span" size="sm">
+          {subtitle}
+        </SupportingText>
+      </div>
+      {meta ? (
+        <div className="flex flex-wrap items-center gap-[0.55rem]">{meta}</div>
+      ) : null}
     </div>
   );
 }
@@ -1376,16 +1488,17 @@ function DesktopSetupPanel({
   ];
 
   return (
-    <section className="surface desktop-setup-surface">
-      <CardHeader
-        title="Desktop runtime"
-        subtitle="Use this recovery path when the desktop shell is open but the local extraction stack is not ready."
-      />
-      <div className="desktop-setup-grid">
-        <div className="desktop-setup-main">
-          <div className="desktop-status-banner">
-            <strong>{desktopStatus.message}</strong>
-            <p>
+    <TitledSurface
+      as="section"
+      className="border-[rgba(77,96,255,0.16)] bg-[linear-gradient(135deg,rgba(248,250,255,0.96),rgba(255,255,255,0.96))]"
+      title="Desktop runtime"
+      subtitle="Use this recovery path when the desktop shell is open but the local extraction stack is not ready."
+    >
+      <div className="grid items-start gap-4 [grid-template-columns:minmax(0,1.45fr)_minmax(280px,0.75fr)] max-[1280px]:grid-cols-1">
+        <div className="grid gap-4">
+          <PanelCard tone="plain" className="px-[1.1rem]">
+            <strong className="block text-base">{desktopStatus.message}</strong>
+            <p className="mt-[0.55rem] text-[0.92rem] text-muted">
               Runtime source:{" "}
               {desktopStatus.runtimeSource === "bundled_resources"
                 ? "Bundled desktop payload"
@@ -1398,128 +1511,118 @@ function DesktopSetupPanel({
               Backend target: {desktopStatus.backendHost}:
               {desktopStatus.backendPort}
             </p>
-          </div>
+          </PanelCard>
 
-          <div className="desktop-checklist">
+          <div className="grid gap-3">
             {checklist.map((item) => (
-              <div
+              <StatusRow
                 key={item.label}
-                className={classNames(
-                  "desktop-check-item",
-                  item.complete && "complete",
-                )}
-              >
-                <div className="desktop-check-state" aria-hidden="true">
-                  {item.complete ? "✓" : "!"}
-                </div>
-                <div>
-                  <strong>{item.label}</strong>
-                  <p>{item.detail}</p>
-                </div>
-              </div>
+                complete={item.complete}
+                title={item.label}
+                description={item.detail}
+              />
             ))}
           </div>
 
-          <div className="desktop-action-groups">
-            <div className="desktop-action-row">
-              <button
-                type="button"
-                className="primary-button"
+          <div className="grid gap-[0.7rem]">
+            <InlineGroup spacing="roomy">
+              <Button
+                variant="primary"
                 onClick={() => void onStart()}
                 disabled={busyAction === "desktop-start"}
               >
                 {busyAction === "desktop-start"
                   ? "Starting..."
                   : "Start local stack"}
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void onRestart()}
                 disabled={busyAction === "desktop-restart"}
               >
                 {busyAction === "desktop-restart"
                   ? "Restarting..."
                   : "Restart stack"}
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void onStop()}
                 disabled={busyAction === "desktop-stop"}
               >
                 {busyAction === "desktop-stop" ? "Stopping..." : "Stop stack"}
-              </button>
-            </div>
-            <div className="desktop-action-row">
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+            </InlineGroup>
+            <InlineGroup spacing="roomy">
+              <Button
+                variant="secondary"
                 onClick={() => void onRefresh()}
                 disabled={busyAction === "desktop-refresh"}
               >
                 Refresh status
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void onLoadLogs()}
                 disabled={busyAction === "desktop-logs"}
               >
                 {busyAction === "desktop-logs"
                   ? "Loading logs..."
                   : "Load backend logs"}
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void onOpenProjectRoot()}
                 disabled={busyAction === "desktop-open-root"}
               >
                 Open runtime root
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void onOpenAppDataDir()}
                 disabled={busyAction === "desktop-open-data"}
               >
                 Open app data
-              </button>
-            </div>
+              </Button>
+            </InlineGroup>
           </div>
         </div>
 
-        <div className="desktop-setup-side">
-          <div className="desktop-side-card">
-            <span className="eyebrow">Recommended sequence</span>
-            <ol className="desktop-step-list">
+        <div className="grid gap-4">
+          <PanelCard tone="plain" className="px-[1.1rem]">
+            <MetricLabel className="inline-block text-brand-strong">
+              Recommended sequence
+            </MetricLabel>
+            <ol className="mt-[0.8rem] pl-[1.05rem] text-ink">
               <li>Confirm Docker Desktop is running.</li>
               <li>Start the local stack from this shell.</li>
               <li>Refresh status after the backend becomes reachable.</li>
               <li>Load logs only if the backend still fails to respond.</li>
             </ol>
-          </div>
-          <div className="desktop-side-card">
-            <span className="eyebrow">Why this is secondary</span>
-            <p>
+          </PanelCard>
+          <PanelCard tone="plain" className="px-[1.1rem]">
+            <MetricLabel className="inline-block text-brand-strong">
+              Why this is secondary
+            </MetricLabel>
+            <p className="mt-[0.55rem] text-[0.92rem] text-muted">
               Runtime setup belongs behind the extraction flow, not in front of
               it.
             </p>
-          </div>
+          </PanelCard>
         </div>
       </div>
 
       {logs ? (
-        <div className="desktop-logs-shell">
-          <div className="desktop-logs-header">
+        <div className="mt-4 overflow-hidden rounded-[18px] border border-[rgba(122,138,179,0.16)] bg-[rgba(255,255,255,0.9)] shadow-sm">
+          <div className="flex items-center justify-between gap-4 px-4 pb-0 pt-[0.95rem]">
             <strong>Backend logs</strong>
-            <span>{logs.source}</span>
+            <span className="text-[0.82rem] text-muted">{logs.source}</span>
           </div>
-          <pre>{logs.content || "No log output returned."}</pre>
+          <pre className="m-0 max-h-[360px] overflow-auto bg-[rgba(246,248,253,0.95)] p-4 font-mono text-[0.84rem] leading-[1.5] text-ink">
+            {logs.content || "No log output returned."}
+          </pre>
         </div>
       ) : null}
-    </section>
+    </TitledSurface>
   );
 }
 
@@ -1589,101 +1692,87 @@ function DesktopSetupNotice({
   ];
 
   return (
-    <section
-      className="surface desktop-launch-surface"
+    <Surface
+      as="section"
+      className="border-[rgba(77,96,255,0.16)] bg-[linear-gradient(135deg,rgba(248,250,255,0.96),rgba(255,255,255,0.94))]"
       role={needsAttention ? "alert" : "status"}
       aria-live={needsAttention ? "assertive" : "polite"}
     >
-      <div className="desktop-launch-grid">
-        <div className="desktop-launch-copy">
-          <strong>
+      <div className="grid items-center gap-4 [grid-template-columns:minmax(0,1.1fr)_minmax(260px,0.9fr)_auto] max-[1280px]:grid-cols-1">
+        <div>
+          <strong className="block text-base">
             {needsAttention
               ? "Desktop setup needs attention, but it no longer blocks the workspace."
               : "Desktop runtime is ready. Confirm the defaults once, then get back to extraction."}
           </strong>
-          <p>
+          <p className="mt-[0.55rem] text-[0.9rem] text-muted">
             {needsAttention
               ? "Use these recovery controls when the local stack is down or the default provider is still missing."
               : "This reminder is only here for first-run orientation. Dismiss it once the path is obvious."}
           </p>
         </div>
-        <div className="desktop-launch-metrics">
-          <div className="desktop-launch-pill">
-            <span>Backend</span>
-            <strong>{apiUnavailable ? "Needs recovery" : "Ready"}</strong>
-          </div>
-          <div className="desktop-launch-pill">
-            <span>Provider</span>
-            <strong>{provider ? provider.provider_type : "Not set"}</strong>
-          </div>
-          <div className="desktop-launch-pill">
-            <span>Runtime root</span>
-            <strong>
-              {desktopStatus.projectRoot ? "Connected" : "Missing"}
-            </strong>
-          </div>
+        <div className="grid grid-cols-3 gap-3 max-[1280px]:grid-cols-1">
+          <DetailTile
+            label="Backend"
+            tone="plain"
+            value={apiUnavailable ? "Needs recovery" : "Ready"}
+            valueClassName="mt-[0.25rem]"
+          />
+          <DetailTile
+            label="Provider"
+            tone="plain"
+            value={provider ? provider.provider_type : "Not set"}
+            valueClassName="mt-[0.25rem]"
+          />
+          <DetailTile
+            label="Runtime root"
+            tone="plain"
+            value={desktopStatus.projectRoot ? "Connected" : "Missing"}
+            valueClassName="mt-[0.25rem]"
+          />
         </div>
-        <div className="desktop-launch-actions">
-          <button
-            type="button"
-            className="secondary-button"
+        <div className="flex flex-wrap items-center justify-end gap-[0.6rem]">
+          <Button
+            variant="secondary"
             onClick={() => void onRefresh()}
             disabled={busyAction === "desktop-refresh"}
           >
             Refresh status
-          </button>
+          </Button>
           {(apiUnavailable || !desktopStatus.backendReachable) && (
-            <button
-              type="button"
-              className="primary-button"
+            <Button
+              variant="primary"
               onClick={() => void onStartDesktopStack()}
               disabled={busyAction === "desktop-start"}
             >
               {busyAction === "desktop-start"
                 ? "Starting..."
                 : "Start local stack"}
-            </button>
+            </Button>
           )}
           {!provider ? (
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={onOpenSettings}
-            >
+            <Button variant="secondary" onClick={onOpenSettings}>
               Open settings
-            </button>
+            </Button>
           ) : null}
           {!needsAttention ? (
-            <button
-              type="button"
-              className="tertiary-button"
-              onClick={onDismiss}
-            >
+            <Button variant="tertiary" onClick={onDismiss}>
               Dismiss reminder
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>
-      <div className="desktop-checklist top-gap">
+      <div className="mt-4 grid gap-3">
         {checklist.map((item) => (
-          <div
+          <StatusRow
             key={item.label}
-            className={classNames(
-              "desktop-check-item",
-              item.complete && "complete",
-            )}
-          >
-            <div className="desktop-check-state" aria-hidden="true">
-              {item.complete ? "✓" : "!"}
-            </div>
-            <div>
-              <strong>{item.label}</strong>
-              <p>{item.detail}</p>
-            </div>
-          </div>
+            complete={item.complete}
+            title={item.label}
+            description={item.detail}
+          />
         ))}
       </div>
-    </section>
+    </Surface>
   );
 }
 
@@ -1756,36 +1845,34 @@ function SchemaPage({
   const outputRulesStepNumber = showLangExtractEditor ? 5 : 4;
 
   return (
-    <div className="page-stack">
-      <section className="surface page-header-surface">
+    <PageStack>
+      <PageIntro>
         <PageHeader
           eyebrow="Schemas"
           title="Define what the model should look for before the document run starts."
           description="Keep the setup sequence obvious: choose a reusable schema, describe the extraction job, review the search parameters, then confirm evidence and export rules."
           actions={
-            <button
-              type="button"
-              className="secondary-button"
+            <Button
+              variant="secondary"
               onClick={() => void onCreateTemplate()}
               disabled={busyAction === "save-template"}
             >
               {busyAction === "save-template" ? "Saving..." : "Save schema"}
-            </button>
+            </Button>
           }
         />
-      </section>
+      </PageIntro>
 
-      <div className="detail-grid">
-        <section
-          className="surface span-12 schema-selector-surface"
+      <div className="grid grid-cols-12 gap-5">
+        <TitledSurface
+          as="section"
+          className="col-span-12"
           aria-labelledby="schema-base-step-title"
+          titleId="schema-base-step-title"
+          title="1. Start from the closest existing schema"
+          subtitle="Most operators should begin from a reusable schema and only change the brief when the job truly differs."
         >
-          <CardHeader
-            titleId="schema-base-step-title"
-            title="1. Start from the closest existing schema"
-            subtitle="Most operators should begin from a reusable schema and only change the brief when the job truly differs."
-          />
-          <div className="schema-selector-grid">
+          <div className="grid gap-4 [grid-template-columns:minmax(0,1fr)_minmax(260px,0.9fr)_minmax(260px,0.95fr)] max-[1280px]:grid-cols-1">
             <FieldShell
               label="Base schema"
               hint="Choose the reusable extraction pattern that is closest to this job."
@@ -1826,43 +1913,42 @@ function SchemaPage({
                 ))}
               </select>
             </FieldShell>
-            <div className="schema-active-card">
-              <span className="metric-label">Active setup</span>
-              <strong>
+            <PanelCard tone="subtle" spacing="compact">
+              <MetricLabel>Active setup</MetricLabel>
+              <strong className="block">
                 {selectedSchema?.name ?? definition.template_name}
               </strong>
-              <p>
+              <SupportingText className="mt-[0.45rem]">
                 {selectedSchema?.description ||
                   definition.description ||
                   "Use this starter schema as the base contract for the extraction job below."}
-              </p>
-              <div className="inline-badges">
+              </SupportingText>
+              <div className="flex flex-wrap items-center gap-[0.55rem]">
                 <StatusBadge tone="indigo">
                   {selectedTemplateVersionId
                     ? "Version selected"
                     : "Starter template"}
                 </StatusBadge>
-                <span className="pill">
+                <Badge tone="neutral">
                   {selectedVersions.length
                     ? `${selectedVersions.length} saved versions`
                     : "No saved versions yet"}
-                </span>
+                </Badge>
               </div>
-            </div>
+            </PanelCard>
           </div>
-        </section>
+        </TitledSurface>
 
-        <section
-          className="surface span-7"
+        <TitledSurface
+          as="section"
+          className="col-span-7 max-[1280px]:col-span-12"
           aria-labelledby="schema-brief-step-title"
+          titleId="schema-brief-step-title"
+          title="2. Describe the extraction brief"
+          subtitle="Tell the system what class of document this is and what information the run is meant to find."
         >
-          <CardHeader
-            titleId="schema-brief-step-title"
-            title="2. Describe the extraction brief"
-            subtitle="Tell the system what class of document this is and what information the run is meant to find."
-          />
-          <div className="schema-brief-grid">
-            <div className="form-grid">
+          <div className="grid gap-4 [grid-template-columns:minmax(0,1.35fr)_minmax(280px,0.95fr)] max-[1280px]:grid-cols-1">
+            <FormGrid>
               <label>
                 <span>Schema name</span>
                 <input
@@ -1887,7 +1973,7 @@ function SchemaPage({
                   }
                 />
               </label>
-              <label className="full-line">
+              <label className="col-span-full">
                 <span>What should this run look for?</span>
                 <textarea
                   rows={4}
@@ -1924,42 +2010,47 @@ function SchemaPage({
                   }))
                 }
               />
-            </div>
-            <div className="schema-guidance-stack">
-              <div className="schema-guidance-card">
-                <span className="metric-label">Best practice</span>
-                <strong>Describe the extraction goal, not the model.</strong>
-                <p>
+            </FormGrid>
+            <div className="grid gap-[0.85rem]">
+              <PanelCard tone="subtle" spacing="compact">
+                <MetricLabel>Best practice</MetricLabel>
+                <strong className="block">
+                  Describe the extraction goal, not the model.
+                </strong>
+                <SupportingText className="mt-[0.45rem]">
                   Write the task the operator cares about: what values must be
                   found, what evidence matters, and what should happen when the
                   value is missing or ambiguous.
-                </p>
-              </div>
-              <div className="schema-guidance-card muted">
-                <span className="metric-label">Current search surface</span>
-                <ul className="schema-checklist">
+                </SupportingText>
+              </PanelCard>
+              <div className="rounded-[18px] border border-subtle bg-[rgba(248,250,255,0.88)] px-[1.05rem] py-4">
+                <MetricLabel>Current search surface</MetricLabel>
+                <ul className="mt-[0.65rem] pl-[1.1rem] text-[0.95rem] text-default">
                   <li>
                     {definition.extracted_fields.length} extraction targets
                     defined
                   </li>
-                  <li>{requiredFieldCount} required values must be found</li>
-                  <li>{citationFieldCount} fields expect source evidence</li>
+                  <li className="mt-[0.4rem]">
+                    {requiredFieldCount} required values must be found
+                  </li>
+                  <li className="mt-[0.4rem]">
+                    {citationFieldCount} fields expect source evidence
+                  </li>
                 </ul>
               </div>
             </div>
           </div>
-        </section>
+        </TitledSurface>
 
         {showLangExtractEditor ? (
-          <section
-            className="surface span-12"
+          <TitledSurface
+            as="section"
+            className="col-span-12"
             aria-labelledby="langextract-step-title"
+            titleId="langextract-step-title"
+            title="3. Teach the schema with grounded examples"
+            subtitle="Start with the smallest grounded example set that proves the behavior you want, then promote reviewed suggestions only when they deserve the next saved version."
           >
-            <CardHeader
-              titleId="langextract-step-title"
-              title="3. Teach the schema with grounded examples"
-              subtitle="Start with the smallest grounded example set that proves the behavior you want, then promote reviewed suggestions only when they deserve the next saved version."
-            />
             <LangExtractEditor
               draft={draft}
               setDraft={setDraft}
@@ -1980,81 +2071,56 @@ function SchemaPage({
               saveBusy={busyAction === "save-template"}
               sourceVersionLabel={definition.template_version}
             />
-          </section>
+          </TitledSurface>
         ) : null}
 
-        <section className="surface span-5" aria-labelledby="setup-map-title">
-          <CardHeader
-            titleId="setup-map-title"
-            title="Setup map"
-            subtitle="Keep the configuration sequence obvious so the user always knows what comes next."
-          />
-          <ol className="schema-step-list">
-            <li className="schema-step-card active">
-              <span className="schema-step-number" aria-hidden="true">
-                1
-              </span>
-              <div>
-                <strong>Choose a schema base</strong>
-                <p>
-                  Reuse the closest existing definition before creating a new
-                  one.
-                </p>
-              </div>
-            </li>
-            <li className="schema-step-card active">
-              <span className="schema-step-number" aria-hidden="true">
-                2
-              </span>
-              <div>
-                <strong>Describe the extraction goal</strong>
-                <p>
-                  State what the run should search for in plain operational
-                  terms.
-                </p>
-              </div>
-            </li>
+        <TitledSurface
+          as="section"
+          className="col-span-5 max-[1280px]:col-span-12"
+          aria-labelledby="setup-map-title"
+          titleId="setup-map-title"
+          title="Setup map"
+          subtitle="Keep the configuration sequence obvious so the user always knows what comes next."
+        >
+          <ol className="grid list-none gap-[0.85rem] p-0">
+            <StepCard
+              as="li"
+              tone="accent"
+              step={1}
+              title="Choose a schema base"
+              description="Reuse the closest existing definition before creating a new one."
+            />
+            <StepCard
+              as="li"
+              tone="accent"
+              step={2}
+              title="Describe the extraction goal"
+              description="State what the run should search for in plain operational terms."
+            />
             {showLangExtractEditor ? (
-              <li className="schema-step-card active">
-                <span className="schema-step-number" aria-hidden="true">
-                  3
-                </span>
-                <div>
-                  <strong>Teach the schema with examples</strong>
-                  <p>
-                    Ground the schema with reliable spans before promoting
-                    reviewed suggestions.
-                  </p>
-                </div>
-              </li>
+              <StepCard
+                as="li"
+                tone="accent"
+                step={3}
+                title="Teach the schema with examples"
+                description="Ground the schema with reliable spans before promoting reviewed suggestions."
+              />
             ) : null}
-            <li className="schema-step-card">
-              <span className="schema-step-number" aria-hidden="true">
-                {searchParametersStepNumber}
-              </span>
-              <div>
-                <strong>Review search parameters</strong>
-                <p>
-                  Confirm the exact fields, evidence requirements, and output
-                  types.
-                </p>
-              </div>
-            </li>
-            <li className="schema-step-card">
-              <span className="schema-step-number" aria-hidden="true">
-                {outputRulesStepNumber}
-              </span>
-              <div>
-                <strong>Confirm review and export rules</strong>
-                <p>
-                  Make sure the output and human-review burden match the
-                  workflow.
-                </p>
-              </div>
-            </li>
+            <StepCard
+              as="li"
+              step={searchParametersStepNumber}
+              title="Review search parameters"
+              description="Confirm the exact fields, evidence requirements, and output types."
+            />
+            <StepCard
+              as="li"
+              step={outputRulesStepNumber}
+              title="Confirm review and export rules"
+              description="Make sure the output and human-review burden match the workflow."
+            />
           </ol>
 
-          <div className="summary-grid top-gap">
+          <SummaryGrid className="mt-4">
             <SummaryStat
               label="Search targets"
               value={definition.extracted_fields.length}
@@ -2076,33 +2142,35 @@ function SchemaPage({
               value={exportFormatsLabel}
               support="Standardized output formats"
             />
-          </div>
-        </section>
+          </SummaryGrid>
+        </TitledSurface>
 
-        <section
-          className="surface span-7"
+        <TitledSurface
+          as="section"
+          className="col-span-7 max-[1280px]:col-span-12"
           aria-labelledby="search-parameters-step-title"
+          titleId="search-parameters-step-title"
+          title={`${searchParametersStepNumber}. Review the search parameters`}
+          subtitle="This is the actual search contract the extraction run will follow."
         >
-          <CardHeader
-            titleId="search-parameters-step-title"
-            title={`${searchParametersStepNumber}. Review the search parameters`}
-            subtitle="This is the actual search contract the extraction run will follow."
-          />
-          <div className="builder-list parameter-list">
+          <div className="grid gap-4">
             {definition.extracted_fields.map((field, index) => (
-              <div key={field.name} className="builder-item parameter-card">
-                <div className="parameter-card-header">
-                  <div className="parameter-index">{index + 1}</div>
-                  <div className="parameter-copy">
-                    <div className="builder-item-topline">
+              <div
+                key={field.name}
+                className="rounded-[var(--ds-radius-lg)] border border-border bg-panel p-[1.05rem] shadow-sm"
+              >
+                <div className="grid items-start gap-[0.9rem] [grid-template-columns:auto_minmax(0,1fr)]">
+                  <StepMarker>{index + 1}</StepMarker>
+                  <div className="grid gap-[0.45rem]">
+                    <div className="flex flex-wrap items-center justify-between gap-4 max-[820px]:items-stretch">
                       <strong>{field.label}</strong>
-                      <div className="inline-badges">
-                        <span className="pill">{field.type}</span>
+                      <div className="flex flex-wrap items-center gap-[0.55rem]">
+                        <Badge tone="neutral">{field.type}</Badge>
                         <StatusBadge tone={field.required ? "info" : "warning"}>
                           {field.required ? "Required" : "Optional"}
                         </StatusBadge>
                         {field.citation_required ? (
-                          <span className="pill">Evidence required</span>
+                          <Badge tone="neutral">Evidence required</Badge>
                         ) : null}
                       </div>
                     </div>
@@ -2113,110 +2181,114 @@ function SchemaPage({
                     </p>
                   </div>
                 </div>
-                <div className="parameter-meta-grid">
-                  <div className="parameter-meta-cell">
-                    <span className="metric-label">Field key</span>
-                    <strong>{field.name}</strong>
-                  </div>
-                  <div className="parameter-meta-cell">
-                    <span className="metric-label">Output type</span>
-                    <strong>{field.type}</strong>
-                  </div>
-                  <div className="parameter-meta-cell">
-                    <span className="metric-label">Null handling</span>
-                    <strong>
-                      {field.required
+                <div className="mt-[0.9rem] grid gap-3 sm:grid-cols-2">
+                  <DetailTile label="Field key" value={field.name} />
+                  <DetailTile label="Output type" value={field.type} />
+                  <DetailTile
+                    label="Null handling"
+                    value={
+                      field.required
                         ? "Do not allow missing values"
-                        : "Allow null when absent"}
-                    </strong>
-                  </div>
-                  <div className="parameter-meta-cell">
-                    <span className="metric-label">Review posture</span>
-                    <strong>
-                      {field.citation_required
+                        : "Allow null when absent"
+                    }
+                  />
+                  <DetailTile
+                    label="Review posture"
+                    value={
+                      field.citation_required
                         ? "Operator should confirm source evidence"
-                        : "Evidence optional for this field"}
-                    </strong>
-                  </div>
+                        : "Evidence optional for this field"
+                    }
+                  />
                 </div>
               </div>
             ))}
           </div>
-        </section>
+        </TitledSurface>
 
-        <section
-          className="surface span-5"
+        <TitledSurface
+          as="section"
+          className="col-span-5 max-[1280px]:col-span-12"
           aria-labelledby="output-rules-step-title"
+          titleId="output-rules-step-title"
+          title={`${outputRulesStepNumber}. Review output and trust rules`}
+          subtitle="Keep deterministic logic and export behavior visible before the schema is saved."
         >
-          <CardHeader
-            titleId="output-rules-step-title"
-            title={`${outputRulesStepNumber}. Review output and trust rules`}
-            subtitle="Keep deterministic logic and export behavior visible before the schema is saved."
-          />
-          <div className="schema-guidance-stack">
-            <div className="schema-policy-card">
-              <span className="metric-label">Provider</span>
-              <strong>{definition.llm_provider_settings.provider_type}</strong>
-              <p>
+          <div className="grid gap-[0.85rem]">
+            <PanelCard tone="subtle" spacing="compact">
+              <MetricLabel>Provider</MetricLabel>
+              <strong className="block">
+                {definition.llm_provider_settings.provider_type}
+              </strong>
+              <SupportingText className="mt-[0.45rem]">
                 Chunk size{" "}
                 {definition.llm_provider_settings.chunk_size ?? 16000}{" "}
                 characters ·{" "}
                 {draft.local_only
                   ? "local-first boundary"
                   : "external processing allowed"}
-              </p>
+              </SupportingText>
               {definition.langextract_config?.examples?.length ? (
-                <p>
+                <SupportingText className="mt-[0.45rem]">
                   LangExtract examples{" "}
                   {definition.langextract_config.examples.length}
-                </p>
+                </SupportingText>
               ) : null}
-            </div>
-            <div className="schema-policy-card">
-              <span className="metric-label">Review threshold</span>
-              <strong>
+            </PanelCard>
+            <PanelCard tone="subtle" spacing="compact">
+              <MetricLabel>Review threshold</MetricLabel>
+              <strong className="block">
                 {citationFieldCount
                   ? "Evidence-backed review expected"
                   : "Light review posture"}
               </strong>
-              <p>
+              <SupportingText className="mt-[0.45rem]">
                 Required fields and low-confidence values should be reviewed
                 before the export is treated as final.
-              </p>
-            </div>
+              </SupportingText>
+            </PanelCard>
           </div>
 
-          <div className="formula-editor-shell top-gap">
-            <div className="hint-box">
-              <strong>Calculated outputs stay deterministic.</strong>
-              <p>
+          <div className="mt-4 grid gap-[0.9rem]">
+            <NoteCard tone="info" density="compact">
+              <strong className="mb-[0.35rem] block">
+                Calculated outputs stay deterministic.
+              </strong>
+              <SupportingText className="mt-0">
                 Keep formulas in the product so the model only extracts source
                 values and the application owns the final math.
-              </p>
-            </div>
+              </SupportingText>
+            </NoteCard>
             {definition.calculated_fields.length ? (
               definition.calculated_fields.map((field) => (
-                <div key={field.name} className="formula-chip">
+                <div
+                  key={field.name}
+                  className="rounded-[16px] border border-[rgba(var(--accent-rgb),0.12)] bg-[rgba(var(--accent-rgb),0.06)] px-4 py-[0.9rem] font-mono text-[0.9rem] text-brand-strong"
+                >
                   {field.label} = {field.formula}
                 </div>
               ))
             ) : (
-              <div className="hint-box">
-                <strong>No calculated outputs yet.</strong>
-                <p>
+              <NoteCard tone="info" density="compact">
+                <strong className="mb-[0.35rem] block">
+                  No calculated outputs yet.
+                </strong>
+                <SupportingText className="mt-0">
                   Add formulas only when the workflow needs deterministic values
                   after extraction.
-                </p>
-              </div>
+                </SupportingText>
+              </NoteCard>
             )}
-            <div className="hint-box">
-              <strong>Export formats</strong>
-              <p>{exportFormatsLabel}</p>
-            </div>
+            <NoteCard tone="info" density="compact">
+              <strong className="mb-[0.35rem] block">Export formats</strong>
+              <SupportingText className="mt-0">
+                {exportFormatsLabel}
+              </SupportingText>
+            </NoteCard>
           </div>
-        </section>
+        </TitledSurface>
       </div>
-    </div>
+    </PageStack>
   );
 }
 
@@ -2245,7 +2317,10 @@ function ExtractionWorkspacePage({
   onSetReviewDraft,
   onSetFocusedField,
   onRunExtraction,
+  onRetryJob,
   onSaveReview,
+  onApproveAllReview,
+  onApproveHighConfidenceReview,
   onExport,
   onOpenSchemas,
   onOpenHelp,
@@ -2275,7 +2350,10 @@ function ExtractionWorkspacePage({
   onSetReviewDraft: (fieldName: string, value: string) => void;
   onSetFocusedField: (fieldName: string) => void;
   onRunExtraction: () => Promise<void>;
+  onRetryJob: () => Promise<void>;
   onSaveReview: () => Promise<void>;
+  onApproveAllReview: () => Promise<void>;
+  onApproveHighConfidenceReview: () => Promise<void>;
   onExport: (format: "json" | "csv" | "excel") => Promise<void>;
   onOpenSchemas: () => void;
   onOpenHelp: () => void;
@@ -2330,6 +2408,14 @@ function ExtractionWorkspacePage({
   const calculatedFields = selectedResult?.result.calculated_fields ?? [];
   const fieldsNeedingReview = extractedFields.filter(
     (field) => field.requires_review || field.validation_status === "invalid",
+  );
+  const highConfidenceReviewCount = fieldsNeedingReview.filter((field) =>
+    isHighConfidenceField(field),
+  ).length;
+  const jobProgressPct = clampProgressPct(selectedJob?.progress_pct);
+  const jobProgressLabel = getJobStageLabel(
+    selectedJob?.progress_stage ??
+      (selectedJob?.status === "queued" ? "queued" : null),
   );
   const workspaceInteractive = coreDataState === "ready";
   const validatedFields = extractedFields.filter(
@@ -2437,26 +2523,25 @@ function ExtractionWorkspacePage({
             : "The output is ready. Export it from the same place where you trusted it.";
 
   return (
-    <div className="page-stack">
-      <div className="workspace-layout">
-        <aside className="surface job-rail">
-          <CardHeader
-            title="Jobs"
-            subtitle="Switch runs without leaving the workspace."
-          />
-          <button
-            type="button"
-            className="primary-button full-width"
-            onClick={onStartNew}
-          >
+    <PageStack>
+      <div className="grid items-start gap-5 [grid-template-columns:280px_minmax(0,1fr)] max-[1280px]:grid-cols-1">
+        <TitledSurface
+          as="aside"
+          className="sticky top-[6.4rem] grid min-w-0 gap-4 bg-[rgba(255,255,255,0.62)] p-4 shadow-none"
+          title="Jobs"
+          subtitle="Switch runs without leaving the workspace."
+        >
+          <Button variant="primary" fullWidth onClick={onStartNew}>
             New extraction
-          </button>
-          <div className="job-rail-sections">
+          </Button>
+          <div className="grid gap-[0.9rem]">
             {jobGroups.length ? (
               jobGroups.map((group) => (
-                <div key={group.label} className="job-group">
-                  <span className="job-group-label">{group.label}</span>
-                  <div className="queue-list">
+                <div key={group.label} className="grid gap-[0.9rem]">
+                  <MetricLabel className="text-[0.76rem] tracking-[0.08em] text-faint">
+                    {group.label}
+                  </MetricLabel>
+                  <div className="grid gap-[0.7rem]">
                     {group.items.map((job) => {
                       const result = resultsByJob[job.id];
                       const document = documents.find(
@@ -2469,8 +2554,10 @@ function ExtractionWorkspacePage({
                           key={job.id}
                           type="button"
                           className={classNames(
-                            "queue-item",
-                            selectedJobId === job.id && "selected",
+                            "grid gap-[0.25rem] rounded-[var(--ds-radius-lg)] border px-4 py-[0.9rem] text-left transition-transform",
+                            selectedJobId === job.id
+                              ? "border-[rgba(77,96,255,0.22)] bg-[rgba(247,248,255,0.98)]"
+                              : "border-border bg-[rgba(255,255,255,0.78)] shadow-none hover:-translate-y-px",
                           )}
                           aria-current={
                             selectedJobId === job.id ? "true" : undefined
@@ -2481,8 +2568,10 @@ function ExtractionWorkspacePage({
                             {document?.original_filename ??
                               `Document ${job.document_id}`}
                           </strong>
-                          <span>{formatTimestamp(job.updated_at)}</span>
-                          <em>
+                          <SupportingText as="span" size="sm">
+                            {formatTimestamp(job.updated_at)}
+                          </SupportingText>
+                          <em className="text-[0.86rem] not-italic text-brand-strong">
                             {job.status === "completed"
                               ? reviewCount
                                 ? `${reviewCount} need review`
@@ -2498,7 +2587,7 @@ function ExtractionWorkspacePage({
                 </div>
               ))
             ) : (
-              <div className="rail-empty-state">
+              <div className="grid gap-[0.45rem] px-[0.1rem] pt-[0.95rem]">
                 <strong>
                   {coreDataState === "loading"
                     ? "Loading jobs..."
@@ -2516,10 +2605,10 @@ function ExtractionWorkspacePage({
               </div>
             )}
           </div>
-        </aside>
+        </TitledSurface>
 
-        <div className="workspace-stage">
-          <section className="surface">
+        <div className="min-w-0">
+          <Surface as="section">
             <PageHeader
               eyebrow="Extraction workspace"
               title={headerTitle}
@@ -2527,24 +2616,62 @@ function ExtractionWorkspacePage({
               actions={
                 <>
                   {stage === "review" ? (
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={() => void onSaveReview()}
+                    <>
+                      {highConfidenceReviewCount > 0 ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => void onApproveHighConfidenceReview()}
+                          disabled={
+                            !workspaceInteractive ||
+                            busyAction === "save-review"
+                          }
+                        >
+                          {busyAction === "save-review"
+                            ? "Saving..."
+                            : `Approve ${highConfidenceReviewCount} high-confidence`}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="secondary"
+                        onClick={() => void onApproveAllReview()}
+                        disabled={
+                          !workspaceInteractive ||
+                          busyAction === "save-review" ||
+                          fieldsNeedingReview.length === 0
+                        }
+                      >
+                        Approve all flagged
+                      </Button>
+                      <Button
+                        variant="primary"
+                        onClick={() => void onSaveReview()}
+                        disabled={
+                          !workspaceInteractive || busyAction === "save-review"
+                        }
+                      >
+                        {busyAction === "save-review"
+                          ? "Saving review..."
+                          : "Save review"}
+                      </Button>
+                    </>
+                  ) : null}
+                  {stage === "failed" && selectedJob ? (
+                    <Button
+                      variant="primary"
+                      onClick={() => void onRetryJob()}
                       disabled={
-                        !workspaceInteractive || busyAction === "save-review"
+                        !workspaceInteractive || busyAction === "retry-job"
                       }
                     >
-                      {busyAction === "save-review"
-                        ? "Saving review..."
-                        : "Save review"}
-                    </button>
+                      {busyAction === "retry-job"
+                        ? "Retrying..."
+                        : "Retry extraction"}
+                    </Button>
                   ) : null}
                   {stage === "ready" || stage === "review" ? (
                     <>
-                      <button
-                        type="button"
-                        className="secondary-button"
+                      <Button
+                        variant="secondary"
                         onClick={() => void onExport("json")}
                         disabled={
                           !workspaceInteractive || busyAction === "export-json"
@@ -2553,10 +2680,9 @@ function ExtractionWorkspacePage({
                         {busyAction === "export-json"
                           ? "Exporting JSON..."
                           : "Export JSON"}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button"
+                      </Button>
+                      <Button
+                        variant="secondary"
                         onClick={() => void onExport("csv")}
                         disabled={
                           !workspaceInteractive || busyAction === "export-csv"
@@ -2565,10 +2691,9 @@ function ExtractionWorkspacePage({
                         {busyAction === "export-csv"
                           ? "Exporting CSV..."
                           : "Export CSV"}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary-button"
+                      </Button>
+                      <Button
+                        variant="secondary"
                         onClick={() => void onExport("excel")}
                         disabled={
                           !workspaceInteractive || busyAction === "export-excel"
@@ -2577,14 +2702,13 @@ function ExtractionWorkspacePage({
                         {busyAction === "export-excel"
                           ? "Exporting Excel..."
                           : "Export Excel"}
-                      </button>
+                      </Button>
                     </>
                   ) : null}
                   {(stage === "draft" || stage === "failed") &&
                   templates.length ? (
-                    <button
-                      type="button"
-                      className="primary-button"
+                    <Button
+                      variant="primary"
                       onClick={() => void onRunExtraction()}
                       disabled={
                         !selectedDocument ||
@@ -2594,60 +2718,71 @@ function ExtractionWorkspacePage({
                       }
                     >
                       {busyAction === "run" ? "Queueing..." : "Run extraction"}
-                    </button>
+                    </Button>
                   ) : null}
                 </>
               }
             />
 
             {stage === "draft" ? (
-              <div className="workspace-guide-bar">
-                <div className="workspace-guide-item">
-                  <span>Document</span>
-                  <strong>
-                    {selectedDocument?.original_filename ?? "Choose a file"}
-                  </strong>
-                </div>
-                <div className="workspace-guide-item">
-                  <span>Schema</span>
-                  <strong>
-                    {selectedTemplateVersion?.version
+              <div className="mt-4 grid grid-cols-3 gap-[0.85rem] max-[1280px]:grid-cols-1">
+                <DetailTile
+                  label="Document"
+                  tone="subtle"
+                  value={selectedDocument?.original_filename ?? "Choose a file"}
+                  valueClassName="text-[0.95rem] tracking-[-0.02em]"
+                />
+                <DetailTile
+                  label="Schema"
+                  tone="subtle"
+                  value={
+                    selectedTemplateVersion?.version
                       ? `${selectedTemplate?.name ?? "Schema"} · ${selectedTemplateVersion.version}`
                       : templates.length
                         ? "Choose one schema"
-                        : "Create a schema first"}
-                  </strong>
-                </div>
-                <div className="workspace-guide-item workspace-guide-item-accent">
-                  <span>Next step</span>
-                  <strong>
-                    {!selectedDocument
+                        : "Create a schema first"
+                  }
+                  valueClassName="text-[0.95rem] tracking-[-0.02em]"
+                />
+                <DetailTile
+                  label="Next step"
+                  tone="accent"
+                  value={
+                    !selectedDocument
                       ? "Upload a file"
                       : selectedTemplateVersion
                         ? "Run extraction"
                         : templates.length
                           ? "Choose a schema"
-                          : "Open schema builder"}
-                  </strong>
-                </div>
+                          : "Open schema builder"
+                  }
+                  valueClassName="text-[0.95rem] tracking-[-0.02em]"
+                />
               </div>
             ) : null}
 
-            <div className="workspace-detail-grid">
-              <section className="surface section-surface">
-                <CardHeader
-                  title="Source"
-                  subtitle="Keep the document, schema, and evidence together so the next action stays obvious."
-                />
+            <div className="mt-4 grid items-start gap-4 [grid-template-columns:minmax(320px,0.95fr)_minmax(0,1.25fr)] max-[1280px]:grid-cols-1">
+              <TitledSurface
+                as="section"
+                className="grid gap-4 p-[1.1rem]"
+                tone="translucent"
+                title="Source"
+                subtitle="Keep the document, schema, and evidence together so the next action stays obvious."
+              >
                 {stage === "draft" ? (
-                  <div className="draft-source-stack">
-                    <div className="upload-zone">
-                      <div className="upload-glyph">↑</div>
-                      <strong>Upload PDF or source file</strong>
-                      <p>PDF, DOCX, JPG, PNG, TIFF, TXT</p>
-                      <button
-                        type="button"
-                        className="primary-button"
+                  <div className="grid gap-[0.9rem]">
+                    <div className="grid min-h-[290px] place-items-center gap-[0.7rem] rounded-[var(--ds-radius-lg)] border border-dashed border-[rgba(var(--accent-rgb),0.36)] bg-[linear-gradient(180deg,rgba(247,249,255,0.95),rgba(255,255,255,0.95))] p-[1.3rem] text-center">
+                      <div className="grid h-[58px] w-[58px] place-items-center rounded-[18px] bg-brand-soft text-[1.45rem] font-bold text-brand-strong">
+                        ↑
+                      </div>
+                      <strong className="text-[1.08rem]">
+                        Upload PDF or source file
+                      </strong>
+                      <p className="text-muted">
+                        PDF, DOCX, JPG, PNG, TIFF, TXT
+                      </p>
+                      <Button
+                        variant="primary"
                         onClick={() => uploadInputRef.current?.click()}
                         disabled={!workspaceInteractive}
                       >
@@ -2656,8 +2791,8 @@ function ExtractionWorkspacePage({
                           : coreDataState === "unavailable"
                             ? "Reconnect backend to upload"
                             : "Choose file"}
-                      </button>
-                      <span>
+                      </Button>
+                      <span className="text-muted">
                         Stay in this workspace after upload. Do not get kicked
                         to another destination.
                       </span>
@@ -2665,7 +2800,7 @@ function ExtractionWorkspacePage({
                         ref={uploadInputRef}
                         type="file"
                         aria-label="Choose document file"
-                        className="hidden-input"
+                        className="hidden"
                         disabled={!workspaceInteractive}
                         onChange={(event) => {
                           const file = event.target.files?.[0];
@@ -2677,7 +2812,7 @@ function ExtractionWorkspacePage({
                       />
                     </div>
 
-                    <div className="settings-grid">
+                    <SummaryGrid gap="lg">
                       <SummaryStat
                         label="Selected document"
                         value={
@@ -2695,7 +2830,7 @@ function ExtractionWorkspacePage({
                             : "—"
                         }
                       />
-                    </div>
+                    </SummaryGrid>
 
                     {documents.length > 1 ? (
                       <label>
@@ -2720,7 +2855,7 @@ function ExtractionWorkspacePage({
                     ) : null}
 
                     {templates.length ? (
-                      <div className="form-grid">
+                      <FormGrid>
                         <label>
                           <span>Schema</span>
                           <select
@@ -2740,7 +2875,7 @@ function ExtractionWorkspacePage({
                             ))}
                           </select>
                         </label>
-                        <div className="note-card compact full-line">
+                        <NoteCard density="compact" className="col-span-full">
                           <strong>Schema version</strong>
                           <p>
                             {selectedTemplateVersion
@@ -2749,13 +2884,12 @@ function ExtractionWorkspacePage({
                           </p>
                           {hasMultipleSchemaVersions ? (
                             <>
-                              <div className="inline-actions top-gap">
-                                <span className="pill">
+                              <InlineGroup className="mt-4">
+                                <Badge tone="indigo">
                                   {selectedSchemaVersions.length} saved versions
-                                </span>
-                                <button
-                                  type="button"
-                                  className="text-link"
+                                </Badge>
+                                <Button
+                                  variant="text"
                                   disabled={!workspaceInteractive}
                                   aria-expanded={showVersionSelector}
                                   aria-controls="schema-version-panel"
@@ -2768,13 +2902,10 @@ function ExtractionWorkspacePage({
                                   {showVersionSelector
                                     ? "Hide versions"
                                     : "Change version"}
-                                </button>
-                              </div>
+                                </Button>
+                              </InlineGroup>
                               {showVersionSelector ? (
-                                <div
-                                  id="schema-version-panel"
-                                  className="top-gap"
-                                >
+                                <div id="schema-version-panel" className="mt-4">
                                   <label>
                                     <span>Schema version</span>
                                     <select
@@ -2802,115 +2933,88 @@ function ExtractionWorkspacePage({
                               ) : null}
                             </>
                           ) : null}
-                        </div>
-                      </div>
+                        </NoteCard>
+                      </FormGrid>
                     ) : coreDataState === "loading" ? (
-                      <div className="note-card">
+                      <NoteCard>
                         <strong>Loading workspace data...</strong>
                         <p>
                           Pulling schemas, documents, and job history into the
                           extraction workspace now.
                         </p>
-                      </div>
+                      </NoteCard>
                     ) : coreDataState === "unavailable" ? (
-                      <div className="note-card">
+                      <NoteCard>
                         <strong>Workspace data unavailable</strong>
                         <p>
                           The local API is down, so schemas and saved document
                           history cannot load yet.
                         </p>
-                        <div className="inline-actions top-gap">
-                          <button
-                            type="button"
-                            className="secondary-button"
+                        <InlineGroup className="mt-4">
+                          <Button
+                            variant="secondary"
                             onClick={() => void onRetryConnection()}
                           >
                             Retry connection
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button small"
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={onOpenHelp}
                           >
                             Open help
-                          </button>
-                        </div>
-                      </div>
+                          </Button>
+                        </InlineGroup>
+                      </NoteCard>
                     ) : (
-                      <div className="note-card">
+                      <NoteCard>
                         <strong>No schemas yet</strong>
                         <p>
                           Create one reusable schema, then come straight back
                           here to run extraction on this document.
                         </p>
-                        <div className="inline-actions top-gap">
-                          <button
-                            type="button"
-                            className="secondary-button"
-                            onClick={onOpenSchemas}
-                          >
+                        <InlineGroup className="mt-4">
+                          <Button variant="secondary" onClick={onOpenSchemas}>
                             Open schema builder
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-button small"
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={onOpenHelp}
                           >
                             Open help
-                          </button>
-                        </div>
-                      </div>
+                          </Button>
+                        </InlineGroup>
+                      </NoteCard>
                     )}
                   </div>
                 ) : selectedResult ? (
-                  <div className="evidence-stack">
-                    <div className="evidence-preview">
-                      <strong>
+                  <div className="grid gap-[0.9rem]">
+                    <PanelCard tone="gradient">
+                      <strong className="block">
                         {selectedDocument?.original_filename ??
                           "Selected document"}
                       </strong>
-                      <p>
+                      <p className="mt-[0.45rem] text-[0.92rem] text-muted">
                         {focusedField
                           ? "Source evidence should justify the field the user is editing."
                           : "No field is currently selected."}
                       </p>
-                    </div>
+                    </PanelCard>
                     {focusedField ? (
-                      <div className="note-card">
-                        <strong>{focusedField.label}</strong>
-                        <p>
-                          {focusedField.source_text ||
-                            "No citation snippet returned for this field."}
-                        </p>
-                        <div className="inline-actions top-gap">
-                          <span className="pill">
-                            {focusedField.page_number
-                              ? `Page ${focusedField.page_number}`
-                              : "Page —"}
-                          </span>
-                          <span className="pill">
-                            {focusedField.location_reference ||
-                              "Unknown location"}
-                          </span>
-                          <span className="pill">
-                            {formatCharInterval(focusedField)}
-                          </span>
-                          <span className="pill">
-                            Confidence{" "}
-                            {formatConfidence(focusedField.confidence_score)}
-                          </span>
-                        </div>
-                      </div>
+                      <SourceEvidencePanel field={focusedField} />
                     ) : null}
-                    <div className="evidence-list">
+                    <div className="grid gap-[0.7rem]">
                       {extractedFields.map((field) => (
                         <button
                           key={field.field_name}
                           type="button"
                           className={classNames(
-                            "evidence-row",
+                            "flex w-full items-start justify-between gap-4 rounded-[18px] border px-4 py-[0.95rem] text-left shadow-sm transition-colors",
                             focusedField?.field_name === field.field_name &&
-                              "selected",
+                              "border-[rgba(77,96,255,0.28)] bg-[rgba(247,248,255,0.98)]",
+                            focusedField?.field_name !== field.field_name &&
+                              "border-[rgba(122,138,179,0.16)] bg-[rgba(255,255,255,0.92)]",
                           )}
                           aria-current={
                             focusedField?.field_name === field.field_name
@@ -2921,7 +3025,7 @@ function ExtractionWorkspacePage({
                         >
                           <div>
                             <strong>{field.label}</strong>
-                            <p>
+                            <p className="mt-[0.35rem] text-[0.88rem] text-muted">
                               {field.source_text ||
                                 field.extraction_notes ||
                                 "No source snippet returned."}
@@ -2947,34 +3051,21 @@ function ExtractionWorkspacePage({
                     </div>
                   </div>
                 ) : (
-                  <div className="processing-stack">
-                    <div className="evidence-preview">
-                      <strong>
+                  <div className="grid gap-[0.9rem]">
+                    <PanelCard tone="gradient">
+                      <strong className="block">
                         {selectedDocument?.original_filename ??
                           "Selected document"}
                       </strong>
-                      <p>
+                      <p className="mt-[0.45rem] text-[0.92rem] text-muted">
                         {selectedDocument
                           ? `${getDocumentTypeLabel(selectedDocument.content_type)} · uploaded ${formatTimestamp(selectedDocument.created_at)}`
                           : "Choose a document to begin."}
                       </p>
-                    </div>
-                    <div className="progress-list">
-                      {progressSteps.map((step) => (
-                        <div
-                          key={step.label}
-                          className={classNames(
-                            "progress-step",
-                            step.complete && "complete",
-                          )}
-                        >
-                          <div className="progress-dot" aria-hidden="true" />
-                          <span>{step.label}</span>
-                        </div>
-                      ))}
-                    </div>
+                    </PanelCard>
+                    <ProgressList steps={progressSteps} />
                     {selectedJob?.error_message ? (
-                      <div className="note-card">
+                      <NoteCard>
                         <strong>
                           {parserFailureGuidance?.title ?? "Failure detail"}
                         </strong>
@@ -2994,20 +3085,38 @@ function ExtractionWorkspacePage({
                             .
                           </p>
                         ) : null}
-                      </div>
+                      </NoteCard>
                     ) : null}
                   </div>
                 )}
-              </section>
+              </TitledSurface>
 
-              <section className="surface section-surface">
+              <TitledSurface
+                as="section"
+                className="grid gap-4 p-[1.1rem]"
+                tone="translucent"
+                title={
+                  stage === "draft"
+                    ? "Outcome preview"
+                    : stage === "processing" || stage === "failed"
+                      ? "Progress"
+                      : stage === "review"
+                        ? "Review only the exceptions"
+                        : "Trusted result"
+                }
+                subtitle={
+                  stage === "draft"
+                    ? "The user should know what progress looks like before they press run."
+                    : stage === "processing" || stage === "failed"
+                      ? "This replaces the old Runs page. Status belongs inside the active job."
+                      : stage === "review"
+                        ? `${fieldsNeedingReview.length} fields need a human decision before export.`
+                        : "The extraction finished cleanly. Export directly from the trusted result."
+                }
+              >
                 {stage === "draft" ? (
                   <>
-                    <CardHeader
-                      title="Outcome preview"
-                      subtitle="The user should know what progress looks like before they press run."
-                    />
-                    <div className="summary-grid">
+                    <SummaryGrid>
                       <SummaryStat
                         label="Schema"
                         value={selectedTemplate?.name ?? "Choose one schema"}
@@ -3034,54 +3143,49 @@ function ExtractionWorkspacePage({
                           ) ?? "JSON · CSV · Excel"
                         }
                       />
-                    </div>
-                    <div className="note-card">
+                    </SummaryGrid>
+                    <NoteCard>
                       <strong>What happens next</strong>
                       <p>
                         Upload a PDF, keep the recommended schema unless it is
                         wrong, run extraction, then review only the uncertain
                         fields.
                       </p>
-                    </div>
+                    </NoteCard>
                     {selectedTemplateVersion ? (
-                      <div className="preview-list">
+                      <PreviewList>
                         {selectedTemplateVersion.definition.extracted_fields.map(
                           (field) => (
-                            <div key={field.name} className="preview-row">
-                              <div className="field-token">
-                                {field.label.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="preview-copy">
-                                <strong>{field.label}</strong>
-                                <span>{field.type}</span>
-                              </div>
-                              <div className="preview-meta">
-                                <StatusBadge
-                                  tone={field.required ? "info" : "warning"}
-                                >
-                                  {field.required ? "Required" : "Optional"}
-                                </StatusBadge>
-                                {field.citation_required ? (
-                                  <span className="pill">Citation</span>
-                                ) : null}
-                              </div>
-                            </div>
+                            <PreviewRow
+                              key={field.name}
+                              token={field.label.charAt(0).toUpperCase()}
+                              title={field.label}
+                              subtitle={field.type}
+                              meta={
+                                <>
+                                  <StatusBadge
+                                    tone={field.required ? "info" : "warning"}
+                                  >
+                                    {field.required ? "Required" : "Optional"}
+                                  </StatusBadge>
+                                  {field.citation_required ? (
+                                    <Badge tone="indigo">Citation</Badge>
+                                  ) : null}
+                                </>
+                              }
+                            />
                           ),
                         )}
-                      </div>
+                      </PreviewList>
                     ) : null}
                   </>
                 ) : stage === "processing" || stage === "failed" ? (
                   <div
-                    className="progress-state"
+                    className="grid gap-[0.9rem]"
                     role={stage === "failed" ? "alert" : "status"}
                     aria-live={stage === "failed" ? "assertive" : "polite"}
                   >
-                    <CardHeader
-                      title="Progress"
-                      subtitle="This replaces the old Runs page. Status belongs inside the active job."
-                    />
-                    <div className="summary-grid">
+                    <SummaryGrid>
                       <SummaryStat
                         label="Status"
                         value={selectedJob?.status ?? "Queued"}
@@ -3112,22 +3216,37 @@ function ExtractionWorkspacePage({
                         label="Last update"
                         value={formatTimestamp(selectedJob?.updated_at)}
                       />
-                    </div>
-                    <div className="progress-list">
-                      {progressSteps.map((step) => (
-                        <div
-                          key={step.label}
-                          className={classNames(
-                            "progress-step",
-                            step.complete && "complete",
-                          )}
-                        >
-                          <div className="progress-dot" aria-hidden="true" />
-                          <span>{step.label}</span>
+                      {stage === "processing" ? (
+                        <SummaryStat
+                          label="Pipeline stage"
+                          value={jobProgressLabel}
+                          tone="warning"
+                        />
+                      ) : null}
+                    </SummaryGrid>
+                    {stage === "processing" ? (
+                      <div className="grid gap-2">
+                        <div className="flex items-center justify-between gap-3 text-[0.88rem] text-muted">
+                          <span>{jobProgressLabel}</span>
+                          <span>{jobProgressPct}%</span>
                         </div>
-                      ))}
-                    </div>
-                    <div className="note-card">
+                        <div
+                          className="h-2 overflow-hidden rounded-full bg-[rgba(122,138,179,0.18)]"
+                          role="progressbar"
+                          aria-valuenow={jobProgressPct}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label="Extraction progress"
+                        >
+                          <div
+                            className="h-full rounded-full bg-[linear-gradient(90deg,rgba(77,96,255,0.92),rgba(99,130,255,0.92))] transition-[width] duration-500"
+                            style={{ width: `${jobProgressPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    <ProgressList steps={progressSteps} />
+                    <NoteCard>
                       <strong>
                         {stage === "failed"
                           ? "Recovery path"
@@ -3135,26 +3254,14 @@ function ExtractionWorkspacePage({
                       </strong>
                       <p>
                         {stage === "failed"
-                          ? "The user should be one action away from retrying instead of hunting through a job table."
-                          : "Web and desktop users both need live job progress without leaving the extraction workspace."}
+                          ? "Use Retry extraction to re-queue this job with the same document and schema."
+                          : "Progress updates every few seconds while the worker parses, extracts, validates, and calculates."}
                       </p>
-                    </div>
+                    </NoteCard>
                   </div>
                 ) : (
                   <>
-                    <CardHeader
-                      title={
-                        stage === "review"
-                          ? "Review only the exceptions"
-                          : "Trusted result"
-                      }
-                      subtitle={
-                        stage === "review"
-                          ? `${fieldsNeedingReview.length} fields need a human decision before export.`
-                          : "The extraction finished cleanly. Export directly from the trusted result."
-                      }
-                    />
-                    <div className="summary-grid">
+                    <SummaryGrid>
                       <SummaryStat
                         label="Extracted fields"
                         value={extractedFields.length}
@@ -3182,14 +3289,16 @@ function ExtractionWorkspacePage({
                             : "Not yet"
                         }
                       />
-                    </div>
+                    </SummaryGrid>
 
                     {fieldsNeedingReview.length ? (
-                      <div className="review-groups">
-                        <div className="review-group">
-                          <div className="review-group-header">
-                            <strong>Needs review</strong>
-                            <span>{fieldsNeedingReview.length} fields</span>
+                      <div className="grid gap-4">
+                        <div className="grid gap-[0.7rem]">
+                          <div className="flex items-center justify-between gap-3">
+                            <strong className="block">Needs review</strong>
+                            <SupportingText as="span" size="sm">
+                              {fieldsNeedingReview.length} fields
+                            </SupportingText>
                           </div>
                           {fieldsNeedingReview.map((field) => {
                             const definition = getFieldDefinition(
@@ -3201,200 +3310,169 @@ function ExtractionWorkspacePage({
                             const draftValue =
                               reviewDrafts[field.field_name] ??
                               getInitialReviewDraft(field, definition);
+                            const highConfidence = isHighConfidenceField(field);
                             return (
                               <div
                                 key={field.field_name}
                                 className={classNames(
-                                  "triage-card",
-                                  focusedField?.field_name ===
-                                    field.field_name && "selected-card",
+                                  "rounded-[var(--ds-radius-lg)] border px-4 py-[0.95rem] shadow-sm",
+                                  focusedField?.field_name === field.field_name
+                                    ? "border-[rgba(77,96,255,0.22)] bg-[rgba(247,248,255,0.98)]"
+                                    : "border-border bg-[rgba(255,255,255,0.92)]",
                                 )}
                               >
-                                <div className="review-card-header">
+                                <SectionHeader className="gap-4">
                                   <div>
                                     <strong>{field.label}</strong>
-                                    <p>
+                                    <SupportingText>
                                       {reviewSignals[0] ??
                                         "This field needs confirmation."}
-                                    </p>
+                                    </SupportingText>
                                   </div>
-                                  <StatusBadge
-                                    tone={
-                                      field.validation_status === "invalid"
-                                        ? "danger"
-                                        : "warning"
-                                    }
-                                  >
-                                    {field.validation_status === "invalid"
-                                      ? "Invalid"
-                                      : "Needs Review"}
-                                  </StatusBadge>
-                                </div>
+                                  <InlineGroup>
+                                    {highConfidence ? (
+                                      <Badge tone="success">
+                                        High confidence
+                                      </Badge>
+                                    ) : null}
+                                    <StatusBadge
+                                      tone={
+                                        field.validation_status === "invalid"
+                                          ? "danger"
+                                          : "warning"
+                                      }
+                                    >
+                                      {field.validation_status === "invalid"
+                                        ? "Invalid"
+                                        : "Needs Review"}
+                                    </StatusBadge>
+                                  </InlineGroup>
+                                </SectionHeader>
                                 {reviewSignals.length ? (
-                                  <div className="review-signals">
-                                    <span className="metric-label">
-                                      Review signals
-                                    </span>
-                                    <ul className="review-signal-list">
-                                      {reviewSignals.map((signal) => (
-                                        <li key={signal}>{signal}</li>
+                                  <div className="mt-[0.8rem]">
+                                    <MetricLabel>Review signals</MetricLabel>
+                                    <ul className="mt-[0.4rem] pl-[1.1rem] text-[0.88rem] text-muted">
+                                      {reviewSignals.map((signal, index) => (
+                                        <li
+                                          key={signal}
+                                          className={
+                                            index > 0
+                                              ? "mt-[0.32rem]"
+                                              : undefined
+                                          }
+                                        >
+                                          {signal}
+                                        </li>
                                       ))}
                                     </ul>
                                   </div>
                                 ) : null}
                                 <FieldShell
                                   label="Review value"
-                                  hint={
-                                    fieldType === "boolean"
-                                      ? "Choose the confirmed value."
-                                      : fieldType === "paragraph"
-                                        ? "Save the verified text exactly as it should appear in the result."
-                                        : fieldType === "date"
-                                          ? "Use the normalized date when the source is clear."
-                                          : "Edit the normalized value before saving."
-                                  }
+                                  hint={reviewFieldHint(fieldType, definition)}
                                 >
-                                  {fieldType === "boolean" ? (
-                                    <select
-                                      aria-label={`${field.label} review value`}
-                                      value={draftValue}
-                                      onChange={(event) =>
-                                        onSetReviewDraft(
-                                          field.field_name,
-                                          event.target.value,
-                                        )
-                                      }
-                                    >
-                                      <option value="">Unknown</option>
-                                      <option value="true">True</option>
-                                      <option value="false">False</option>
-                                    </select>
-                                  ) : fieldType === "paragraph" ? (
-                                    <textarea
-                                      aria-label={`${field.label} review value`}
-                                      rows={4}
-                                      value={draftValue}
-                                      onChange={(event) =>
-                                        onSetReviewDraft(
-                                          field.field_name,
-                                          event.target.value,
-                                        )
-                                      }
-                                    />
-                                  ) : (
-                                    <input
-                                      aria-label={`${field.label} review value`}
-                                      type={
-                                        fieldType === "date" ? "date" : "text"
-                                      }
-                                      value={draftValue}
-                                      onChange={(event) =>
-                                        onSetReviewDraft(
-                                          field.field_name,
-                                          event.target.value,
-                                        )
-                                      }
-                                    />
-                                  )}
+                                  <ReviewFieldEditor
+                                    fieldLabel={field.label}
+                                    fieldType={fieldType}
+                                    draftValue={draftValue}
+                                    definition={definition}
+                                    onChange={(value) =>
+                                      onSetReviewDraft(field.field_name, value)
+                                    }
+                                  />
                                 </FieldShell>
-                                <div className="triage-meta">
-                                  <span>
+                                <div className="mt-[0.55rem] grid gap-[0.18rem]">
+                                  <SupportingText as="span" size="sm">
                                     Current value:{" "}
                                     {formatValue(
                                       field.normalized_value ??
                                         field.extracted_value,
                                     )}
-                                  </span>
-                                  <span>
+                                  </SupportingText>
+                                  <SupportingText as="span" size="sm">
                                     {field.page_number
                                       ? `Page ${field.page_number}`
                                       : "Page —"}{" "}
                                     ·{" "}
                                     {field.location_reference ||
                                       "Unknown location"}
-                                  </span>
-                                  <span>{formatCharInterval(field)}</span>
-                                  <span>
+                                  </SupportingText>
+                                  <SupportingText as="span" size="sm">
+                                    {formatCharInterval(field)}
+                                  </SupportingText>
+                                  <SupportingText as="span" size="sm">
                                     Confidence{" "}
                                     {formatConfidence(field.confidence_score)}
-                                  </span>
+                                  </SupportingText>
                                 </div>
-                                <div className="inline-actions top-gap">
-                                  <button
-                                    type="button"
-                                    className="text-link"
+                                <InlineGroup className="mt-4">
+                                  <Button
+                                    variant="text"
                                     onClick={() =>
                                       onSetFocusedField(field.field_name)
                                     }
                                   >
                                     Show source
-                                  </button>
-                                  <span className="pill">{fieldType}</span>
-                                </div>
+                                  </Button>
+                                  <Badge tone="neutral">{fieldType}</Badge>
+                                </InlineGroup>
                               </div>
                             );
                           })}
                         </div>
                       </div>
                     ) : (
-                      <div className="note-card">
+                      <NoteCard>
                         <strong>No manual review required</strong>
                         <p>
                           The result is already ready for export. Do not make
                           the user visit another page just to download it.
                         </p>
-                      </div>
+                      </NoteCard>
                     )}
 
                     {validatedFields.length ? (
-                      <div className="review-group">
-                        <div className="review-group-header">
-                          <strong>Looks good</strong>
-                          <span>{validatedFields.length} fields</span>
+                      <div className="grid gap-[0.7rem]">
+                        <div className="flex items-center justify-between gap-3">
+                          <strong className="block">Looks good</strong>
+                          <SupportingText as="span" size="sm">
+                            {validatedFields.length} fields
+                          </SupportingText>
                         </div>
-                        <div className="preview-list">
+                        <PreviewList>
                           {validatedFields.slice(0, 6).map((field) => (
-                            <div key={field.field_name} className="preview-row">
-                              <div className="field-token">
-                                {field.label.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="preview-copy">
-                                <strong>{field.label}</strong>
-                                <span>
-                                  {formatValue(
-                                    field.normalized_value ??
-                                      field.extracted_value,
-                                  )}
-                                </span>
-                              </div>
-                              <div className="preview-meta">
+                            <PreviewRow
+                              key={field.field_name}
+                              token={field.label.charAt(0).toUpperCase()}
+                              title={field.label}
+                              subtitle={formatValue(
+                                field.normalized_value ?? field.extracted_value,
+                              )}
+                              meta={
                                 <StatusBadge tone="success">Valid</StatusBadge>
-                              </div>
-                            </div>
+                              }
+                            />
                           ))}
-                        </div>
+                        </PreviewList>
                       </div>
                     ) : null}
 
                     {calculatedFields.length ? (
-                      <div className="review-group">
-                        <div className="review-group-header">
-                          <strong>Calculated fields</strong>
-                          <span>{calculatedFields.length}</span>
+                      <div className="grid gap-[0.7rem]">
+                        <div className="flex items-center justify-between gap-3">
+                          <strong className="block">Calculated fields</strong>
+                          <SupportingText as="span" size="sm">
+                            {calculatedFields.length}
+                          </SupportingText>
                         </div>
-                        <div className="preview-list">
+                        <PreviewList>
                           {calculatedFields.map((field) => (
-                            <div key={field.field_name} className="preview-row">
-                              <div className="field-token">
-                                {field.label.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="preview-copy">
-                                <strong>{field.label}</strong>
-                                <span>
-                                  {formatValue(field.calculated_value)}
-                                </span>
-                              </div>
-                              <div className="preview-meta">
+                            <PreviewRow
+                              key={field.field_name}
+                              token={field.label.charAt(0).toUpperCase()}
+                              title={field.label}
+                              subtitle={formatValue(field.calculated_value)}
+                              meta={
                                 <StatusBadge
                                   tone={
                                     field.validation_status === "invalid"
@@ -3406,62 +3484,61 @@ function ExtractionWorkspacePage({
                                     ? "Invalid"
                                     : "Valid"}
                                 </StatusBadge>
-                              </div>
-                            </div>
+                              }
+                            />
                           ))}
-                        </div>
+                        </PreviewList>
                       </div>
                     ) : null}
 
-                    <div className="review-group">
-                      <div className="review-group-header">
-                        <strong>Export history</strong>
-                        <span>{exportHistory.length}</span>
+                    <div className="grid gap-[0.7rem]">
+                      <div className="flex items-center justify-between gap-3">
+                        <strong className="block">Export history</strong>
+                        <SupportingText as="span" size="sm">
+                          {exportHistory.length}
+                        </SupportingText>
                       </div>
                       {exportHistory.length ? (
-                        <div className="preview-list">
+                        <PreviewList>
                           {exportHistory.map((record) => (
-                            <div key={record.id} className="preview-row">
-                              <div className="field-token">
-                                {record.export_format.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="preview-copy">
-                                <strong>{basename(record.file_path)}</strong>
-                                <span>
-                                  {formatTimestamp(record.created_at)}
-                                </span>
-                              </div>
-                              <div className="preview-meta">
+                            <PreviewRow
+                              key={record.id}
+                              token={record.export_format
+                                .charAt(0)
+                                .toUpperCase()}
+                              title={basename(record.file_path)}
+                              subtitle={formatTimestamp(record.created_at)}
+                              meta={
                                 <a
-                                  className="text-link"
+                                  className="font-semibold text-brand-strong"
                                   href={`${API_BASE}/exports/${record.id}/download`}
                                   target="_blank"
                                   rel="noreferrer"
                                 >
                                   Download
                                 </a>
-                              </div>
-                            </div>
+                              }
+                            />
                           ))}
-                        </div>
+                        </PreviewList>
                       ) : (
-                        <div className="note-card compact">
+                        <NoteCard density="compact">
                           <strong>No exports yet</strong>
                           <p>
                             Exports should be available from this result, not
                             hidden behind another destination.
                           </p>
-                        </div>
+                        </NoteCard>
                       )}
                     </div>
                   </>
                 )}
-              </section>
+              </TitledSurface>
             </div>
-          </section>
+          </Surface>
         </div>
       </div>
-    </div>
+    </PageStack>
   );
 }
 
@@ -3573,21 +3650,32 @@ function SettingsPage({
   ]);
 
   return (
-    <div className="page-stack">
-      <section className="surface page-header-surface">
+    <PageStack>
+      <PageIntro>
         <PageHeader
           eyebrow="Settings"
           title="Confirm the current runtime, change it only if this workflow needs something else."
           description="This page should answer one question fast: keep the default provider, or switch to a different runtime or private endpoint."
         />
-      </section>
+      </PageIntro>
 
-      <section className="surface">
-        <CardHeader
-          title="Current defaults"
-          subtitle="Start here. If these match the job, leave this page."
-        />
-        <div className="settings-grid settings-grid-wide">
+      {isBootstrapMockProvider(provider) ? (
+        <NoteCard className="border-[rgba(214,158,0,0.28)] bg-[rgba(255,249,235,0.98)]">
+          <strong>Mock extractor is not for production</strong>
+          <p>
+            The bootstrap mock provider validates the upload → review → export
+            workflow without a live model. Company deployments should activate
+            Ollama, LangExtract, or another catalog provider below.
+          </p>
+        </NoteCard>
+      ) : null}
+
+      <TitledSurface
+        as="section"
+        title="Current defaults"
+        subtitle="Start here. If these match the job, leave this page."
+      >
+        <SummaryGrid columns="four" gap="lg">
           {[
             [
               "Provider mode",
@@ -3610,15 +3698,15 @@ function SettingsPage({
           ].map(([label, value]) => (
             <SummaryStat key={label} label={label} value={value} />
           ))}
-        </div>
-      </section>
+        </SummaryGrid>
+      </TitledSurface>
 
-      <section className="surface">
-        <CardHeader
-          title="Document parser runtime"
-          subtitle="This controls whether PDF, DOCX, PPTX, HTML, and image files can be parsed before extraction starts."
-        />
-        <div className="settings-grid settings-grid-wide">
+      <TitledSurface
+        as="section"
+        title="Document parser runtime"
+        subtitle="This controls whether PDF, DOCX, PPTX, HTML, and image files can be parsed before extraction starts."
+      >
+        <SummaryGrid columns="four" gap="lg">
           <SummaryStat
             label="Parser runtime"
             value={
@@ -3659,36 +3747,40 @@ function SettingsPage({
             label="Last worker update"
             value={formatTimestamp(parserStatus?.timestamp)}
           />
-        </div>
-        <div className="provider-item top-gap">
-          <span>Supported document classes</span>
-          <strong>
-            {parserStatus?.supported_classes?.join(" • ") ||
-              "PDF • DOCX • PPTX • HTML • Images • CSV • Excel • Plain text • Markdown"}
-          </strong>
-        </div>
-        <div className="provider-item">
-          <span>Docling-backed file extensions</span>
-          <strong>
-            {parserStatus?.supported_extensions?.join(" ") ||
-              ".pdf .docx .pptx .html .htm .png .jpg .jpeg .tiff"}
-          </strong>
-        </div>
+        </SummaryGrid>
+        <DetailPair
+          className="mt-4 gap-[0.28rem]"
+          label="Supported document classes"
+          value={
+            parserStatus?.supported_classes?.join(" • ") ||
+            "PDF • DOCX • PPTX • HTML • Images • CSV • Excel • Plain text • Markdown"
+          }
+          labelTone="muted"
+        />
+        <DetailPair
+          className="gap-[0.28rem]"
+          label="Docling-backed file extensions"
+          value={
+            parserStatus?.supported_extensions?.join(" ") ||
+            ".pdf .docx .pptx .html .htm .png .jpg .jpeg .tiff"
+          }
+          labelTone="muted"
+        />
         {parserStatus?.prewarm_error ? (
-          <div className="note-card top-gap">
+          <NoteCard className="mt-4">
             <strong>Parser prewarm warning</strong>
             <p>{parserStatus.prewarm_error}</p>
-          </div>
+          </NoteCard>
         ) : null}
-      </section>
+      </TitledSurface>
 
-      <section className="surface">
-        <CardHeader
-          title="Provider presets"
-          subtitle="Only switch providers when the current defaults are wrong for this document policy or runtime."
-        />
+      <TitledSurface
+        as="section"
+        title="Provider presets"
+        subtitle="Only switch providers when the current defaults are wrong for this document policy or runtime."
+      >
         {providerCatalog.length ? (
-          <div className="provider-grid">
+          <div className="grid gap-5 [grid-template-columns:repeat(2,minmax(0,1fr))] max-[1280px]:grid-cols-1">
             {providerCatalog.map((item) => {
               const selected =
                 provider?.provider_type === item.settings.provider_type &&
@@ -3719,91 +3811,89 @@ function SettingsPage({
                         : "danger";
               const detailsVisible = expandedProviderKey === item.key;
               return (
-                <section key={item.key} className="provider-card">
-                  <div className="provider-header">
+                <PanelCard
+                  as="section"
+                  key={item.key}
+                  tone="panel"
+                  spacing="spacious"
+                  className="rounded-[var(--ds-radius-lg)]"
+                >
+                  <SectionHeader className="gap-4">
                     <div>
-                      <span
-                        className={classNames(
-                          "provider-mode",
-                          item.mode === "local" ? "local" : "cloud",
-                        )}
-                      >
-                        {item.mode === "local" ? "Local" : "Cloud"}
-                      </span>
-                      <h3>{item.label}</h3>
+                      <ProviderModeBadge
+                        className="mb-[0.55rem]"
+                        mode={item.mode}
+                      />
+                      <h3 className="block">{item.label}</h3>
                     </div>
                     <StatusBadge tone={statusTone}>{statusLabel}</StatusBadge>
-                  </div>
-                  <div className="provider-body">
-                    <p>{item.description}</p>
-                    <div className="provider-item">
-                      <span>Model</span>
-                      <strong>{item.model}</strong>
-                    </div>
-                    <div className="provider-item">
-                      <span>Document handling</span>
-                      <strong>
-                        {item.settings.allow_external_processing
+                  </SectionHeader>
+                  <div className="grid gap-[0.85rem]">
+                    <p className="text-[0.92rem] text-muted">
+                      {item.description}
+                    </p>
+                    <DetailPair label="Model" value={item.model} />
+                    <DetailPair
+                      label="Document handling"
+                      value={
+                        item.settings.allow_external_processing
                           ? "Cloud processing allowed"
-                          : "Local-only processing"}
-                      </strong>
-                    </div>
-                    <div className="provider-item">
-                      <span>Runtime</span>
-                      <strong>
-                        {item.mode === "local"
+                          : "Local-only processing"
+                      }
+                    />
+                    <DetailPair
+                      label="Runtime"
+                      value={
+                        item.mode === "local"
                           ? "Runs against a local endpoint"
-                          : "Runs against a remote endpoint"}
-                      </strong>
-                    </div>
+                          : "Runs against a remote endpoint"
+                      }
+                    />
                     {detailsVisible ? (
                       <div
                         id={`provider-details-${item.key}`}
-                        className="provider-details"
+                        className="grid gap-[0.8rem] rounded-[16px] border border-subtle bg-muted p-[0.9rem]"
                       >
-                        <div className="provider-item">
-                          <span>Base URL</span>
-                          <strong>
-                            {item.base_url ?? "No network endpoint"}
-                          </strong>
-                        </div>
+                        <DetailPair
+                          label="Base URL"
+                          value={item.base_url ?? "No network endpoint"}
+                        />
                         {item.settings.deployment ? (
-                          <div className="provider-item">
-                            <span>Deployment</span>
-                            <strong>{item.settings.deployment}</strong>
-                          </div>
+                          <DetailPair
+                            label="Deployment"
+                            value={item.settings.deployment}
+                          />
                         ) : null}
-                        <div className="provider-item">
-                          <span>API key</span>
-                          <strong>
-                            {item.capabilities.requires_api_key
+                        <DetailPair
+                          label="API key"
+                          value={
+                            item.capabilities.requires_api_key
                               ? `Via ${item.api_key_env_var}`
-                              : "Not required"}
-                          </strong>
-                        </div>
-                        <div className="provider-item">
-                          <span>Readiness</span>
-                          <strong>
-                            {health
+                              : "Not required"
+                          }
+                        />
+                        <DetailPair
+                          label="Readiness"
+                          value={
+                            health
                               ? health.checks.join(" • ")
-                              : "No health data loaded"}
-                          </strong>
-                        </div>
-                        <div className="provider-item">
-                          <span>Latest probe</span>
-                          <strong>
-                            {probe
+                              : "No health data loaded"
+                          }
+                        />
+                        <DetailPair
+                          label="Latest probe"
+                          value={
+                            probe
                               ? `${probe.reachable ? "Reachable" : "Not reachable"}${probe.status_code ? ` (HTTP ${probe.status_code})` : ""}: ${probe.detail}`
-                              : "No live probe run"}
-                          </strong>
-                        </div>
+                              : "No live probe run"
+                          }
+                        />
                       </div>
                     ) : null}
                   </div>
-                  <div className="inline-actions">
-                    <button
-                      type="button"
-                      className="primary-button"
+                  <div className="flex flex-wrap items-center gap-[0.55rem]">
+                    <Button
+                      variant="primary"
                       onClick={() =>
                         void onSetProvider(buildProviderPayload(item))
                       }
@@ -3814,20 +3904,19 @@ function SettingsPage({
                         : busyAction === "save-provider"
                           ? "Saving..."
                           : "Set as default"}
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-button"
+                    </Button>
+                    <Button
+                      variant="secondary"
                       onClick={() => void onProbeProvider(item)}
                       disabled={busyAction === `probe-${item.key}`}
                     >
                       {busyAction === `probe-${item.key}`
                         ? "Probing..."
                         : "Probe"}
-                    </button>
-                    <button
-                      type="button"
-                      className="tertiary-button small"
+                    </Button>
+                    <Button
+                      variant="tertiary"
+                      size="sm"
                       aria-expanded={detailsVisible}
                       aria-controls={`provider-details-${item.key}`}
                       onClick={() =>
@@ -3837,48 +3926,47 @@ function SettingsPage({
                       }
                     >
                       {detailsVisible ? "Hide details" : "Show details"}
-                    </button>
+                    </Button>
                   </div>
-                </section>
+                </PanelCard>
               );
             })}
           </div>
         ) : (
-          <div className="note-card compact">
+          <NoteCard density="compact">
             <strong>No provider presets available right now</strong>
             <p>
               Provider presets load from the backend. Retry once the local API
               is reachable.
             </p>
-          </div>
+          </NoteCard>
         )}
-      </section>
+      </TitledSurface>
 
-      <section className="surface">
-        <CardHeader
-          title="Advanced provider profiles"
-          subtitle="Keep private endpoints and raw provider plumbing out of the everyday settings path."
-        />
-        <div className="note-card compact">
+      <TitledSurface
+        as="section"
+        title="Advanced provider profiles"
+        subtitle="Keep private endpoints and raw provider plumbing out of the everyday settings path."
+      >
+        <NoteCard density="compact">
           <strong>Private endpoints and saved custom profiles</strong>
           <p>
             Open this only when you need to register a private OpenAI-compatible
             or Azure endpoint.
           </p>
-          <div className="inline-actions top-gap">
-            <span className="pill">
+          <InlineGroup className="mt-4">
+            <Badge tone="neutral">
               {savedCustomProfiles.length} saved
               {savedCustomProfiles.length === 1 ? " profile" : " profiles"}
-            </span>
+            </Badge>
             {customProviderIsActive ? (
               <StatusBadge tone="info">Custom provider active</StatusBadge>
             ) : null}
             {customDraftChanged ? (
               <StatusBadge tone="warning">Draft edited</StatusBadge>
             ) : null}
-            <button
-              type="button"
-              className="secondary-button"
+            <Button
+              variant="secondary"
               aria-expanded={showCustomProviderDetails}
               aria-controls="advanced-provider-profiles-panel"
               onClick={() =>
@@ -3888,12 +3976,12 @@ function SettingsPage({
               {showCustomProviderDetails
                 ? "Hide advanced provider profiles"
                 : "Open advanced provider profiles"}
-            </button>
-          </div>
-        </div>
+            </Button>
+          </InlineGroup>
+        </NoteCard>
         {showCustomProviderDetails ? (
           <div id="advanced-provider-profiles-panel">
-            <div className="form-grid top-gap">
+            <FormGrid className="mt-4">
               <label>
                 <span>Display label</span>
                 <input
@@ -3950,7 +4038,7 @@ function SettingsPage({
                   <option value="azure_openai">Azure OpenAI</option>
                 </select>
               </label>
-              <label className="full-line">
+              <label className="col-span-full">
                 <span>Base URL</span>
                 <input
                   value={customProviderDraft.base_url}
@@ -4099,19 +4187,20 @@ function SettingsPage({
                   }))
                 }
               />
-            </div>
-            <div className="provider-item top-gap">
-              <span>Current draft probe</span>
-              <strong>
-                {probeResults[CUSTOM_PROVIDER_KEY]
+            </FormGrid>
+            <DetailPair
+              className="mt-4 gap-[0.28rem]"
+              label="Current draft probe"
+              value={
+                probeResults[CUSTOM_PROVIDER_KEY]
                   ? `${probeResults[CUSTOM_PROVIDER_KEY].reachable ? "Reachable" : "Not reachable"}: ${probeResults[CUSTOM_PROVIDER_KEY].detail}`
-                  : "No live probe run"}
-              </strong>
-            </div>
-            <div className="inline-actions top-gap">
-              <button
-                type="button"
-                className="secondary-button"
+                  : "No live probe run"
+              }
+              labelTone="muted"
+            />
+            <InlineGroup className="mt-4">
+              <Button
+                variant="secondary"
                 onClick={() => void onSaveCustomProfile()}
                 disabled={busyAction === "save-custom-profile"}
               >
@@ -4120,52 +4209,48 @@ function SettingsPage({
                   : selectedCustomProfileId
                     ? "Update saved profile"
                     : "Save profile"}
-              </button>
-              <button
-                type="button"
-                className="primary-button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => void onSetCustomProvider()}
                 disabled={busyAction === "save-provider"}
               >
                 {busyAction === "save-provider"
                   ? "Saving..."
                   : "Set custom provider as default"}
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void onProbeCustomProvider()}
                 disabled={busyAction === `probe-${CUSTOM_PROVIDER_KEY}`}
               >
                 {busyAction === `probe-${CUSTOM_PROVIDER_KEY}`
                   ? "Probing..."
                   : "Probe custom provider"}
-              </button>
-            </div>
+              </Button>
+            </InlineGroup>
             {savedCustomProfiles.length ? (
-              <div className="provider-grid top-gap">
+              <div className="mt-4 grid gap-5 [grid-template-columns:repeat(2,minmax(0,1fr))] max-[1280px]:grid-cols-1">
                 {savedCustomProfiles.map((profile) => {
                   const profileProbeIsStale = customProviderProfileProbeIsStale(
                     profile,
                     probeMaxAgeHours,
                   );
                   return (
-                    <section key={profile.id} className="provider-card">
-                      <div className="provider-header">
+                    <PanelCard
+                      as="section"
+                      key={profile.id}
+                      tone="panel"
+                      spacing="spacious"
+                      className="rounded-[var(--ds-radius-lg)]"
+                    >
+                      <SectionHeader className="gap-4">
                         <div>
-                          <span
-                            className={classNames(
-                              "provider-mode",
-                              profile.settings.mode === "local"
-                                ? "local"
-                                : "cloud",
-                            )}
-                          >
-                            {profile.settings.mode === "local"
-                              ? "Local"
-                              : "Cloud"}
-                          </span>
-                          <h3>{profile.name}</h3>
+                          <ProviderModeBadge
+                            className="mb-[0.55rem]"
+                            mode={profile.settings.mode}
+                          />
+                          <h3 className="block">{profile.name}</h3>
                         </div>
                         <StatusBadge
                           tone={
@@ -4186,110 +4271,96 @@ function SettingsPage({
                                 ? "Stale"
                                 : "Saved"}
                         </StatusBadge>
-                      </div>
-                      <div className="provider-body">
-                        <div className="provider-item">
-                          <span>Provider type</span>
-                          <strong>{profile.settings.provider_type}</strong>
-                        </div>
-                        <div className="provider-item">
-                          <span>Model</span>
-                          <strong>{profile.settings.model}</strong>
-                        </div>
-                        <div className="provider-item">
-                          <span>Updated</span>
-                          <strong>
-                            {new Date(profile.updated_at).toLocaleString()}
-                          </strong>
-                        </div>
-                        <div className="provider-item">
-                          <span>Last verified</span>
-                          <strong>
-                            {profile.last_probe_at
+                      </SectionHeader>
+                      <div className="grid gap-[0.85rem]">
+                        <DetailPair
+                          label="Provider type"
+                          value={profile.settings.provider_type}
+                        />
+                        <DetailPair
+                          label="Model"
+                          value={profile.settings.model}
+                        />
+                        <DetailPair
+                          label="Updated"
+                          value={new Date(profile.updated_at).toLocaleString()}
+                        />
+                        <DetailPair
+                          label="Last verified"
+                          value={
+                            profile.last_probe_at
                               ? `${formatTimestamp(profile.last_probe_at)}${profileProbeIsStale ? ` (${probeMaxAgeHours}h threshold exceeded)` : ""}`
-                              : "No successful probe recorded"}
-                          </strong>
-                        </div>
-                        <div className="provider-item">
-                          <span>Probe status</span>
-                          <strong>
-                            {profile.last_probe_status &&
+                              : "No successful probe recorded"
+                          }
+                        />
+                        <DetailPair
+                          label="Probe status"
+                          value={
+                            profile.last_probe_status &&
                             profile.last_probe_detail
                               ? `${profile.last_probe_status}: ${profile.last_probe_detail}`
-                              : "No successful probe recorded"}
-                          </strong>
-                        </div>
+                              : "No successful probe recorded"
+                          }
+                        />
                       </div>
-                      <div className="inline-actions">
-                        <button
-                          type="button"
-                          className="secondary-button"
+                      <InlineGroup>
+                        <Button
+                          variant="secondary"
                           onClick={() => onLoadCustomProfile(profile)}
                         >
                           Load into form
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary-button"
+                        </Button>
+                        <Button
+                          variant="secondary"
                           onClick={() => void onReverifyCustomProfile(profile)}
                           disabled={busyAction === `reverify-${profile.id}`}
                         >
                           {busyAction === `reverify-${profile.id}`
                             ? "Reverifying..."
                             : "Reverify"}
-                        </button>
-                        <button
-                          type="button"
-                          className="primary-button"
+                        </Button>
+                        <Button
+                          variant="primary"
                           onClick={() => void onActivateCustomProfile(profile)}
                           disabled={busyAction === `activate-${profile.id}`}
                         >
                           {busyAction === `activate-${profile.id}`
                             ? "Activating..."
                             : "Activate default"}
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary-button"
+                        </Button>
+                        <Button
+                          variant="secondary"
                           onClick={() => void onDeleteCustomProfile(profile)}
                           disabled={busyAction === `delete-${profile.id}`}
                         >
                           {busyAction === `delete-${profile.id}`
                             ? "Deleting..."
                             : "Delete"}
-                        </button>
-                      </div>
-                    </section>
+                        </Button>
+                      </InlineGroup>
+                    </PanelCard>
                   );
                 })}
               </div>
             ) : null}
           </div>
         ) : null}
-      </section>
+      </TitledSurface>
 
-      <section className="surface">
-        <CardHeader
-          title="Support and history"
-          subtitle="Use these only when you need to investigate or get unstuck."
-        />
-        <div className="inline-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onOpenAudit}
-          >
+      <TitledSurface
+        as="section"
+        title="Support and history"
+        subtitle="Use these only when you need to investigate or get unstuck."
+      >
+        <InlineGroup>
+          <Button variant="secondary" onClick={onOpenAudit}>
             Open audit history
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onOpenHelp}
-          >
+          </Button>
+          <Button variant="secondary" onClick={onOpenHelp}>
             Open help
-          </button>
-        </div>
-      </section>
+          </Button>
+        </InlineGroup>
+      </TitledSurface>
 
       <DesktopSetupPanel
         desktopStatus={desktopStatus}
@@ -4303,63 +4374,68 @@ function SettingsPage({
         onOpenAppDataDir={onOpenDesktopAppDataDir}
         onLoadLogs={onLoadDesktopLogs}
       />
-    </div>
+    </PageStack>
   );
 }
 
 function AuditPage() {
   return (
-    <div className="page-stack">
-      <section className="surface page-header-surface">
+    <PageStack>
+      <PageIntro>
         <PageHeader
           eyebrow="Audit"
           title="See what happened to a document after upload, review, recalculation, and export."
         />
-      </section>
-      <section className="surface">
-        <CardHeader
-          title="Recent activity"
-          subtitle="Keep the trail scannable so operators can answer what changed without digging through logs."
-        />
-        <div className="table-toolbar">
+      </PageIntro>
+      <TitledSurface
+        as="section"
+        title="Recent activity"
+        subtitle="Keep the trail scannable so operators can answer what changed without digging through logs."
+      >
+        <div className="mb-4 grid items-center gap-4 [grid-template-columns:minmax(180px,240px)_minmax(0,1fr)] max-[1080px]:grid-cols-1">
           <SummaryStat
             label="Recorded events"
             value={auditRows.length}
             tone="accent"
           />
-          <p className="table-toolbar-copy">
+          <p className="m-0 text-sm text-muted">
             Uploads, review edits, recalculations, and exports should read like
             one coherent timeline.
           </p>
         </div>
-        <div className="table-shell">
-          <table>
+        <div className="overflow-auto rounded-[var(--ds-radius-lg)] border border-subtle bg-panel shadow-sm">
+          <table className="min-w-[760px] w-full border-collapse">
             <thead>
               <tr>
-                <th>Timestamp</th>
-                <th>User</th>
-                <th>Action</th>
-                <th>Object</th>
-                <th>Details</th>
+                <TableHeaderCell>Timestamp</TableHeaderCell>
+                <TableHeaderCell>User</TableHeaderCell>
+                <TableHeaderCell>Action</TableHeaderCell>
+                <TableHeaderCell>Object</TableHeaderCell>
+                <TableHeaderCell>Details</TableHeaderCell>
               </tr>
             </thead>
             <tbody>
               {auditRows.map((row) => (
-                <tr key={`${row[0]}-${row[2]}`}>
-                  <td>{row[0]}</td>
-                  <td>{row[1]}</td>
-                  <td>
-                    <span className="table-event">{row[2]}</span>
-                  </td>
-                  <td>{row[3]}</td>
-                  <td>{row[4]}</td>
+                <tr
+                  key={`${row[0]}-${row[2]}`}
+                  className="hover:bg-[rgba(var(--accent-rgb),0.04)]"
+                >
+                  <TableDataCell>{row[0]}</TableDataCell>
+                  <TableDataCell>{row[1]}</TableDataCell>
+                  <TableDataCell>
+                    <span className="inline-flex items-center rounded-full bg-[rgba(var(--accent-rgb),0.08)] px-[0.72rem] py-[0.28rem] text-[var(--text-xs)] font-bold text-brand-strong">
+                      {row[2]}
+                    </span>
+                  </TableDataCell>
+                  <TableDataCell>{row[3]}</TableDataCell>
+                  <TableDataCell>{row[4]}</TableDataCell>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </section>
-    </div>
+      </TitledSurface>
+    </PageStack>
   );
 }
 
@@ -4373,81 +4449,75 @@ function HelpPage({
   onOpenSettings: () => void;
 }) {
   return (
-    <div className="page-stack">
-      <section className="surface page-header-surface">
+    <PageStack>
+      <PageIntro>
         <PageHeader
           eyebrow="Help"
           title="Get the next step when setup, review, or evidence is unclear."
         />
-      </section>
-      <section className="surface">
-        <CardHeader
-          title="Jump to the right surface"
-          subtitle="Use help to get unstuck, then leave it."
-        />
-        <div className="inline-actions">
-          <button
-            type="button"
-            className="primary-button"
-            onClick={onOpenExtractions}
-          >
+      </PageIntro>
+      <TitledSurface
+        as="section"
+        title="Jump to the right surface"
+        subtitle="Use help to get unstuck, then leave it."
+      >
+        <InlineGroup>
+          <Button variant="primary" onClick={onOpenExtractions}>
             Open extraction workspace
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onOpenSchemas}
-          >
+          </Button>
+          <Button variant="secondary" onClick={onOpenSchemas}>
             Open schema builder
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onOpenSettings}
-          >
+          </Button>
+          <Button variant="secondary" onClick={onOpenSettings}>
             Open settings
-          </button>
-        </div>
-      </section>
-      <div className="detail-grid">
-        <section className="surface span-6">
-          <CardHeader title="Getting started" />
-          <div className="note-list">
-            <div className="note-card">
+          </Button>
+        </InlineGroup>
+      </TitledSurface>
+      <div className="grid grid-cols-12 gap-5">
+        <TitledSurface
+          as="section"
+          className="col-span-6 max-[1280px]:col-span-12"
+          title="Getting started"
+        >
+          <div className="grid gap-[0.8rem]">
+            <NoteCard>
               <strong>First schema missing?</strong>
               <p>
                 Create one reusable extraction schema, then return to the
                 extraction workspace.
               </p>
-            </div>
-            <div className="note-card">
+            </NoteCard>
+            <NoteCard>
               <strong>Review is for exceptions</strong>
               <p>
                 The app should let the model extract first, then ask a human
                 only for the uncertain fields.
               </p>
-            </div>
-            <div className="note-card">
+            </NoteCard>
+            <NoteCard>
               <strong>Why source evidence matters</strong>
               <p>
                 Users trust extraction when the cited snippet makes the decision
                 easy.
               </p>
-            </div>
+            </NoteCard>
           </div>
-        </section>
-        <section className="surface span-6">
-          <CardHeader title="Supported concepts" />
-          <div className="note-list">
+        </TitledSurface>
+        <TitledSurface
+          as="section"
+          className="col-span-6 max-[1280px]:col-span-12"
+          title="Supported concepts"
+        >
+          <div className="grid gap-[0.8rem]">
             {helpTopics.map((item) => (
-              <div key={item} className="note-card compact">
+              <NoteCard key={item} density="compact">
                 <strong>{item}</strong>
-              </div>
+              </NoteCard>
             ))}
           </div>
-        </section>
+        </TitledSurface>
       </div>
-    </div>
+    </PageStack>
   );
 }
 
@@ -4531,6 +4601,8 @@ export function App() {
     "loading" | "ready" | "unavailable"
   >("loading");
   const [apiUnavailable, setApiUnavailable] = useState(false);
+  const [mockProviderWarningDismissed, setMockProviderWarningDismissed] =
+    useState(() => readMockProviderWarningDismissed());
   const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
     null,
   );
@@ -4700,7 +4772,13 @@ export function App() {
     setDesktopOnboardingDismissed(
       window.localStorage.getItem(DESKTOP_ONBOARDING_KEY) === "true",
     );
+    setMockProviderWarningDismissed(readMockProviderWarningDismissed());
   }, []);
+
+  const showMockProviderWarning =
+    !apiUnavailable &&
+    isBootstrapMockProvider(provider) &&
+    !mockProviderWarningDismissed;
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -4712,16 +4790,21 @@ export function App() {
     );
   }, [customProviderDraft]);
 
+  const hasActiveJobs = jobs.some(
+    (job) => job.status === "queued" || job.status === "running",
+  );
+
   useEffect(() => {
+    const pollMs = hasActiveJobs ? 2000 : 7000;
     const interval = window.setInterval(() => {
       void refreshCoreData();
       if (isTauriRuntime()) {
         void refreshDesktopStatus();
       }
-    }, 7000);
+    }, pollMs);
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasActiveJobs]);
 
   useEffect(() => {
     if (!selectedTemplateId || !templateVersions.length) {
@@ -5091,7 +5174,43 @@ export function App() {
     setActivePage("extractions");
   }
 
-  async function handleSaveReview() {
+  function buildReviewEditsForResult(
+    result: ResultPayload,
+    templateDefinition: TemplateDefinition | null,
+  ) {
+    return result.extracted_fields
+      .map((field) => {
+        const draft =
+          reviewDrafts[field.field_name] ??
+          getInitialReviewDraft(
+            field,
+            getFieldDefinition(templateDefinition, field.field_name),
+          );
+        const parsed = parseReviewDraft(
+          field,
+          draft,
+          getFieldDefinition(templateDefinition, field.field_name),
+        );
+        const original =
+          field.normalized_value ?? field.extracted_value ?? null;
+        if (JSON.stringify(parsed) === JSON.stringify(original)) {
+          return null;
+        }
+        return {
+          field_name: field.field_name,
+          normalized_value: parsed,
+          reason: "Updated from extraction workspace",
+        };
+      })
+      .filter(Boolean);
+  }
+
+  async function submitReview(
+    options: {
+      approve_high_confidence_min?: number;
+      approveOnly?: boolean;
+    } = {},
+  ) {
     if (!selectedJobId) {
       return;
     }
@@ -5109,31 +5228,9 @@ export function App() {
 
     try {
       setBusyAction("save-review");
-      const edits = selectedResult.result.extracted_fields
-        .map((field) => {
-          const draft =
-            reviewDrafts[field.field_name] ??
-            getInitialReviewDraft(
-              field,
-              getFieldDefinition(definition, field.field_name),
-            );
-          const parsed = parseReviewDraft(
-            field,
-            draft,
-            getFieldDefinition(definition, field.field_name),
-          );
-          const original =
-            field.normalized_value ?? field.extracted_value ?? null;
-          if (JSON.stringify(parsed) === JSON.stringify(original)) {
-            return null;
-          }
-          return {
-            field_name: field.field_name,
-            normalized_value: parsed,
-            reason: "Updated from extraction workspace",
-          };
-        })
-        .filter(Boolean);
+      const edits = options.approveOnly
+        ? []
+        : buildReviewEditsForResult(selectedResult.result, definition);
 
       const updatedResult = await readJson<ResultPayload>(
         `/results/${selectedResult.result_id}/review`,
@@ -5144,6 +5241,7 @@ export function App() {
             reviewer: "local-ui",
             edits,
             recalculate: true,
+            approve_high_confidence_min: options.approve_high_confidence_min,
           }),
         },
       );
@@ -5214,6 +5312,51 @@ export function App() {
         tone: "error",
         message:
           error instanceof Error ? error.message : "Could not save review.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleSaveReview() {
+    await submitReview();
+  }
+
+  async function handleApproveAllReview() {
+    await submitReview({ approveOnly: true });
+  }
+
+  async function handleApproveHighConfidenceReview() {
+    await submitReview({
+      approveOnly: true,
+      approve_high_confidence_min: REVIEW_HIGH_CONFIDENCE_MIN,
+    });
+  }
+
+  async function handleRetryJob() {
+    if (!selectedJobId) {
+      return;
+    }
+    try {
+      setBusyAction("retry-job");
+      const retried = await readJson<JobRecord>(
+        `/jobs/${selectedJobId}/retry`,
+        { method: "POST" },
+      );
+      await refreshCoreData();
+      setSelectedJobId(retried.id);
+      setFocusedFieldName(null);
+      setBanner({
+        tone: "success",
+        message: "Failed extraction re-queued. Progress will update here.",
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not retry extraction job.",
       });
     } finally {
       setBusyAction(null);
@@ -5719,16 +5862,19 @@ export function App() {
   }
 
   return (
-    <div className="app-frame">
+    <div className="grid min-h-screen [grid-template-columns:260px_minmax(0,1fr)] max-[1080px]:grid-cols-1">
       <AppSidebar
         activePage={activePage}
         onSelectPage={setActivePage}
         provider={provider}
         reviewCount={reviewCount}
       />
-      <div className="main-shell">
+      <div className="grid min-w-0 [grid-template-rows:auto_minmax(0,1fr)]">
         <TopBar activePage={activePage} />
-        <main className="workspace" aria-busy={workspaceBusy}>
+        <main
+          className="p-[1.5rem_1.8rem_2rem] max-[820px]:p-4"
+          aria-busy={workspaceBusy}
+        >
           <DesktopSetupNotice
             desktopStatus={desktopStatus}
             provider={provider}
@@ -5743,7 +5889,7 @@ export function App() {
 
           {apiUnavailable && !desktopStatus?.tauriMode ? (
             <div
-              className="banner banner-error"
+              className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-[16px] border border-[rgba(208,70,86,0.24)] bg-[rgba(255,244,246,0.96)] px-4 py-[0.9rem]"
               role="alert"
               aria-live="assertive"
             >
@@ -5751,60 +5897,68 @@ export function App() {
                 Backend unavailable. The extraction workspace is open, but the
                 local API is not reachable at {API_BASE}. Start the backend
                 stack or use
-                <code> npm run tauri:dev</code> for the managed desktop flow.
+                <code className="rounded-[8px] bg-[rgba(25,35,61,0.08)] px-[0.4rem] py-[0.12rem] font-mono text-[0.86em]">
+                  {" "}
+                  npm run tauri:dev
+                </code>{" "}
+                for the managed desktop flow.
               </span>
-              <div className="inline-actions">
-                <button
-                  type="button"
-                  className="secondary-button small"
+              <InlineGroup>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => void refreshCoreData()}
                 >
                   Retry connection
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button small"
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setActivePage("settings")}
                 >
                   Open settings
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button small"
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setActivePage("help")}
                 >
                   Open help
-                </button>
-              </div>
+                </Button>
+              </InlineGroup>
             </div>
+          ) : null}
+
+          {showMockProviderWarning ? (
+            <MockProviderProductionNotice
+              onOpenSettings={() => setActivePage("settings")}
+              onDismiss={() => {
+                dismissMockProviderWarning();
+                setMockProviderWarningDismissed(true);
+              }}
+            />
           ) : null}
 
           {banner ? (
             <div
               className={classNames(
-                "banner",
-                banner.tone === "error" ? "banner-error" : "banner-success",
+                "mb-4 flex flex-wrap items-center justify-between gap-4 rounded-[16px] border px-4 py-[0.9rem]",
+                banner.tone === "error"
+                  ? "border-[rgba(208,70,86,0.24)] bg-[rgba(255,244,246,0.96)]"
+                  : "border-[rgba(31,159,103,0.2)] bg-[rgba(241,255,247,0.95)]",
               )}
               role={banner.tone === "error" ? "alert" : "status"}
               aria-live={banner.tone === "error" ? "assertive" : "polite"}
             >
               <span>{banner.message}</span>
               {banner.actionLabel && banner.onAction ? (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={banner.onAction}
-                >
+                <Button variant="secondary" onClick={banner.onAction}>
                   {banner.actionLabel}
-                </button>
+                </Button>
               ) : null}
-              <button
-                type="button"
-                className="text-link"
-                onClick={() => setBanner(null)}
-              >
+              <Button variant="text" onClick={() => setBanner(null)}>
                 Dismiss
-              </button>
+              </Button>
             </div>
           ) : null}
 
@@ -5839,7 +5993,10 @@ export function App() {
               }
               onSetFocusedField={setFocusedFieldName}
               onRunExtraction={handleRunExtraction}
+              onRetryJob={handleRetryJob}
               onSaveReview={handleSaveReview}
+              onApproveAllReview={handleApproveAllReview}
+              onApproveHighConfidenceReview={handleApproveHighConfidenceReview}
               onExport={handleExport}
               onOpenSchemas={() => setActivePage("templates")}
               onOpenHelp={() => setActivePage("help")}
@@ -5923,7 +6080,7 @@ export function App() {
           ) : null}
 
           {devStatus && activePage !== "extractions" ? (
-            <div className="runtime-message">
+            <div className="mt-[0.9rem] text-[0.92rem] text-muted">
               Live state: {devStatus.documents} documents, {devStatus.jobs}{" "}
               jobs, {devStatus.results} results.
             </div>

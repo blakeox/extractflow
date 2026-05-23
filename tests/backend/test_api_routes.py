@@ -209,6 +209,97 @@ def test_template_creation_rejects_invalid_field_json_schema(client) -> None:
     assert "Field schema is not a valid JSON Schema" in response.text
 
 
+def test_template_creation_rejects_invalid_calculated_field_formula(client) -> None:
+    definition = build_template_definition()
+    definition["calculated_fields"][0]["formula"] = "coalesce("
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid Formula Schema",
+            "description": "Invalid calculated field formula",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Calculated field 'amount_with_buffer' formula is invalid" in response.text
+
+
+def test_template_creation_rejects_mismatched_calculated_field_depends_on(client) -> None:
+    definition = build_template_definition()
+    definition["calculated_fields"][0]["depends_on"] = []
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid Depends On Schema",
+            "description": "Mismatched calculated field dependencies",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "depends_on must match referenced fields" in response.text
+
+
+def test_template_creation_rejects_fields_marked_unusable_in_formulas(client) -> None:
+    definition = build_template_definition()
+    definition["extracted_fields"][1]["usable_in_formulas"] = False
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Invalid Formula Field Usage",
+            "description": "Formula references blocked field",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "not usable in formulas: total_amount" in response.text
+
+
+def test_template_creation_rejects_circular_calculated_field_dependencies(client) -> None:
+    definition = build_template_definition()
+    definition["calculated_fields"] = [
+        {
+            "name": "a",
+            "label": "A",
+            "description": "A",
+            "type": "calculated",
+            "output_type": "number",
+            "formula": "b + 1",
+            "depends_on": ["b"],
+        },
+        {
+            "name": "b",
+            "label": "B",
+            "description": "B",
+            "type": "calculated",
+            "output_type": "number",
+            "formula": "a + 1",
+            "depends_on": ["a"],
+        },
+    ]
+
+    response = client.post(
+        "/api/templates",
+        json={
+            "name": "Circular Formula Schema",
+            "description": "Circular calculated field dependencies",
+            "document_type": "invoice",
+            "definition": definition,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Calculated field dependency graph is invalid" in response.text
+
+
 def test_document_upload_and_job_creation(client) -> None:
     template_payload = {
         "name": "Invoice Schema",
@@ -728,15 +819,128 @@ def test_review_recalculation_updates_calculated_fields(client) -> None:
 
     assert review_response.status_code == 200
     calculated = review_response.json()["calculated_fields"][0]
-    assert calculated["calculated_value"] == pytest.approx(1650.0)
+    assert calculated["calculated_value"] == {"amount": 1650.0, "currency": "USD"}
+    assert calculated["display_value"] == "USD 1,650.00"
     assert calculated["validation_status"] == "reviewed"
     assert review_response.json()["fields_requiring_review"] == ["vendor_name"]
 
     with SessionLocal() as db:
         persisted = db.query(ExtractionResult).filter(ExtractionResult.id == result_id).one()
         assert persisted.review_status == "reviewed"
-        assert persisted.result_json["calculated_fields"][0]["calculated_value"] == pytest.approx(1650.0)
+        assert persisted.result_json["calculated_fields"][0]["calculated_value"] == {
+            "amount": 1650.0,
+            "currency": "USD",
+        }
         assert persisted.result_json["fields_requiring_review"] == ["vendor_name"]
+
+
+def test_review_recalculation_marks_formula_errors_for_review(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["calculated_fields"][0]["formula"] = "1 / coalesce(total_amount.amount, 0)"
+    template_definition["calculated_fields"][0]["output_type"] = "number"
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.91,
+                        "source_text": "Acme Corp",
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "extraction_notes": "Extracted successfully.",
+                        "requires_review": False,
+                    },
+                    {
+                        "field_name": "total_amount",
+                        "label": "Total Amount",
+                        "field_kind": "extracted",
+                        "data_type": "currency",
+                        "extracted_value": "$0.00",
+                        "normalized_value": {"amount": 0, "currency": "USD", "display_value": "$0.00"},
+                        "confidence_score": 0.91,
+                        "source_text": "$0.00",
+                        "page_number": 1,
+                        "location_reference": "Page 1",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "extraction_notes": "Extracted successfully.",
+                        "requires_review": False,
+                    },
+                ],
+                "calculated_fields": [
+                    {
+                        "field_name": "amount_with_buffer",
+                        "label": "Amount With Buffer",
+                        "field_kind": "calculated",
+                        "output_type": "number",
+                        "formula": "1 / coalesce(total_amount.amount, 0)",
+                        "depends_on": ["total_amount"],
+                        "calculated_value": 1.0,
+                        "display_value": "1.0",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "calculation_notes": "Deterministic formula evaluation.",
+                        "requires_review": False,
+                    }
+                ],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [],
+            "recalculate": True,
+        },
+    )
+
+    assert review_response.status_code == 200
+    calculated = review_response.json()["calculated_fields"][0]
+    assert calculated["calculated_value"] is None
+    assert calculated["validation_status"] == "invalid"
+    assert calculated["validation_errors"] == ["Division by zero.", "Calculated value is null."]
+    assert calculated["requires_review"] is True
+    assert review_response.json()["fields_requiring_review"] == ["amount_with_buffer"]
 
 
 def test_review_accepts_confirm_without_field_edits(client) -> None:
@@ -2363,3 +2567,166 @@ def test_provider_settings_are_tenant_scoped(client) -> None:
         app.dependency_overrides.pop(get_current_tenant_id, None)
 
     assert client.get("/api/settings/provider").json()["model"] == "tenant-a-model"
+
+
+def test_retry_failed_job_requeues_work(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="failed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(
+            document_id=document.id,
+            template_version_id=version.id,
+            status="failed",
+            error_message="Provider timed out.",
+            progress_stage="failed",
+            progress_pct=0,
+            attempt_count=2,
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+        document_id = document.id
+
+    response = client.post(f"/api/jobs/{job_id}/retry")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "queued"
+    assert payload["error_message"] is None
+    assert payload["progress_stage"] == "queued"
+    assert payload["progress_pct"] == 0
+    assert payload["attempt_count"] == 2
+
+    with SessionLocal() as db:
+        refreshed_job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).one()
+        refreshed_document = db.query(Document).filter(Document.id == document_id).one()
+        assert refreshed_job.status == "queued"
+        assert refreshed_job.error_message is None
+        assert refreshed_job.worker_id is None
+        assert refreshed_document.status == "queued"
+
+
+def test_retry_job_rejects_non_failed_status(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    response = client.post(f"/api/jobs/{job_id}/retry")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Only failed jobs can be retried."
+
+
+def test_review_approve_high_confidence_leaves_low_confidence_flagged(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.92,
+                        "source_text": "Acme Corp",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    },
+                    {
+                        "field_name": "total_amount",
+                        "label": "Total Amount",
+                        "field_kind": "extracted",
+                        "data_type": "currency",
+                        "extracted_value": "$1,200.00",
+                        "normalized_value": {"amount": 1200, "currency": "USD"},
+                        "confidence_score": 0.55,
+                        "source_text": "$1,200.00",
+                        "validation_status": "valid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    },
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name", "total_amount"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [],
+            "recalculate": False,
+            "approve_high_confidence_min": 0.85,
+        },
+    )
+
+    assert review_response.status_code == 200
+    fields = {item["field_name"]: item for item in review_response.json()["extracted_fields"]}
+    assert fields["vendor_name"]["requires_review"] is False
+    assert fields["total_amount"]["requires_review"] is True
+    assert review_response.json()["fields_requiring_review"] == ["total_amount"]

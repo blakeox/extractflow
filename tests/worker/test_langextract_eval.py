@@ -5,11 +5,32 @@ from pathlib import Path
 
 from app.services.langextract_eval import (
     LangExtractEvalCase,
+    apply_eval_runtime_overrides,
     load_eval_cases,
     render_eval_summary,
     run_eval_case,
     run_eval_cases,
 )
+
+
+def test_apply_eval_runtime_overrides_updates_llm_settings(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("LANGEXTRACT_EVAL_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("LANGEXTRACT_EVAL_MODEL", "qwen2.5:3b")
+
+    definition = apply_eval_runtime_overrides(
+        {
+            "template_name": "Invoice Extraction Eval",
+            "llm_provider_settings": {
+                "base_url": "http://host.docker.internal:11434/v1",
+                "model": "qwen3.5:27b",
+            },
+        }
+    )
+
+    assert definition["llm_provider_settings"]["base_url"] == "http://127.0.0.1:11434/v1"
+    assert definition["llm_provider_settings"]["model"] == "qwen2.5:3b"
 
 
 def test_load_eval_cases_reads_sorted_json_files(tmp_path) -> None:

@@ -48,6 +48,8 @@ class ExtractionJob(Base):
     claimed_at = Column(DateTime, nullable=True)
     worker_id = Column(String(255), nullable=True)
     attempt_count = Column(Integer, nullable=False, default=0)
+    progress_stage = Column(String(50), nullable=True)
+    progress_pct = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=utc_now)
     updated_at = Column(DateTime, nullable=False, default=utc_now)
 

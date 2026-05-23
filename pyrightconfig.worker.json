@@ -1,0 +1,22 @@
+{
+  "include": ["worker", "shared"],
+  "exclude": [
+    "**/__pycache__",
+    ".git",
+    ".venv",
+    "frontend",
+    "node_modules",
+    "src-tauri",
+    "tests"
+  ],
+  "ignore": ["worker/app/main.py", "worker/app/services/job_progress.py"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.11",
+  "reportMissingModuleSource": "none",
+  "executionEnvironments": [
+    { "root": "worker", "extraPaths": ["shared"] },
+    { "root": "shared" }
+  ]
+}

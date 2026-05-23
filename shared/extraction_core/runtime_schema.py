@@ -18,6 +18,10 @@ def ensure_extraction_job_runtime_columns(engine: Engine) -> None:
         statements.append("ALTER TABLE extraction_jobs ADD COLUMN worker_id VARCHAR(255)")
     if "attempt_count" not in extraction_job_columns:
         statements.append("ALTER TABLE extraction_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
+    if "progress_stage" not in extraction_job_columns:
+        statements.append("ALTER TABLE extraction_jobs ADD COLUMN progress_stage VARCHAR(50)")
+    if "progress_pct" not in extraction_job_columns:
+        statements.append("ALTER TABLE extraction_jobs ADD COLUMN progress_pct INTEGER NOT NULL DEFAULT 0")
 
     tenant_tables = (
         "templates",
