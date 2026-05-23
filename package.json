@@ -36,9 +36,9 @@
     "prepare": "lefthook install --reset-hooks-path"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "^2.11.2",
     "eslint-config-prettier": "^10.1.8",
-    "lefthook": "^2.1.6",
+    "lefthook": "^2.1.8",
     "prettier": "^3.8.3"
   }
 }
