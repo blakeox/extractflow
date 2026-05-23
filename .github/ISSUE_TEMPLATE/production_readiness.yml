@@ -1,0 +1,48 @@
+name: Production readiness task
+description: Track work toward company self-host production (links to P0–P4 roadmap)
+title: "[Production]: "
+labels:
+  - production-readiness
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for **production readiness** work aligned with [docs/PRODUCTION_ROADMAP.md](../../docs/PRODUCTION_ROADMAP.md).
+        Prefer picking an [existing roadmap issue](https://github.com/blakeox/extractflow/issues?q=label%3Aproduction-readiness) instead of filing duplicates.
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase
+      options:
+        - P0 — Extraction quality
+        - P1 — Operator trust
+        - P2 — Production operations
+        - P3 — Team self-host
+        - P4 — Hosted SaaS (optional)
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem for company operators
+      description: What breaks trust, scale, or compliance today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How do we know this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: Tests, eval harness, or manual playbook steps.

@@ -2,6 +2,14 @@
 
 Thanks for contributing. Keep changes narrow, testable, and attributable to a clear runtime boundary.
 
+## Company production roadmap
+
+ExtractFlow is open source for **companies self-hosting** the stack. Planned work is tracked in [docs/PRODUCTION_ROADMAP.md](docs/PRODUCTION_ROADMAP.md) (milestones **P0–P4**, issues labeled `production-readiness`).
+
+- Start with [good first issues](https://github.com/blakeox/extractflow/issues?q=label%3Aproduction-readiness+label%3A%22good+first+issue%22) if you are new to the repo.
+- Do not skip **P0** (extraction quality) before claiming production deployment work.
+- Regenerate issues after editing the roadmap script: `SKIP_MILESTONES=1 ./scripts/create-production-roadmap-issues.sh` (avoid duplicates).
+
 ## Ground rules
 
 - Open an issue or draft pull request before large feature work.
