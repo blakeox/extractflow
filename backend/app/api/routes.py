@@ -5,6 +5,7 @@ import shutil
 from copy import deepcopy
 from pathlib import Path
 
+from extraction_core.job_progress import JOB_STAGE_QUEUED
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -39,6 +40,7 @@ from app.schemas.api import (
     TemplateVersionCreateRequest,
     TemplateVersionResponse,
 )
+from app.services.job_service import build_job_response, retry_failed_job
 from app.services.langextract_feedback import (
     list_langextract_feedback_suggestions,
     set_langextract_feedback_suggestion_dismissed,
@@ -265,21 +267,14 @@ def create_job(
         document_id=payload.document_id,
         template_version_id=payload.template_version_id,
         provider_override=payload.provider_override.model_dump() if payload.provider_override else None,
+        progress_stage=JOB_STAGE_QUEUED,
+        progress_pct=0,
     )
     db.add(job)
     document.status = "queued"
     db.commit()
     db.refresh(job)
-    return JobResponse(
-        id=job.id,
-        document_id=job.document_id,
-        template_version_id=job.template_version_id,
-        provider_override=LLMProviderSettings.model_validate(job.provider_override) if job.provider_override else None,
-        status=job.status,
-        error_message=job.error_message,
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-    )
+    return build_job_response(job)
 
 
 @router.get("/jobs", response_model=list[JobResponse])
@@ -290,21 +285,23 @@ def list_jobs(db: Session = Depends(get_db), tenant_id: str = Depends(get_curren
         .order_by(ExtractionJob.created_at.desc())
         .all()
     )
-    return [
-        JobResponse(
-            id=job.id,
-            document_id=job.document_id,
-            template_version_id=job.template_version_id,
-            provider_override=LLMProviderSettings.model_validate(job.provider_override)
-            if job.provider_override
-            else None,
-            status=job.status,
-            error_message=job.error_message,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
-        )
-        for job in jobs
-    ]
+    return [build_job_response(job) for job in jobs]
+
+
+@router.post("/jobs/{job_id}/retry", response_model=JobResponse)
+def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id, ExtractionJob.tenant_id == tenant_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.status != "failed":
+        raise HTTPException(status_code=409, detail="Only failed jobs can be retried.")
+    document = db.query(Document).filter(Document.id == job.document_id, Document.tenant_id == tenant_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    retry_failed_job(job, document)
+    db.commit()
+    db.refresh(job)
+    return build_job_response(job)
 
 
 @router.get("/jobs/{job_id}/result", response_model=ResultEnvelope)

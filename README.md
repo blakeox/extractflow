@@ -12,6 +12,15 @@ Current release posture:
 - Multi-tenant and external-processing controls exist, but those paths should be treated as operator-owned configuration surfaces rather than turnkey hosted guarantees
 - Desktop packaging is supported, but the Dockerized local web stack remains the primary development and verification path
 
+## Production roadmap (company self-host)
+
+ExtractFlow is open source for **teams running their own infrastructure**. The path to company-grade production (quality gates, audit, Postgres, auth, multi-worker) is tracked in [docs/PRODUCTION_ROADMAP.md](docs/PRODUCTION_ROADMAP.md) and on GitHub:
+
+- [Milestones P0–P4](https://github.com/blakeox/extractflow/milestones)
+- [Issues labeled `production-readiness`](https://github.com/blakeox/extractflow/issues?q=label%3Aproduction-readiness)
+
+Contributors: pick an unassigned issue in the earliest open milestone you can close; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Decision
 
 This first version is a Dockerized local web application with a React frontend, FastAPI backend, SQLite-backed persistence, and a separate Python worker for parsing, extraction, validation, deterministic formulas, review, and export.
@@ -136,6 +145,8 @@ make test-ui
 make test-e2e
 make eval-langextract
 PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m ruff check backend worker shared tests
+PYTHON_BIN="$(./scripts/resolve-python.sh)" && "$PYTHON_BIN" -m pyright --project pyrightconfig.backend.json && "$PYTHON_BIN" -m pyright --project pyrightconfig.worker.json
+./scripts/verify-shell.sh
 npm --prefix frontend run lint
 npm run format:check
 PYTHONPATH=backend:shared python3 -m pytest tests/backend -k templates
@@ -149,11 +160,27 @@ Continuous enforcement:
 - Local Lefthook hooks run the same verification scripts used by CI so contributor machines and GitHub Actions enforce the same contract
 - A separate browser E2E job runs Playwright against the Vite app and covers upload -> run -> review with mocked API traffic
 - Secret scanning also runs in-repo through `scripts/scan-secrets.py` locally and in `.github/workflows/secret-scan.yml` so tracked-file secret checks remain part of both local and CI verification
-- Ruff now standardizes the Python surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
+- Ruff, Pyright, and ShellCheck now standardize the Python and shell surfaces, ESLint covers the React/TypeScript frontend, and Prettier keeps repo formatting consistent across supported files
 - Frontend CI uses `npm ci` against the checked-in lockfile for deterministic installs
 - PRs also run dependency review, CodeQL scans the Python and TypeScript surfaces, and Dependabot tracks npm, pip, cargo, and GitHub Actions updates
 - Workflow actions are pinned to exact commit SHAs, and `.github/CODEOWNERS` plus PR/issue templates keep review and change hygiene explicit
 - Vulnerability reports should go through GitHub Security Advisories as documented in [`SECURITY.md`](SECURITY.md)
+
+Dependency strategy:
+
+- Keep heavy extraction/runtime dependencies such as Docling, LangExtract, and OCR runtimes scoped to the worker environment instead of spreading them across services
+- Keep required CI deterministic with `./scripts/verify-python.sh` and frontend verification; use the LangExtract golden-set harness as an upgrade gate for extraction dependency bumps rather than a required per-PR job
+- Before bumping Docling, LangExtract, or OCR runtimes, run the normal Python verification contract first and then run `make eval-langextract` or `make benchmark-langextract` to catch extraction-quality regressions that unit tests cannot detect
+- `make verify-langextract-upgrade` bundles that local upgrade lane into one command by running Python verification first and then the LangExtract eval harness
+- Prefer narrow, domain-specific packages when the product expands (for example unit conversion or business-calendar logic) instead of adding a general math engine preemptively
+
+Formula authoring policy:
+
+- Calculated-field formulas are compiled during template validation, so syntax errors and unknown field references are rejected before a template version is saved
+- Extracted fields marked `usable_in_formulas=false` are rejected if a calculated field tries to reference them
+- `depends_on` must match the real field references used by the formula instead of drifting as stale metadata
+- Formulas may only call the built-in helper functions exposed by the shared formula engine; arbitrary method calls on field values are rejected
+- Calculated-field `error_handling` now supports `return_null_and_flag_review` and `return_null` for divide-by-zero and missing-input cases, so template policy matches runtime behavior
 
 ## Runtime Environment Contract
 

@@ -8,6 +8,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from extraction_core.job_progress import JOB_STAGE_COMPLETED, JOB_STAGE_FAILED, JOB_STAGE_PARSING
 from extraction_core.observability import configure_logger, log_event
 from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
 from extraction_core.storage_refs import resolve_storage_path
@@ -17,6 +18,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal, engine
 from app.models import Document, ExtractionJob, ExtractionResult, TemplateVersion
 from app.services.executor import execute_extraction
+from app.services.job_progress import build_progress_reporter, update_job_progress
 from app.services.parser import prewarm_docling_converters
 
 logger = configure_logger("extractflow.worker")
@@ -51,6 +53,8 @@ def process_once() -> None:
         if not document or not template_version:
             job.status = "failed"
             job.error_message = "Document or template version missing."
+            job.progress_stage = JOB_STAGE_FAILED
+            job.progress_pct = 0
             db.commit()
             write_worker_status(
                 "failed",
@@ -66,6 +70,7 @@ def process_once() -> None:
         try:
             ensure_job_tenant_consistency(job, document, template_version)
             document.status = "processing"
+            update_job_progress(db, job.id, JOB_STAGE_PARSING)
             db.commit()
             write_worker_status(
                 "running",
@@ -84,6 +89,7 @@ def process_once() -> None:
                 document_id=document.id,
                 template_definition=template_version.definition,
                 provider_override=job.provider_override,
+                progress_reporter=build_progress_reporter(db, job.id),
             )
             result = db.query(ExtractionResult).filter(ExtractionResult.job_id == job.id).first()
             if result is None:
@@ -96,6 +102,8 @@ def process_once() -> None:
                 result.result_json = result_json
                 result.review_status = "pending"
             job.status = "completed"
+            job.progress_stage = JOB_STAGE_COMPLETED
+            job.progress_pct = 100
             document.status = "completed"
             db.commit()
             write_worker_status(
@@ -111,6 +119,8 @@ def process_once() -> None:
         except Exception as exc:  # noqa: BLE001
             job.status = "failed"
             job.error_message = str(exc)
+            job.progress_stage = JOB_STAGE_FAILED
+            job.progress_pct = 0
             document.status = "failed"
             db.commit()
             write_worker_status(

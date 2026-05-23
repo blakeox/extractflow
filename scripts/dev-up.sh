@@ -36,9 +36,10 @@ requested_web_port="$(read_env_value "WEB_PORT" "3000")"
 requested_api_port="$(read_env_value "API_PORT" "8000")"
 requested_ollama_port="$(read_env_value "OLLAMA_PORT" "11434")"
 
-export WEB_PORT="$(find_available_port "$requested_web_port")"
-export API_PORT="$(find_available_port "$requested_api_port")"
-export OLLAMA_PORT="$(find_available_port "$requested_ollama_port")"
+WEB_PORT="$(find_available_port "$requested_web_port")"
+API_PORT="$(find_available_port "$requested_api_port")"
+OLLAMA_PORT="$(find_available_port "$requested_ollama_port")"
+export WEB_PORT API_PORT OLLAMA_PORT
 export VITE_API_BASE_URL="http://localhost:${API_PORT}/api"
 
 frontend_url="http://localhost:${WEB_PORT}"

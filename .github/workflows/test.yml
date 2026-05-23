@@ -35,6 +35,15 @@ jobs:
       - name: Install Python test dependencies
         run: python -m pip install -r requirements-dev.txt
 
+      - name: Run shell verification
+        run: ./scripts/verify-shell.sh
+
+      - name: Validate LangExtract golden-set cases
+        run: |
+          PYTHONPATH=worker:shared python ./scripts/evaluate-langextract.py \
+            evals/langextract/cases \
+            --validate-only
+
       - name: Run Python test suites
         run: ./scripts/verify-python.sh
 
@@ -64,6 +73,70 @@ jobs:
 
       - name: Run frontend verification
         run: ./scripts/verify-frontend.sh
+
+      - name: Summarize frontend coverage
+        if: always()
+        run: |
+          node <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const path = 'frontend/test-results/coverage/coverage-summary.json';
+          if (!fs.existsSync(path)) {
+            console.log('## Frontend coverage');
+            console.log('');
+            console.log('Coverage summary file was not generated.');
+            process.exit(0);
+          }
+          const summary = JSON.parse(fs.readFileSync(path, 'utf8')).total;
+          console.log('## Frontend coverage');
+          console.log('');
+          console.log('| Metric | Coverage | Covered / Total |');
+          console.log('| --- | ---: | ---: |');
+          for (const key of ['statements', 'branches', 'functions', 'lines']) {
+            const metric = summary[key];
+            console.log(`| ${key} | ${metric.pct.toFixed(2)}% | ${metric.covered} / ${metric.total} |`);
+          }
+          EOF
+
+      - name: Summarize frontend bundle size
+        if: always()
+        run: |
+          node <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const path = 'frontend/test-results/bundle-size.json';
+          if (!fs.existsSync(path)) {
+            console.log('## Frontend bundle size');
+            console.log('');
+            console.log('Bundle summary file was not generated.');
+            process.exit(0);
+          }
+          const summary = JSON.parse(fs.readFileSync(path, 'utf8'));
+          console.log('## Frontend bundle size');
+          console.log('');
+          console.log('| Asset | Actual | Budget | Status |');
+          console.log('| --- | ---: | ---: | --- |');
+          for (const key of ['js', 'css']) {
+            const actual = (summary.actual[key] / 1024).toFixed(2);
+            const budget = (summary.budgets[key] / 1024).toFixed(2);
+            const status = summary.actual[key] <= summary.budgets[key] ? 'pass' : 'fail';
+            console.log(`| ${key.toUpperCase()} | ${actual} KiB | ${budget} KiB | ${status} |`);
+          }
+          EOF
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: frontend-coverage
+          path: frontend/test-results/coverage
+          if-no-files-found: ignore
+
+      - name: Upload frontend bundle metrics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: frontend-bundle-metrics
+          path: frontend/test-results/bundle-size.json
+          if-no-files-found: ignore
 
   e2e:
     name: Browser E2E
@@ -95,8 +168,11 @@ jobs:
       - name: Build frontend for E2E
         run: npm run build
 
+      - name: Run browser accessibility smoke tests
+        run: npm run test:a11y
+
       - name: Run browser E2E
-        run: npm run test:e2e
+        run: npm run test:e2e -- --grep-invert @a11y
 
       - name: Upload Playwright report
         if: always()

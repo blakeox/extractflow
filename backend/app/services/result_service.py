@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from extraction_core import FormulaEngine, topologically_sort_calculated_fields
+from extraction_core import evaluate_calculated_fields
 from extraction_core.models import ExtractionTemplate, ExtractionValidationSummary, ReviewEditPayload
 from openpyxl import Workbook
 from sqlalchemy.orm import Session
@@ -29,7 +29,17 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
     summary = ExtractionValidationSummary.model_validate(result.result_json)
     field_index = {field.field_name: field for field in summary.extracted_fields}
 
-    if not payload.edits:
+    if payload.approve_high_confidence_min is not None:
+        threshold = payload.approve_high_confidence_min
+        for field in summary.extracted_fields:
+            if not field.requires_review or field.validation_status == "invalid":
+                continue
+            score = field.confidence_score
+            if score is not None and score >= threshold:
+                field.validation_status = "reviewed"
+                field.requires_review = False
+
+    if not payload.edits and payload.approve_high_confidence_min is None:
         for field in summary.extracted_fields:
             if field.requires_review:
                 field.validation_status = "reviewed"
@@ -38,7 +48,6 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
             if calc.requires_review:
                 calc.validation_status = "reviewed"
                 calc.requires_review = False
-
     for edit in payload.edits:
         target = field_index[edit.field_name]
         db.add(
@@ -77,14 +86,11 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
             job_template = None
         if job_template:
             template = ExtractionTemplate.model_validate(job_template.definition)
-            engine = FormulaEngine()
-            context = {field.field_name: field.normalized_value for field in summary.extracted_fields}
-            for definition in topologically_sort_calculated_fields(template.calculated_fields):
-                calc = next(item for item in summary.calculated_fields if item.field_name == definition.name)
-                calc.calculated_value = engine.evaluate(definition.formula, context)
+            summary.calculated_fields = evaluate_calculated_fields(template.calculated_fields, summary.extracted_fields)
+            for calc in summary.calculated_fields:
+                if calc.requires_review:
+                    continue
                 calc.validation_status = "reviewed"
-                calc.requires_review = False
-                context[calc.field_name] = calc.calculated_value
 
     recompute_fields_requiring_review(summary)
     summary.reviewed_at = utc_now()
