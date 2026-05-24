@@ -11,6 +11,7 @@ from extraction_core.models import ExtractionFieldDefinition, ExtractionTemplate
 from extraction_core.observability import configure_logger, log_event
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import (
     Document,
     ExtractionJob,
@@ -26,7 +27,6 @@ from app.schemas.api import (
     LangExtractFeedbackSuggestionListResponse,
     LangExtractFeedbackSuggestionResponse,
 )
-from app.core.config import settings
 from app.services.storage import resolve_storage_path
 
 CONTEXT_RADIUS = 160
