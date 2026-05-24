@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 
 from extraction_core.dry_run import SchemaDryRunResponse, run_schema_dry_run
@@ -20,10 +21,14 @@ from app.core.tenant import build_tenant_setting_key, get_current_tenant_id
 from app.db.database import get_db
 from app.models import Document, ExportRecord, ExtractionJob, ExtractionResult, Setting, Template, TemplateVersion
 from app.schemas.api import (
+    AuditEventListResponse,
+    AuditEventResponse,
     CustomProviderProfileListResponse,
     CustomProviderProfileRequest,
     DocumentParsedTextResponse,
     DocumentResponse,
+    ExportPolicyRequest,
+    ExportPolicyResponse,
     ExportResponse,
     JobCreateRequest,
     JobResponse,
@@ -45,7 +50,8 @@ from app.schemas.api import (
     TemplateVersionDiffRequest,
     TemplateVersionResponse,
 )
-from app.services.job_service import build_job_response, retry_failed_job
+from app.services.audit_service import list_audit_events, record_audit_event
+from app.services.job_service import build_job_response, cancel_job, retry_failed_job
 from app.services.langextract_feedback import (
     list_langextract_feedback_suggestions,
     set_langextract_feedback_suggestion_dismissed,
@@ -63,6 +69,7 @@ from app.services.provider_profiles import (
     update_custom_provider_profile,
 )
 from app.services.result_service import apply_review_edits, export_result
+from app.services.settings_service import get_tenant_bool_setting
 from app.services.storage import (
     build_upload_target,
     read_managed_document_text,
@@ -240,6 +247,20 @@ def upload_document(
     db.add(document)
     db.commit()
     db.refresh(document)
+    record_audit_event(
+        db,
+        tenant_id=tenant_id,
+        actor="local-user",
+        action="document.uploaded",
+        object_type="document",
+        object_id=document.id,
+        metadata={
+            "document_id": document.id,
+            "original_filename": document.original_filename,
+            "content_type": document.content_type,
+        },
+    )
+    db.commit()
     return DocumentResponse(
         id=document.id,
         original_filename=document.original_filename,
@@ -320,6 +341,20 @@ def create_job(
     document.status = "queued"
     db.commit()
     db.refresh(job)
+    record_audit_event(
+        db,
+        tenant_id=tenant_id,
+        actor="local-user",
+        action="job.queued",
+        object_type="job",
+        object_id=job.id,
+        metadata={
+            "job_id": job.id,
+            "document_id": job.document_id,
+            "template_version_id": job.template_version_id,
+        },
+    )
+    db.commit()
     return build_job_response(job)
 
 
@@ -359,6 +394,40 @@ def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depen
     )
     validate_job_provider(template_definition, effective_provider)
     retry_failed_job(job, document)
+    record_audit_event(
+        db,
+        tenant_id=tenant_id,
+        actor="local-user",
+        action="job.retried",
+        object_type="job",
+        object_id=job.id,
+        metadata={"job_id": job.id, "document_id": job.document_id},
+    )
+    db.commit()
+    db.refresh(job)
+    return build_job_response(job)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
+def cancel_job_route(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id, ExtractionJob.tenant_id == tenant_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if job.status not in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="Only queued or running jobs can be cancelled.")
+    document = db.query(Document).filter(Document.id == job.document_id, Document.tenant_id == tenant_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    cancel_job(job, document)
+    record_audit_event(
+        db,
+        tenant_id=tenant_id,
+        actor="local-user",
+        action="job.cancelled",
+        object_type="job",
+        object_id=job.id,
+        metadata={"job_id": job.id, "document_id": job.document_id},
+    )
     db.commit()
     db.refresh(job)
     return build_job_response(job)
@@ -411,8 +480,17 @@ def export_result_endpoint(
     try:
         record = export_result(db, result, export_format)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"export_id": record.id, "path": record.file_path}
+        status_code = 409 if "blocked" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return {
+        "export_id": record.id,
+        "path": record.file_path,
+        "content_sha256": record.content_sha256,
+        "exported_at": record.exported_at.isoformat() if record.exported_at else None,
+        "reviewer": record.reviewer,
+        "template_version_id": record.template_version_id,
+        "manifest": record.manifest_json,
+    }
 
 
 @router.get("/exports/{export_id}/download")
@@ -449,10 +527,86 @@ def list_exports(db: Session = Depends(get_db), tenant_id: str = Depends(get_cur
                 job_id=result.job_id if result else 0,
                 export_format=record.export_format,
                 file_path=record.file_path,
+                content_sha256=record.content_sha256,
+                exported_at=record.exported_at,
+                reviewer=record.reviewer,
+                template_version_id=record.template_version_id,
+                manifest_json=record.manifest_json,
                 created_at=record.created_at,
             )
         )
     return responses
+
+
+@router.get("/audit/events", response_model=AuditEventListResponse)
+def list_audit_events_route(
+    result_id: int | None = None,
+    document_id: int | None = None,
+    job_id: int | None = None,
+    action: str | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    events = list_audit_events(
+        db,
+        tenant_id=tenant_id,
+        result_id=result_id,
+        document_id=document_id,
+        job_id=job_id,
+        action=action,
+        from_time=from_time,
+        to_time=to_time,
+        limit=limit,
+        offset=offset,
+    )
+    return AuditEventListResponse(
+        events=[
+            AuditEventResponse(
+                id=event.id,
+                actor=event.actor,
+                action=event.action,
+                object_type=event.object_type,
+                object_id=event.object_id,
+                metadata=event.metadata_json or {},
+                created_at=event.created_at,
+            )
+            for event in events
+        ],
+        total=len(events),
+    )
+
+
+@router.get("/settings/export-policy", response_model=ExportPolicyResponse)
+def get_export_policy(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    return ExportPolicyResponse(
+        require_review_cleared=get_tenant_bool_setting(
+            db,
+            tenant_id,
+            "export.require_review_cleared",
+        )
+    )
+
+
+@router.put("/settings/export-policy", response_model=ExportPolicyResponse)
+def set_export_policy(
+    payload: ExportPolicyRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    setting_key = build_tenant_setting_key(tenant_id, "export.require_review_cleared")
+    setting = db.query(Setting).filter(Setting.key == setting_key).first()
+    value = {"enabled": payload.require_review_cleared}
+    if setting:
+        setting.value = value
+    else:
+        setting = Setting(key=setting_key, value=value)
+        db.add(setting)
+    db.commit()
+    return ExportPolicyResponse(require_review_cleared=payload.require_review_cleared)
 
 
 @router.get("/settings/provider")

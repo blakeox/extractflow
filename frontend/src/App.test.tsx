@@ -54,6 +54,7 @@ describe("App", () => {
   beforeEach(() => {
     invokeMock.mockReset();
     window.localStorage.clear();
+    window.history.pushState({}, "", "/");
     delete (window as Window & { __TAURI_INTERNALS__?: object })
       .__TAURI_INTERNALS__;
     vi.stubGlobal(
@@ -94,6 +95,14 @@ describe("App", () => {
             jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
           );
         }
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(jsonResponse({ events: [], total: 0 }));
+        }
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: false }),
+          );
+        }
 
         return Promise.resolve(jsonResponse({}));
       }),
@@ -113,12 +122,8 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
 
-    expect(
-      screen.queryByRole("button", { name: "Audit" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Help" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Audit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Help" })).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "Open settings" }).length,
     ).toBeGreaterThan(0);
@@ -4444,6 +4449,596 @@ describe("App", () => {
     expect(await screen.findByText("valid")).toBeInTheDocument();
     expect(
       screen.getByText("Dry run passed validation for all extracted fields."),
+    ).toBeInTheDocument();
+  });
+
+  it("loads audit events on the Audit page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(
+            jsonResponse({
+              events: [
+                {
+                  id: 1,
+                  actor: "qa-user",
+                  action: "review.saved",
+                  object_type: "result",
+                  object_id: "21",
+                  metadata: {
+                    job_id: 7,
+                    field_names: ["vendor_name"],
+                  },
+                  created_at: "2026-05-02T12:07:00.000Z",
+                },
+              ],
+              total: 1,
+            }),
+          );
+        }
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: false }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Audit" }));
+
+    expect(await screen.findByText("review · saved")).toBeInTheDocument();
+    expect(screen.getByText("qa-user")).toBeInTheDocument();
+  });
+
+  it("honors ?job= deep links when the workspace loads", async () => {
+    window.history.pushState({}, "", "/?job=7");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                definition: {
+                  template_name: "Invoice Schema",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "mock",
+                    base_url: null,
+                    model: "mock-extractor",
+                    temperature: 0.1,
+                    max_tokens: 4000,
+                    supports_json_mode: true,
+                    allow_external_processing: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [
+                    {
+                      name: "vendor_name",
+                      label: "Vendor Name",
+                      type: "text",
+                      required: true,
+                      citation_required: true,
+                    },
+                  ],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json"] },
+                },
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 2,
+                original_filename: "invoice.pdf",
+                content_type: "application/pdf",
+                status: "completed",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                document_id: 2,
+                template_version_id: 11,
+                status: "completed",
+                error_message: null,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:01:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs/7/result")) {
+          return Promise.resolve(
+            jsonResponse({
+              result_id: 21,
+              job_id: 7,
+              result: {
+                document_id: "2",
+                document_type: "invoice",
+                template_name: "Invoice Schema",
+                template_version: "1.0.0",
+                llm_provider: {
+                  mode: "local",
+                  provider_type: "mock",
+                  base_url: null,
+                  model: "mock-extractor",
+                  temperature: 0.1,
+                  max_tokens: 4000,
+                  supports_json_mode: true,
+                  allow_external_processing: false,
+                  timeout_seconds: 120,
+                  retry_count: 2,
+                  chunk_size: 16000,
+                },
+                extraction_status: "completed",
+                extracted_fields: [
+                  {
+                    field_name: "vendor_name",
+                    label: "Vendor Name",
+                    field_kind: "extracted",
+                    data_type: "text",
+                    extracted_value: "Acme Corp",
+                    normalized_value: { value: "Acme Corp" },
+                    confidence_score: 0.42,
+                    validation_status: "invalid",
+                    validation_errors: [],
+                    requires_review: true,
+                  },
+                ],
+                calculated_fields: [],
+                fields_requiring_review: ["vendor_name"],
+                document_level_notes: [],
+                reviewed_at: null,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/documents/2/parsed-text")) {
+          return Promise.resolve(
+            jsonResponse({
+              document_id: 2,
+              text: "Vendor Name: Acme Corp",
+              source: "parsed_file",
+            }),
+          );
+        }
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: false }),
+          );
+        }
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(jsonResponse({ events: [], total: 0 }));
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 1, results: 1 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Vendor Name review value")).toHaveValue(
+        "Acme Corp",
+      );
+    });
+    expect(
+      screen.getByRole("button", { name: /invoice\.pdf/i }),
+    ).toHaveAttribute("aria-current", "true");
+  });
+
+  it("blocks export when review backlog policy is enabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                definition: {
+                  template_name: "Invoice Schema",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "mock",
+                    base_url: null,
+                    model: "mock-extractor",
+                    temperature: 0.1,
+                    max_tokens: 4000,
+                    supports_json_mode: true,
+                    allow_external_processing: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [
+                    {
+                      name: "vendor_name",
+                      label: "Vendor Name",
+                      type: "text",
+                      required: true,
+                    },
+                  ],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json"] },
+                },
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 2,
+                original_filename: "invoice.pdf",
+                content_type: "application/pdf",
+                status: "completed",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                document_id: 2,
+                template_version_id: 11,
+                status: "completed",
+                error_message: null,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:01:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs/7/result")) {
+          return Promise.resolve(
+            jsonResponse({
+              result_id: 21,
+              job_id: 7,
+              result: {
+                document_id: "2",
+                document_type: "invoice",
+                template_name: "Invoice Schema",
+                template_version: "1.0.0",
+                llm_provider: {
+                  mode: "local",
+                  provider_type: "mock",
+                  base_url: null,
+                  model: "mock-extractor",
+                  temperature: 0.1,
+                  max_tokens: 4000,
+                  supports_json_mode: true,
+                  allow_external_processing: false,
+                  timeout_seconds: 120,
+                  retry_count: 2,
+                  chunk_size: 16000,
+                },
+                extraction_status: "completed",
+                extracted_fields: [
+                  {
+                    field_name: "vendor_name",
+                    label: "Vendor Name",
+                    field_kind: "extracted",
+                    data_type: "text",
+                    extracted_value: "Acme Corp",
+                    normalized_value: { value: "Acme Corp" },
+                    confidence_score: 0.42,
+                    validation_status: "invalid",
+                    validation_errors: [],
+                    requires_review: true,
+                  },
+                ],
+                calculated_fields: [],
+                fields_requiring_review: ["vendor_name"],
+                document_level_notes: [],
+                reviewed_at: null,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: true }),
+          );
+        }
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(jsonResponse({ events: [], total: 0 }));
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 1, results: 1 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Export blocked until review is cleared."),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Export JSON" })).toBeDisabled();
+  });
+
+  it("cancels a queued extraction job from the workspace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/jobs/7/cancel") && init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse({
+              id: 7,
+              document_id: 2,
+              template_version_id: 11,
+              status: "cancelled",
+              error_message: "Cancelled by operator.",
+              progress_stage: "cancelled",
+              progress_pct: 0,
+              created_at: "2026-05-02T00:00:00Z",
+              updated_at: "2026-05-02T00:02:00Z",
+            }),
+          );
+        }
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 2,
+                original_filename: "invoice.pdf",
+                content_type: "application/pdf",
+                status: "queued",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                document_id: 2,
+                template_version_id: 11,
+                status: "queued",
+                error_message: null,
+                progress_stage: "queued",
+                progress_pct: 0,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: false }),
+          );
+        }
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(jsonResponse({ events: [], total: 0 }));
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 1, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel job" }));
+    expect(
+      await screen.findByText("Extraction job cancelled."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows audit page load errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(
+            textResponse("Audit service unavailable.", 503),
+          );
+        }
+        if (url.endsWith("/templates"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/documents"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/jobs")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: false }),
+          );
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 0, documents: 0, jobs: 0, results: 0 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Audit" }));
+
+    expect(
+      await screen.findByText("Audit service unavailable."),
     ).toBeInTheDocument();
   });
 });

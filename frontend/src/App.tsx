@@ -13,6 +13,7 @@ import {
 
 import { MockProviderProductionNotice } from "./components/MockProviderProductionNotice";
 import { ReviewFieldEditor } from "./components/review/ReviewFieldEditor";
+import { ParsedTextPanel } from "./components/review/ParsedTextPanel";
 import { reviewFieldHint } from "./components/review/review-field-hint";
 import { SourceEvidencePanel } from "./components/review/SourceEvidencePanel";
 import { API_BASE } from "./lib/config";
@@ -32,6 +33,12 @@ import {
   isHighConfidenceField,
   REVIEW_HIGH_CONFIDENCE_MIN,
 } from "./lib/review-helpers";
+import {
+  getInitialReviewDraft,
+  getReviewFieldType,
+  parseReviewDraft,
+} from "./lib/review-draft";
+import { parseWorkspaceSearch, replaceWorkspaceUrl } from "./lib/workspace-url";
 import {
   LangExtractEditor,
   type LangExtractFeedbackDiagnostics,
@@ -134,6 +141,8 @@ type TemplateDefinitionField = {
   citation_required?: boolean;
   description?: string;
   instructions?: string;
+  schema?: Record<string, unknown> | null;
+  field_schema?: Record<string, unknown> | null;
 };
 
 type TemplateDefinitionCalculated = {
@@ -356,7 +365,26 @@ type ExportRecord = {
   job_id: number;
   export_format: string;
   file_path: string;
+  content_sha256?: string | null;
+  exported_at?: string | null;
+  reviewer?: string | null;
+  template_version_id?: number | null;
+  manifest_json?: Record<string, unknown> | null;
   created_at: string;
+};
+
+type AuditEventRecord = {
+  id: number;
+  actor: string;
+  action: string;
+  object_type: string;
+  object_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+type ExportPolicy = {
+  require_review_cleared: boolean;
 };
 
 type DevStatus = {
@@ -402,7 +430,9 @@ const primaryNavigation: NavItem[] = [
 ];
 
 const secondaryNavigation: NavItem[] = [
+  { id: "audit", label: "Audit", icon: "audit" },
   { id: "settings", label: "Settings", icon: "settings" },
+  { id: "help", label: "Help", icon: "help" },
 ];
 
 const pageLabels: Record<PageId, string> = {
@@ -563,37 +593,6 @@ const starterTemplateDefinition: TemplateDefinition = {
     export_formats: ["json", "csv", "excel"],
   },
 };
-
-const auditRows = [
-  [
-    "May 16, 2025 10:24 AM",
-    "Alex Morgan",
-    "Extraction completed",
-    "Invoice_0042.pdf",
-    "42 fields extracted, 1 needs review",
-  ],
-  [
-    "May 16, 2025 10:19 AM",
-    "Alex Morgan",
-    "Field edited",
-    "Total Amount",
-    "Adjusted to match footer total",
-  ],
-  [
-    "May 16, 2025 10:18 AM",
-    "System",
-    "Formula recalculated",
-    "Invoice Processing v1.4",
-    "Cost Per Unit updated",
-  ],
-  [
-    "May 16, 2025 9:12 AM",
-    "Alex Morgan",
-    "Document uploaded",
-    "MSA_Contract.docx",
-    "Stored in local volume",
-  ],
-];
 
 const helpTopics = [
   "Reusable schemas and version history",
@@ -806,7 +805,7 @@ function getFieldType(
   field: ReviewFieldResult,
   definition?: TemplateDefinitionField | null,
 ) {
-  return String(field.data_type ?? definition?.type ?? "text").toLowerCase();
+  return getReviewFieldType(field, definition);
 }
 
 function getFieldDefinition(
@@ -816,49 +815,6 @@ function getFieldDefinition(
   return (
     definition?.extracted_fields.find((item) => item.name === fieldName) ?? null
   );
-}
-
-function getInitialReviewDraft(
-  field: ReviewFieldResult,
-  definition?: TemplateDefinitionField | null,
-) {
-  const value = field.normalized_value ?? field.extracted_value ?? null;
-  const type = getFieldType(field, definition);
-
-  if (value == null) {
-    return "";
-  }
-
-  if (
-    type === "currency" &&
-    isRecord(value) &&
-    typeof value.amount === "number"
-  ) {
-    return String(value.amount);
-  }
-
-  if (type === "boolean") {
-    if (typeof value === "boolean") return value ? "true" : "false";
-    if (isRecord(value) && typeof value.value === "boolean")
-      return value.value ? "true" : "false";
-  }
-
-  if (
-    isRecord(value) &&
-    (typeof value.value === "string" || typeof value.value === "number")
-  ) {
-    return String(value.value);
-  }
-
-  if (typeof value === "string" || typeof value === "number") {
-    return String(value);
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "true" : "false";
-  }
-
-  return JSON.stringify(value);
 }
 
 function isLangExtractProvider(settings?: ProviderSettings | null) {
@@ -877,51 +833,6 @@ function getReviewSignals(field: ReviewFieldResult): string[] {
     signals.push("This field needs confirmation before export.");
   }
   return [...new Set(signals.map((signal) => signal.trim()).filter(Boolean))];
-}
-
-function parseReviewDraft(
-  field: ReviewFieldResult,
-  raw: string,
-  definition?: TemplateDefinitionField | null,
-): unknown {
-  const trimmed = raw.trim();
-  const type = getFieldType(field, definition);
-
-  if (!trimmed) {
-    return null;
-  }
-
-  switch (type) {
-    case "currency": {
-      const amount = Number(trimmed);
-      if (Number.isNaN(amount)) {
-        throw new Error(`${field.label} must be a valid number.`);
-      }
-      const existing = isRecord(field.normalized_value)
-        ? field.normalized_value
-        : null;
-      const currency =
-        typeof existing?.currency === "string" ? existing.currency : "USD";
-      return {
-        amount,
-        currency,
-        display_value: `${currency} ${amount.toLocaleString([], { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      };
-    }
-    case "date":
-      return { value: trimmed, display_value: trimmed };
-    case "number": {
-      const value = Number(trimmed);
-      if (Number.isNaN(value)) {
-        throw new Error(`${field.label} must be a valid number.`);
-      }
-      return { value };
-    }
-    case "boolean":
-      return trimmed === "true";
-    default:
-      return { value: raw };
-  }
 }
 
 function buildTemplatePayload(
@@ -2599,10 +2510,14 @@ function ExtractionWorkspacePage({
   onSetFocusedField,
   onRunExtraction,
   onRetryJob,
+  onCancelJob,
   onSaveReview,
   onApproveAllReview,
   onApproveHighConfidenceReview,
   onExport,
+  exportBlocked,
+  jobStatusFilter,
+  onJobStatusFilterChange,
   onOpenSchemas,
   onOpenHelp,
   onRetryConnection,
@@ -2633,10 +2548,14 @@ function ExtractionWorkspacePage({
   onSetFocusedField: (fieldName: string) => void;
   onRunExtraction: () => Promise<void>;
   onRetryJob: () => Promise<void>;
+  onCancelJob: () => Promise<void>;
   onSaveReview: () => Promise<void>;
   onApproveAllReview: () => Promise<void>;
   onApproveHighConfidenceReview: () => Promise<void>;
   onExport: (format: "json" | "csv" | "excel") => Promise<void>;
+  exportBlocked: boolean;
+  jobStatusFilter: string | null;
+  onJobStatusFilterChange: (status: string | null) => void;
   onOpenSchemas: () => void;
   onOpenHelp: () => void;
   onRetryConnection: () => Promise<void>;
@@ -2767,6 +2686,10 @@ function ExtractionWorkspacePage({
     },
     { label: "Failed", items: jobs.filter((job) => job.status === "failed") },
     {
+      label: "Cancelled",
+      items: jobs.filter((job) => job.status === "cancelled"),
+    },
+    {
       label: "Completed",
       items: jobs.filter(
         (job) =>
@@ -2776,6 +2699,12 @@ function ExtractionWorkspacePage({
       ),
     },
   ].filter((group) => group.items.length > 0);
+
+  const visibleJobGroups = jobStatusFilter
+    ? jobGroups.filter((group) =>
+        group.label.toLowerCase().includes(jobStatusFilter.toLowerCase()),
+      )
+    : jobGroups;
 
   const progressSteps = [
     { label: "File uploaded", complete: Boolean(selectedDocument) },
@@ -2825,9 +2754,28 @@ function ExtractionWorkspacePage({
           <Button variant="primary" fullWidth onClick={onStartNew}>
             New extraction
           </Button>
+          <InlineGroup>
+            {[
+              { label: "All", value: null },
+              { label: "Processing", value: "processing" },
+              { label: "Review", value: "review" },
+              { label: "Failed", value: "failed" },
+            ].map((filter) => (
+              <Button
+                key={filter.label}
+                variant={
+                  jobStatusFilter === filter.value ? "primary" : "secondary"
+                }
+                size="sm"
+                onClick={() => onJobStatusFilterChange(filter.value)}
+              >
+                {filter.label}
+              </Button>
+            ))}
+          </InlineGroup>
           <div className="grid gap-[0.9rem]">
-            {jobGroups.length ? (
-              jobGroups.map((group) => (
+            {visibleJobGroups.length ? (
+              visibleJobGroups.map((group) => (
                 <div key={group.label} className="grid gap-[0.9rem]">
                   <MetricLabel className="text-[0.76rem] tracking-[0.08em] text-faint">
                     {group.label}
@@ -2959,13 +2907,35 @@ function ExtractionWorkspacePage({
                         : "Retry extraction"}
                     </Button>
                   ) : null}
+                  {selectedJob &&
+                  (selectedJob.status === "queued" ||
+                    selectedJob.status === "running") ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => void onCancelJob()}
+                      disabled={
+                        !workspaceInteractive || busyAction === "cancel-job"
+                      }
+                    >
+                      {busyAction === "cancel-job"
+                        ? "Cancelling..."
+                        : "Cancel job"}
+                    </Button>
+                  ) : null}
                   {stage === "ready" || stage === "review" ? (
                     <>
+                      {exportBlocked ? (
+                        <SupportingText as="span" size="sm">
+                          Export blocked until review is cleared.
+                        </SupportingText>
+                      ) : null}
                       <Button
                         variant="secondary"
                         onClick={() => void onExport("json")}
                         disabled={
-                          !workspaceInteractive || busyAction === "export-json"
+                          !workspaceInteractive ||
+                          exportBlocked ||
+                          busyAction === "export-json"
                         }
                       >
                         {busyAction === "export-json"
@@ -2976,7 +2946,9 @@ function ExtractionWorkspacePage({
                         variant="secondary"
                         onClick={() => void onExport("csv")}
                         disabled={
-                          !workspaceInteractive || busyAction === "export-csv"
+                          !workspaceInteractive ||
+                          exportBlocked ||
+                          busyAction === "export-csv"
                         }
                       >
                         {busyAction === "export-csv"
@@ -2987,7 +2959,9 @@ function ExtractionWorkspacePage({
                         variant="secondary"
                         onClick={() => void onExport("excel")}
                         disabled={
-                          !workspaceInteractive || busyAction === "export-excel"
+                          !workspaceInteractive ||
+                          exportBlocked ||
+                          busyAction === "export-excel"
                         }
                       >
                         {busyAction === "export-excel"
@@ -3304,6 +3278,10 @@ function ExtractionWorkspacePage({
                     {focusedField ? (
                       <SourceEvidencePanel field={focusedField} />
                     ) : null}
+                    <ParsedTextPanel
+                      documentId={selectedDocument?.id ?? null}
+                      focusedField={focusedField}
+                    />
                     <div className="grid gap-[0.7rem]">
                       {extractedFields.map((field) => (
                         <button
@@ -3807,7 +3785,11 @@ function ExtractionWorkspacePage({
                                 .charAt(0)
                                 .toUpperCase()}
                               title={basename(record.file_path)}
-                              subtitle={formatTimestamp(record.created_at)}
+                              subtitle={
+                                record.content_sha256
+                                  ? `${formatTimestamp(record.created_at)} · SHA-256 ${record.content_sha256.slice(0, 12)}…`
+                                  : formatTimestamp(record.created_at)
+                              }
                               meta={
                                 <a
                                   className="font-semibold text-brand-strong"
@@ -3874,6 +3856,8 @@ function SettingsPage({
   desktopLogs,
   onOpenAudit,
   onOpenHelp,
+  exportPolicy,
+  onSetExportPolicy,
 }: {
   provider: ProviderSettings | null;
   parserStatus: ParserStatus | null;
@@ -3906,6 +3890,8 @@ function SettingsPage({
   desktopLogs: DesktopLogs | null;
   onOpenAudit: () => void;
   onOpenHelp: () => void;
+  exportPolicy: ExportPolicy;
+  onSetExportPolicy: (requireReviewCleared: boolean) => Promise<void>;
 }) {
   const savedCustomProfiles = customProfiles ?? [];
   const probeMaxAgeHours =
@@ -3969,6 +3955,24 @@ function SettingsPage({
           </p>
         </NoteCard>
       ) : null}
+
+      <TitledSurface
+        as="section"
+        title="Export policy"
+        subtitle="Optional guardrail for operators who must clear review before exporting."
+      >
+        <label className="flex items-start gap-3 text-[0.95rem]">
+          <input
+            type="checkbox"
+            checked={exportPolicy.require_review_cleared}
+            onChange={(event) => void onSetExportPolicy(event.target.checked)}
+          />
+          <span>
+            Block exports while fields still require review. The server rejects
+            export requests until review is saved.
+          </span>
+        </label>
+      </TitledSurface>
 
       <TitledSurface
         as="section"
@@ -4678,7 +4682,51 @@ function SettingsPage({
   );
 }
 
-function AuditPage() {
+function formatAuditTimestamp(value: string) {
+  return new Date(value).toLocaleString();
+}
+
+function formatAuditAction(action: string) {
+  return action.replace(/\./g, " · ");
+}
+
+function AuditPage({ onOpenJob }: { onOpenJob: (jobId: number) => void }) {
+  const [events, setEvents] = useState<AuditEventRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadEvents() {
+      setLoading(true);
+      setError(null);
+      try {
+        const payload = await readJson<{ events: AuditEventRecord[] }>(
+          "/audit/events?limit=100",
+        );
+        if (!cancelled) {
+          setEvents(payload.events);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Could not load audit events.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    void loadEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <PageStack>
       <PageIntro>
@@ -4690,12 +4738,12 @@ function AuditPage() {
       <TitledSurface
         as="section"
         title="Recent activity"
-        subtitle="Keep the trail scannable so operators can answer what changed without digging through logs."
+        subtitle="Live audit trail backed by the API — uploads, review edits, job transitions, and exports."
       >
         <div className="mb-4 grid items-center gap-4 [grid-template-columns:minmax(180px,240px)_minmax(0,1fr)] max-[1080px]:grid-cols-1">
           <SummaryStat
             label="Recorded events"
-            value={auditRows.length}
+            value={loading ? "…" : events.length}
             tone="accent"
           />
           <p className="m-0 text-sm text-muted">
@@ -4703,37 +4751,87 @@ function AuditPage() {
             one coherent timeline.
           </p>
         </div>
-        <div className="overflow-auto rounded-[var(--ds-radius-lg)] border border-subtle bg-panel shadow-sm">
-          <table className="min-w-[760px] w-full border-collapse">
-            <thead>
-              <tr>
-                <TableHeaderCell>Timestamp</TableHeaderCell>
-                <TableHeaderCell>User</TableHeaderCell>
-                <TableHeaderCell>Action</TableHeaderCell>
-                <TableHeaderCell>Object</TableHeaderCell>
-                <TableHeaderCell>Details</TableHeaderCell>
-              </tr>
-            </thead>
-            <tbody>
-              {auditRows.map((row) => (
-                <tr
-                  key={`${row[0]}-${row[2]}`}
-                  className="hover:bg-[rgba(var(--accent-rgb),0.04)]"
-                >
-                  <TableDataCell>{row[0]}</TableDataCell>
-                  <TableDataCell>{row[1]}</TableDataCell>
-                  <TableDataCell>
-                    <span className="inline-flex items-center rounded-full bg-[rgba(var(--accent-rgb),0.08)] px-[0.72rem] py-[0.28rem] text-[var(--text-xs)] font-bold text-brand-strong">
-                      {row[2]}
-                    </span>
-                  </TableDataCell>
-                  <TableDataCell>{row[3]}</TableDataCell>
-                  <TableDataCell>{row[4]}</TableDataCell>
+        {loading ? (
+          <SupportingText as="p" size="sm">
+            Loading audit events…
+          </SupportingText>
+        ) : null}
+        {error ? (
+          <SupportingText as="p" size="sm" className="text-[#b42318]">
+            {error}
+          </SupportingText>
+        ) : null}
+        {!loading && !error && events.length === 0 ? (
+          <SupportingText as="p" size="sm">
+            No audit events yet. Upload a document and run an extraction to
+            start the trail.
+          </SupportingText>
+        ) : null}
+        {events.length ? (
+          <div className="overflow-auto rounded-[var(--ds-radius-lg)] border border-subtle bg-panel shadow-sm">
+            <table className="min-w-[760px] w-full border-collapse">
+              <thead>
+                <tr>
+                  <TableHeaderCell>Timestamp</TableHeaderCell>
+                  <TableHeaderCell>User</TableHeaderCell>
+                  <TableHeaderCell>Action</TableHeaderCell>
+                  <TableHeaderCell>Object</TableHeaderCell>
+                  <TableHeaderCell>Details</TableHeaderCell>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {events.map((row) => {
+                  const jobId =
+                    typeof row.metadata.job_id === "number"
+                      ? row.metadata.job_id
+                      : null;
+                  const objectLabel =
+                    typeof row.metadata.original_filename === "string"
+                      ? row.metadata.original_filename
+                      : row.object_type;
+                  const details =
+                    typeof row.metadata.reason === "string"
+                      ? row.metadata.reason
+                      : typeof row.metadata.content_sha256 === "string"
+                        ? `SHA-256 ${row.metadata.content_sha256.slice(0, 12)}…`
+                        : Array.isArray(row.metadata.field_names)
+                          ? `Fields: ${row.metadata.field_names.join(", ")}`
+                          : row.action;
+                  return (
+                    <tr
+                      key={row.id}
+                      className="hover:bg-[rgba(var(--accent-rgb),0.04)]"
+                    >
+                      <TableDataCell>
+                        {formatAuditTimestamp(row.created_at)}
+                      </TableDataCell>
+                      <TableDataCell>{row.actor}</TableDataCell>
+                      <TableDataCell>
+                        <span className="inline-flex items-center rounded-full bg-[rgba(var(--accent-rgb),0.08)] px-[0.72rem] py-[0.28rem] text-[var(--text-xs)] font-bold text-brand-strong">
+                          {formatAuditAction(row.action)}
+                        </span>
+                      </TableDataCell>
+                      <TableDataCell>
+                        {jobId ? (
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => onOpenJob(jobId)}
+                          >
+                            {objectLabel}
+                          </button>
+                        ) : (
+                          objectLabel
+                        )}
+                      </TableDataCell>
+                      <TableDataCell>{details}</TableDataCell>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </TitledSurface>
     </PageStack>
   );
@@ -4910,6 +5008,12 @@ export function App() {
   const [desktopOnboardingDismissed, setDesktopOnboardingDismissed] =
     useState(false);
   const [workspaceSeeded, setWorkspaceSeeded] = useState(false);
+  const [jobStatusFilter, setJobStatusFilter] = useState<string | null>(
+    () => parseWorkspaceSearch(window.location.search).status,
+  );
+  const [exportPolicy, setExportPolicy] = useState<ExportPolicy>({
+    require_review_cleared: false,
+  });
 
   async function refreshDesktopStatus() {
     if (!isTauriRuntime()) {
@@ -4952,6 +5056,7 @@ export function App() {
       parserStatusData,
       customProfilesData,
       statusData,
+      exportPolicyData,
     ] = await Promise.allSettled([
       readJson<TemplateSummary[]>("/templates"),
       readJson<DocumentRecord[]>("/documents"),
@@ -4966,6 +5071,7 @@ export function App() {
         "/settings/providers/custom",
       ),
       readJson<DevStatus>("/dev/status"),
+      readJson<ExportPolicy>("/settings/export-policy"),
     ]);
 
     const liveTemplates =
@@ -5012,6 +5118,9 @@ export function App() {
         : [],
     );
     setDevStatus(statusData.status === "fulfilled" ? statusData.value : null);
+    if (exportPolicyData.status === "fulfilled") {
+      setExportPolicy(exportPolicyData.value);
+    }
 
     if (liveTemplates.length) {
       const versionLists = await Promise.all(
@@ -5079,6 +5188,54 @@ export function App() {
     !apiUnavailable &&
     isBootstrapMockProvider(provider) &&
     !mockProviderWarningDismissed;
+
+  const selectedResultForExport = selectedJobId
+    ? (resultsByJob[selectedJobId] ?? null)
+    : null;
+  const exportBlocked =
+    exportPolicy.require_review_cleared &&
+    Boolean(
+      selectedResultForExport?.result.fields_requiring_review.length ?? 0,
+    );
+
+  function handleJobStatusFilterChange(status: string | null) {
+    setJobStatusFilter(status);
+    replaceWorkspaceUrl({
+      jobId: selectedJobId,
+      resultId: selectedResultForExport?.result_id ?? null,
+      status,
+    });
+  }
+
+  async function handleSetExportPolicy(requireReviewCleared: boolean) {
+    try {
+      setBusyAction("save-export-policy");
+      const updated = await readJson<ExportPolicy>("/settings/export-policy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          require_review_cleared: requireReviewCleared,
+        }),
+      });
+      setExportPolicy(updated);
+      setBanner({
+        tone: "success",
+        message: requireReviewCleared
+          ? "Exports now require cleared review."
+          : "Export review gate disabled.",
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Could not save export policy.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -5430,6 +5587,11 @@ export function App() {
       const result = resultsByJob[jobId];
 
       setSelectedJobId(jobId);
+      replaceWorkspaceUrl({
+        jobId,
+        resultId: result?.result_id ?? null,
+        status: jobStatusFilter,
+      });
       if (job) {
         setSelectedDocumentId(job.document_id);
         const version = templateVersions.find(
@@ -5463,8 +5625,36 @@ export function App() {
         setFocusedFieldName(null);
       }
     },
-    [jobs, resultsByJob, templateVersions],
+    [jobs, resultsByJob, templateVersions, jobStatusFilter],
   );
+
+  useEffect(() => {
+    const urlState = parseWorkspaceSearch(window.location.search);
+    if (urlState.status !== jobStatusFilter) {
+      setJobStatusFilter(urlState.status);
+    }
+    if (!jobs.length || workspaceSeeded) {
+      return;
+    }
+    const targetJobId =
+      urlState.jobId ??
+      (urlState.resultId
+        ? (jobs.find(
+            (job) => resultsByJob[job.id]?.result_id === urlState.resultId,
+          )?.id ?? null)
+        : null);
+    if (targetJobId && targetJobId !== selectedJobId) {
+      syncJobSelection(targetJobId);
+      setWorkspaceSeeded(true);
+    }
+  }, [
+    jobs,
+    jobStatusFilter,
+    resultsByJob,
+    selectedJobId,
+    syncJobSelection,
+    workspaceSeeded,
+  ]);
 
   useEffect(() => {
     if (workspaceSeeded || !jobs.length) {
@@ -5689,6 +5879,31 @@ export function App() {
     }
   }
 
+  async function handleCancelJob() {
+    if (!selectedJobId) {
+      return;
+    }
+    try {
+      setBusyAction("cancel-job");
+      await readJson<JobRecord>(`/jobs/${selectedJobId}/cancel`, {
+        method: "POST",
+      });
+      await refreshCoreData();
+      setBanner({
+        tone: "success",
+        message: "Extraction job cancelled.",
+      });
+    } catch (error) {
+      setBanner({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Could not cancel job.",
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function handleExport(format: "json" | "csv" | "excel") {
     if (!selectedJobId) {
       return;
@@ -5700,12 +5915,15 @@ export function App() {
 
     try {
       setBusyAction(`export-${format}`);
-      const payload = await readJson<{ export_id: number }>(
-        `/results/${selectedResult.result_id}/exports/${format}`,
-        {
-          method: "POST",
-        },
-      );
+      const payload = await readJson<{
+        export_id: number;
+        content_sha256?: string;
+        exported_at?: string;
+        reviewer?: string;
+        manifest?: Record<string, unknown>;
+      }>(`/results/${selectedResult.result_id}/exports/${format}`, {
+        method: "POST",
+      });
       window.open(
         `${API_BASE}/exports/${payload.export_id}/download`,
         "_blank",
@@ -5714,7 +5932,9 @@ export function App() {
       await refreshCoreData();
       setBanner({
         tone: "success",
-        message: `Generated ${format.toUpperCase()} export.`,
+        message: payload.content_sha256
+          ? `Generated ${format.toUpperCase()} export. SHA-256 ${payload.content_sha256.slice(0, 12)}…`
+          : `Generated ${format.toUpperCase()} export.`,
       });
     } catch (error) {
       setBanner({
@@ -6320,10 +6540,14 @@ export function App() {
               onSetFocusedField={setFocusedFieldName}
               onRunExtraction={handleRunExtraction}
               onRetryJob={handleRetryJob}
+              onCancelJob={handleCancelJob}
               onSaveReview={handleSaveReview}
               onApproveAllReview={handleApproveAllReview}
               onApproveHighConfidenceReview={handleApproveHighConfidenceReview}
               onExport={handleExport}
+              exportBlocked={exportBlocked}
+              jobStatusFilter={jobStatusFilter}
+              onJobStatusFilterChange={handleJobStatusFilterChange}
               onOpenSchemas={() => setActivePage("templates")}
               onOpenHelp={() => setActivePage("help")}
               onRetryConnection={refreshCoreData}
@@ -6395,10 +6619,23 @@ export function App() {
               desktopLogs={desktopLogs}
               onOpenAudit={() => setActivePage("audit")}
               onOpenHelp={() => setActivePage("help")}
+              exportPolicy={exportPolicy}
+              onSetExportPolicy={handleSetExportPolicy}
             />
           ) : null}
 
-          {activePage === "audit" ? <AuditPage /> : null}
+          {activePage === "audit" ? (
+            <AuditPage
+              onOpenJob={(jobId) => {
+                handleSelectJob(jobId);
+                replaceWorkspaceUrl({
+                  jobId,
+                  resultId: resultsByJob[jobId]?.result_id ?? null,
+                  status: jobStatusFilter,
+                });
+              }}
+            />
+          ) : null}
           {activePage === "help" ? (
             <HelpPage
               onOpenExtractions={() => setActivePage("extractions")}

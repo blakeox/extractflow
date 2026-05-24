@@ -121,6 +121,24 @@ class ExportRecord(Base):
     result_id = Column(Integer, ForeignKey("extraction_results.id"), nullable=False)
     export_format = Column(String(50), nullable=False)
     file_path = Column(String(500), nullable=False)
+    content_sha256 = Column(String(64), nullable=True)
+    exported_at = Column(DateTime, nullable=True)
+    reviewer = Column(String(255), nullable=True)
+    template_version_id = Column(Integer, ForeignKey("template_versions.id"), nullable=True)
+    manifest_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default")
+    actor = Column(String(255), nullable=False, default="system")
+    action = Column(String(100), nullable=False)
+    object_type = Column(String(100), nullable=False)
+    object_id = Column(String(100), nullable=False)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=utc_now)
 
 

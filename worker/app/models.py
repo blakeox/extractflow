@@ -63,4 +63,17 @@ class ExtractionResult(Base):
     result_json = Column(JSON, nullable=False)
     review_status = Column(String(50), nullable=False)
     created_at = Column(DateTime, nullable=False, default=utc_now)
-    updated_at = Column(DateTime, nullable=False, default=utc_now)
+    updated_at = Column(DateTime, nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default")
+    actor = Column(String(255), nullable=False, default="system")
+    action = Column(String(100), nullable=False)
+    object_type = Column(String(100), nullable=False)
+    object_id = Column(String(100), nullable=False)
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=utc_now)

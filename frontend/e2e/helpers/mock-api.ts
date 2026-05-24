@@ -148,9 +148,11 @@ type State = {
   jobs: JobRecord[];
   exports: ExportRecord[];
   results: Record<number, ResultEnvelope>;
+  auditEvents: Array<Record<string, unknown>>;
+  exportPolicy: { require_review_cleared: boolean };
 };
 
-type JobScenario = "review" | "failed";
+type JobScenario = "review" | "failed" | "queued";
 type ExportScenario = "success" | "failed";
 
 type MockOverrides = {
@@ -159,6 +161,7 @@ type MockOverrides = {
   jobScenarios?: JobScenario[];
   exportScenarios?: ExportScenario[];
   apiAvailable?: boolean;
+  exportPolicy?: { require_review_cleared: boolean };
 };
 
 function json(route: Route, status: number, body: unknown) {
@@ -193,6 +196,8 @@ function buildReviewResult(
           normalized_value: { value: "Acme Company" },
           confidence_score: 0.41,
           source_text: "Acme Company",
+          char_start: 16,
+          char_end: 28,
           page_number: 1,
           location_reference: "Page 1",
           validation_status: "valid",
@@ -340,6 +345,8 @@ function buildInitialState(): State {
     jobs: [],
     exports: [],
     results: {},
+    auditEvents: [],
+    exportPolicy: { require_review_cleared: false },
   };
 }
 
@@ -385,6 +392,29 @@ async function mockExtractionApiWithState(
     }
     if (method === "GET" && path === "/exports") {
       return json(route, 200, state.exports);
+    }
+    if (method === "GET" && path === "/audit/events") {
+      return json(route, 200, {
+        events: state.auditEvents,
+        total: state.auditEvents.length,
+      });
+    }
+    if (method === "GET" && path === "/settings/export-policy") {
+      return json(route, 200, state.exportPolicy);
+    }
+    if (method === "PUT" && path === "/settings/export-policy") {
+      const payload = request.postDataJSON() as {
+        require_review_cleared: boolean;
+      };
+      state.exportPolicy = payload;
+      return json(route, 200, state.exportPolicy);
+    }
+    if (method === "GET" && /^\/documents\/\d+\/parsed-text$/.test(path)) {
+      return json(route, 200, {
+        document_id: 1,
+        text: "Invoice Vendor: Acme Company\nTotal Due: $1,200.00",
+        source: "parsed_file",
+      });
     }
     if (method === "GET" && path === "/settings/provider") {
       return json(route, 200, state.provider);
@@ -562,13 +592,24 @@ async function mockExtractionApiWithState(
         id: nextJobId,
         document_id: payload.document_id,
         template_version_id: payload.template_version_id,
-        status: scenario === "failed" ? "failed" : "completed",
+        status:
+          scenario === "failed"
+            ? "failed"
+            : scenario === "queued"
+              ? "queued"
+              : "completed",
         error_message:
           scenario === "failed"
             ? "Provider timed out while extracting vendor_name. Check local runtime and rerun."
             : null,
-        progress_stage: scenario === "failed" ? "failed" : "completed",
-        progress_pct: scenario === "failed" ? 0 : 100,
+        progress_stage:
+          scenario === "failed"
+            ? "failed"
+            : scenario === "queued"
+              ? "queued"
+              : "completed",
+        progress_pct:
+          scenario === "queued" ? 0 : scenario === "failed" ? 0 : 100,
         attempt_count: 1,
         created_at: now,
         updated_at: now,
@@ -579,25 +620,36 @@ async function mockExtractionApiWithState(
         document.id === payload.document_id
           ? {
               ...document,
-              status: scenario === "failed" ? "failed" : "completed",
+              status:
+                scenario === "failed"
+                  ? "failed"
+                  : scenario === "queued"
+                    ? "queued"
+                    : "completed",
             }
           : document,
       );
-      if (scenario === "failed") {
+      if (scenario === "failed" || scenario === "queued") {
         delete state.results[job.id];
       } else {
         state.results[job.id] = buildReviewResult(job.id, state.provider);
       }
       return json(route, 200, job);
     }
-    if (method === "POST" && path === "/results/501/review") {
+    if (method === "POST" && /^\/results\/\d+\/review$/.test(path)) {
+      const resultId = Number(path.split("/")[2]);
       const payload = request.postDataJSON() as {
         edits: Array<{
           field_name: string;
-          normalized_value: { value: string };
+          normalized_value: unknown;
         }>;
       };
-      const current = state.results[1];
+      const current = Object.values(state.results).find(
+        (item) => item.result_id === resultId,
+      );
+      if (!current) {
+        return json(route, 404, { detail: "Result not found." });
+      }
       const edit = payload.edits[0];
       current.result.extracted_fields = current.result.extracted_fields.map(
         (field) => {
@@ -621,6 +673,18 @@ async function mockExtractionApiWithState(
       );
       current.result.fields_requiring_review = [];
       current.result.reviewed_at = "2026-05-02T12:07:00.000Z";
+      state.auditEvents.unshift({
+        id: state.auditEvents.length + 1,
+        actor: "local-ui",
+        action: "review.saved",
+        object_type: "result",
+        object_id: String(current.result_id),
+        metadata: {
+          job_id: current.job_id,
+          field_names: payload.edits.map((item) => item.field_name),
+        },
+        created_at: "2026-05-02T12:07:00.000Z",
+      });
       return json(route, 200, current.result);
     }
     if (
@@ -645,6 +709,15 @@ async function mockExtractionApiWithState(
       if (!result) {
         return json(route, 404, { detail: "Result not found." });
       }
+      if (
+        state.exportPolicy.require_review_cleared &&
+        result.result.fields_requiring_review.length > 0
+      ) {
+        return json(route, 409, {
+          detail:
+            "Export blocked until review is cleared. Save review decisions for all fields requiring review.",
+        });
+      }
 
       const exportRecord: ExportRecord = {
         id: nextExportId,
@@ -656,7 +729,43 @@ async function mockExtractionApiWithState(
       };
       nextExportId += 1;
       state.exports = [exportRecord, ...state.exports];
-      return json(route, 200, { export_id: exportRecord.id });
+      state.auditEvents.unshift({
+        id: state.auditEvents.length + 1,
+        actor: "local-ui",
+        action: "export.created",
+        object_type: "export",
+        object_id: String(exportRecord.id),
+        metadata: {
+          job_id: result.job_id,
+          content_sha256: "abc123def456",
+        },
+        created_at: "2026-05-02T12:08:00.000Z",
+      });
+      return json(route, 200, {
+        export_id: exportRecord.id,
+        content_sha256:
+          "abc123def4567890123456789012345678901234567890123456789012345678",
+        manifest: {
+          result_id: resultId,
+          job_id: result.job_id,
+          export_format: format,
+        },
+      });
+    }
+    if (method === "POST" && /^\/jobs\/\d+\/cancel$/.test(path)) {
+      const jobId = Number(path.split("/")[2]);
+      state.jobs = state.jobs.map((job) =>
+        job.id === jobId
+          ? {
+              ...job,
+              status: "cancelled",
+              progress_stage: "cancelled",
+              updated_at: "2026-05-02T12:06:00.000Z",
+            }
+          : job,
+      );
+      const job = state.jobs.find((item) => item.id === jobId);
+      return json(route, 200, job);
     }
 
     return json(route, 404, {
@@ -672,6 +781,9 @@ export async function mockExtractionApi(page: Page, overrides?: MockOverrides) {
   }
   if (overrides?.templateVersions) {
     state.templateVersions = overrides.templateVersions;
+  }
+  if (overrides?.exportPolicy) {
+    state.exportPolicy = overrides.exportPolicy;
   }
 
   return mockExtractionApiWithState(page, state, {
