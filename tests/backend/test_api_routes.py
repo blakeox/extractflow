@@ -1533,8 +1533,9 @@ def test_export_routes_cover_csv_excel_and_invalid_format(client) -> None:
     assert excel_path.exists()
     assert "vendor_name" in csv_path.read_text(encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Unsupported export format: xml"):
-        client.post(f"/api/results/{result_id}/exports/xml")
+    unsupported_response = client.post(f"/api/results/{result_id}/exports/xml")
+    assert unsupported_response.status_code == 400
+    assert "Unsupported export format" in unsupported_response.json()["detail"]
 
 
 def test_export_list_and_download_routes_return_saved_export_metadata(client) -> None:
@@ -1661,7 +1662,7 @@ def test_export_download_route_rejects_paths_outside_exports_dir(client, tmp_pat
     response = client.get(f"/api/exports/{export_id}/download")
 
     assert response.status_code == 400
-    assert "Managed path must stay inside" in response.json()["detail"]
+    assert "Invalid storage reference" in response.json()["detail"]
 
 
 def test_provider_settings_round_trip(client) -> None:

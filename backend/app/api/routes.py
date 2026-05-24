@@ -408,7 +408,10 @@ def export_result_endpoint(
     )
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
-    record = export_result(db, result, export_format)
+    try:
+        record = export_result(db, result, export_format)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"export_id": record.id, "path": record.file_path}
 
 

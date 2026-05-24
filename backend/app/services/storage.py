@@ -1,11 +1,31 @@
 from __future__ import annotations
 
+import csv
+import json
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
+from extraction_core.models import ExtractionValidationSummary
 from extraction_core.storage_refs import build_storage_reference, resolve_storage_path
+from openpyxl import Workbook
 
 from app.core.config import settings
+
+ExportFormat = Literal["json", "csv", "excel"]
+ALLOWED_EXPORT_FORMATS: frozenset[ExportFormat] = frozenset({"json", "csv", "excel"})
+_EXPORT_SUFFIX_BY_FORMAT: dict[ExportFormat, str] = {
+    "json": "json",
+    "csv": "csv",
+    "excel": "xlsx",
+}
+
+
+def parse_export_format(export_format: str) -> ExportFormat:
+    normalized = export_format.strip().lower()
+    if normalized not in ALLOWED_EXPORT_FORMATS:
+        raise ValueError(f"Unsupported export format: {export_format}")
+    return normalized
 
 
 def build_upload_target(original_filename: str) -> tuple[str, Path]:
@@ -17,14 +37,84 @@ def build_upload_target(original_filename: str) -> tuple[str, Path]:
     return reference, resolve_storage_path(reference, root=data_root)
 
 
-def build_export_reference(result_id: int, export_format: str, timestamp: str) -> str:
-    suffix = "xlsx" if export_format == "excel" else export_format
+def build_export_reference(result_id: int, export_format: ExportFormat, timestamp: str) -> str:
+    suffix = _EXPORT_SUFFIX_BY_FORMAT[export_format]
     return f"result-{result_id}-{timestamp}.{suffix}"
 
 
-def build_export_target(result_id: int, export_format: str, timestamp: str) -> tuple[str, Path]:
+def build_export_target(result_id: int, export_format: ExportFormat, timestamp: str) -> tuple[str, Path]:
     reference = build_export_reference(result_id, export_format, timestamp)
     return reference, resolve_export_download_path(reference)
+
+
+def write_result_export_file(
+    *,
+    result_id: int,
+    export_format: str,
+    timestamp: str,
+    summary: ExtractionValidationSummary,
+) -> str:
+    fmt = parse_export_format(export_format)
+    reference, path = build_export_target(result_id, fmt, timestamp)
+
+    if fmt == "json":
+        path.write_text(json.dumps(summary.model_dump(mode="json"), indent=2), encoding="utf-8")
+    elif fmt == "csv":
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["field_name", "label", "kind", "value", "status", "requires_review"])
+            for field in summary.extracted_fields:
+                writer.writerow(
+                    [
+                        field.field_name,
+                        field.label,
+                        "extracted",
+                        json.dumps(field.normalized_value),
+                        field.validation_status,
+                        field.requires_review,
+                    ]
+                )
+            for field in summary.calculated_fields:
+                writer.writerow(
+                    [
+                        field.field_name,
+                        field.label,
+                        "calculated",
+                        json.dumps(field.calculated_value),
+                        field.validation_status,
+                        field.requires_review,
+                    ]
+                )
+    else:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Extraction Results"
+        sheet.append(["field_name", "label", "kind", "value", "status", "requires_review"])
+        for field in summary.extracted_fields:
+            sheet.append(
+                [
+                    field.field_name,
+                    field.label,
+                    "extracted",
+                    json.dumps(field.normalized_value),
+                    field.validation_status,
+                    field.requires_review,
+                ]
+            )
+        for field in summary.calculated_fields:
+            sheet.append(
+                [
+                    field.field_name,
+                    field.label,
+                    "calculated",
+                    json.dumps(field.calculated_value),
+                    field.validation_status,
+                    field.requires_review,
+                ]
+            )
+        workbook.save(path)
+
+    return reference
 
 
 def resolve_export_download_path(file_path: str) -> Path:

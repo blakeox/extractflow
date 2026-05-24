@@ -1,35 +1,35 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path, PurePosixPath
+import re
+from pathlib import Path
 
-_INVALID_PATH_PARTS = frozenset({".", ".."})
+_SAFE_STORAGE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
 
 
-def _validated_relative_candidate(candidate: str | Path) -> PurePosixPath:
-    if isinstance(candidate, Path):
-        if candidate.is_absolute() or candidate.drive:
-            raise ValueError("Managed paths must be relative to the storage root.")
-        relative = PurePosixPath(*candidate.parts)
-    else:
-        normalized = os.path.normpath(str(candidate)).replace("\\", "/")
-        if os.path.isabs(normalized):
-            raise ValueError("Managed paths must be relative to the storage root.")
-        relative = PurePosixPath(normalized)
-
-    if relative.is_absolute() or any(part in _INVALID_PATH_PARTS for part in relative.parts):
-        raise ValueError("Managed path must not contain parent-directory segments.")
-    return relative
+def normalize_storage_reference(reference: str) -> str:
+    normalized = os.path.normpath(reference).replace("\\", "/")
+    if os.path.isabs(normalized):
+        raise ValueError("Invalid storage reference.")
+    cleaned = normalized.lstrip("/")
+    if not cleaned or cleaned in {".", ".."} or ".." in cleaned.split("/"):
+        raise ValueError("Invalid storage reference.")
+    if not _SAFE_STORAGE_REFERENCE.fullmatch(cleaned):
+        raise ValueError("Invalid storage reference.")
+    return cleaned
 
 
 def resolve_storage_path(candidate: str | Path, *, root: str | Path) -> Path:
     resolved_root = Path(root).expanduser().resolve()
-    raw_candidate = Path(candidate).expanduser()
-    if raw_candidate.is_absolute():
-        resolved_candidate = raw_candidate.resolve()
+    if isinstance(candidate, Path):
+        if candidate.is_absolute():
+            resolved_candidate = candidate.resolve()
+        else:
+            cleaned = normalize_storage_reference(candidate.as_posix())
+            resolved_candidate = (resolved_root / cleaned).resolve()
     else:
-        relative = _validated_relative_candidate(candidate)
-        resolved_candidate = (resolved_root / Path(*relative.parts)).resolve()
+        cleaned = normalize_storage_reference(candidate)
+        resolved_candidate = (resolved_root / cleaned).resolve()
     if not resolved_candidate.is_relative_to(resolved_root):
         raise ValueError(f"Managed path must stay inside {resolved_root}.")
     return resolved_candidate
