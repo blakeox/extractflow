@@ -1698,7 +1698,7 @@ def test_process_once_marks_job_and_document_failed_when_extraction_raises(tmp_p
         document = Document(
             original_filename="invoice.txt",
             content_type="text/plain",
-            stored_path=str(document_path),
+            stored_path=document_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="uploaded",
         )
         db.add(document)
@@ -1757,7 +1757,7 @@ def test_process_once_marks_langextract_job_failed_when_document_exceeds_limit(t
         document = Document(
             original_filename="invoice.txt",
             content_type="text/plain",
-            stored_path=str(document_path),
+            stored_path=document_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="uploaded",
         )
         db.add(document)
@@ -1804,7 +1804,7 @@ def test_process_once_updates_existing_result_for_same_job(tmp_path, monkeypatch
         document = Document(
             original_filename="invoice.txt",
             content_type="text/plain",
-            stored_path=str(document_path),
+            stored_path=document_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="uploaded",
         )
         db.add(document)
