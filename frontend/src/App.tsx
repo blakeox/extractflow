@@ -18,6 +18,12 @@ import { SourceEvidencePanel } from "./components/review/SourceEvidencePanel";
 import { API_BASE } from "./lib/config";
 import { clampProgressPct, getJobStageLabel } from "./lib/job-progress";
 import {
+  CUSTOM_PROVIDER_DRAFT_STORAGE_KEY,
+  readPersistedCustomProviderDraft,
+  writePersistedCustomProviderDraft,
+  type CustomProviderDraftWithEnvVar,
+} from "./lib/custom-provider-draft-storage";
+import {
   dismissMockProviderWarning,
   isBootstrapMockProvider,
   readMockProviderWarningDismissed,
@@ -229,24 +235,7 @@ type CustomProviderProfile = {
   updated_at: string;
 };
 
-type CustomProviderDraft = {
-  label: string;
-  mode: "local" | "cloud";
-  api_style: "openai_compatible" | "azure_openai";
-  provider_type: string;
-  base_url: string;
-  api_key_env_var: string;
-  model: string;
-  deployment: string;
-  api_version: string;
-  allow_external_processing: boolean;
-  supports_json_mode: boolean;
-  temperature: string;
-  max_tokens: string;
-  timeout_seconds: string;
-  retry_count: string;
-  chunk_size: string;
-};
+type CustomProviderDraft = CustomProviderDraftWithEnvVar;
 
 type TemplateDefinition = {
   template_name: string;
@@ -424,7 +413,7 @@ const pageLabels: Record<PageId, string> = {
   help: "Help",
 };
 
-const CUSTOM_PROVIDER_KEY = "custom-provider-draft";
+const CUSTOM_PROVIDER_KEY = CUSTOM_PROVIDER_DRAFT_STORAGE_KEY;
 const DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS = 24;
 
 const DEFAULT_CUSTOM_PROVIDER_DRAFT: CustomProviderDraft = {
@@ -462,22 +451,7 @@ const EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS: LangExtractFeedbackDiagnostics = {
 };
 
 function loadSavedCustomProviderDraft(): CustomProviderDraft {
-  if (typeof window === "undefined") {
-    return DEFAULT_CUSTOM_PROVIDER_DRAFT;
-  }
-
-  const savedDraft = window.localStorage.getItem(CUSTOM_PROVIDER_KEY);
-  if (!savedDraft) {
-    return DEFAULT_CUSTOM_PROVIDER_DRAFT;
-  }
-
-  try {
-    const parsed = JSON.parse(savedDraft) as Partial<CustomProviderDraft>;
-    return { ...DEFAULT_CUSTOM_PROVIDER_DRAFT, ...parsed };
-  } catch {
-    window.localStorage.removeItem(CUSTOM_PROVIDER_KEY);
-    return DEFAULT_CUSTOM_PROVIDER_DRAFT;
-  }
+  return readPersistedCustomProviderDraft(DEFAULT_CUSTOM_PROVIDER_DRAFT);
 }
 
 function customProviderProfileProbeIsStale(
@@ -5110,10 +5084,7 @@ export function App() {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(
-      CUSTOM_PROVIDER_KEY,
-      JSON.stringify(customProviderDraft),
-    );
+    writePersistedCustomProviderDraft(customProviderDraft);
   }, [customProviderDraft]);
 
   const hasActiveJobs = jobs.some(
