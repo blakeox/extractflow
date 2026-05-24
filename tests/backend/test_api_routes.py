@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import httpx
-import pytest
 from app.core.tenant import build_tenant_setting_key, get_current_tenant_id
 from app.db.database import SessionLocal
 from app.main import app
