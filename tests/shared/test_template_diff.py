@@ -42,4 +42,4 @@ def test_template_diff_reports_modified_field_metadata() -> None:
 
     assert diff.extracted_changed
     assert diff.extracted_changed[0].name == before["extracted_fields"][0]["name"]
-    assert any("required" in detail for detail in diff.extracted_changed[0].details)
+    assert any("label" in detail for detail in diff.extracted_changed[0].details)
