@@ -8,14 +8,14 @@ If the repo is ever switched back to private, Actions consume account minutes an
 
 ## What runs in CI
 
-| Workflow            | When                                                                  | Purpose                                    |
-| ------------------- | --------------------------------------------------------------------- | ------------------------------------------ |
-| `CI` (`test.yml`)   | PR + push to `main` / `dev` / `master` (non-doc paths)                | Tests, secret scan, dependency audits, E2E |
-| `Secret Scan`       | Same branches as CI (standalone job for branch protection check name) | `scripts/scan-secrets.py`                  |
-| `CodeQL`            | PR + push to `main` / `dev` / `master`; weekly schedule               | Static analysis (JS/TS + Python)           |
-| `Dependency Review` | Pull requests only                                                    | Block vulnerable dependency changes        |
-| `LangExtract Eval`  | Path-filtered; nightly Ollama eval on public repos only               | Golden-set validate / optional live eval   |
-| `Release Gate`      | Version tags / manual                                                 | Release verification                       |
+| Workflow            | When                                                                  | Purpose                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `CI` (`test.yml`)   | PR + push to `main` / `dev` / `master` (non-doc paths)                | Tests, secret scan, dependency audits, E2E                                                                                 |
+| `Secret Scan`       | Same branches as CI (standalone job for branch protection check name) | `scripts/scan-secrets.py`                                                                                                  |
+| `CodeQL`            | PR + push to `main` / `dev` / `master`; weekly schedule               | Static analysis (JS/TS + Python)                                                                                           |
+| `Dependency Review` | Pull requests only                                                    | Block vulnerable dependency changes                                                                                        |
+| `LangExtract Eval`  | Path-filtered; nightly Ollama eval on public repos only               | Golden-set validate; nightly smoke gate (`receipt-basic`, `statement-basic` on `qwen2.5:3b`) plus informational full suite |
+| `Release Gate`      | Version tags / manual                                                 | Release verification                                                                                                       |
 
 Expensive jobs are path-filtered or gated so doc-only changes and private-repo nightlies do not burn minutes unnecessarily.
 
@@ -38,3 +38,5 @@ Lefthook runs `verify-pre-commit` on commit; `verify-pre-push` mirrors the heavi
 - Require E2E only on `master` (edit `e2e` job `if:` in `test.yml`).
 - Run CodeQL only on schedule + `master` / `dev` (already limited on push).
 - Disable scheduled LangExtract nightly if you rely on manual `workflow_dispatch` eval runs.
+
+Nightly live eval uses `qwen2.5:3b` for CI cost/latency. The **smoke** cases must pass; the **full** golden set (invoice/lease included) runs afterward with `continue-on-error` because small models often miss SLOs authored for larger local models (`qwen3.5:27b` in fixtures). Inspect `langextract-eval-summary` artifacts when the full run fails.
