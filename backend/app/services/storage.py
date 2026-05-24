@@ -88,7 +88,10 @@ def write_result_export_file(
     else:
         workbook = Workbook()
         sheet = workbook.active
-        sheet.title = "Extraction Results"
+        if sheet is None:
+            sheet = workbook.create_sheet("Extraction Results")
+        else:
+            sheet.title = "Extraction Results"
         sheet.append(["field_name", "label", "kind", "value", "status", "requires_review"])
         for field in summary.extracted_fields:
             sheet.append(
