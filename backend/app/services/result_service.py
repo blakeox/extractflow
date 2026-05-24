@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
-
 from extraction_core import evaluate_calculated_fields
 from extraction_core.models import ExtractionTemplate, ExtractionValidationSummary, ReviewEditPayload
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.models import ExportRecord, ExtractionJob, ExtractionResult, ReviewEdit, TemplateVersion
-from app.services.storage import parse_export_format, write_result_export_file
+from app.services.storage import (
+    build_export_reference,
+    ensure_exports_directory,
+    parse_export_format,
+    write_result_export_file,
+)
 
 
 def utc_now() -> datetime:
@@ -101,12 +103,12 @@ def apply_review_edits(db: Session, result: ExtractionResult, payload: ReviewEdi
 def export_result(db: Session, result: ExtractionResult, export_format: str) -> ExportRecord:
     summary = ExtractionValidationSummary.model_validate(result.result_json)
     timestamp = utc_now().strftime("%Y%m%d%H%M%S")
-    Path(settings.exports_dir).mkdir(parents=True, exist_ok=True)
+    ensure_exports_directory()
     parsed_format = parse_export_format(export_format)
-    reference = write_result_export_file(
-        result_id=result.id,
+    reference = build_export_reference(result.id, parsed_format, timestamp)
+    write_result_export_file(
+        reference=reference,
         export_format=parsed_format,
-        timestamp=timestamp,
         summary=summary,
     )
 

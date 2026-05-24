@@ -1,6 +1,7 @@
 .git
 .ruff_cache
 .venv
+.venv.broken
 node_modules
 dist
 build

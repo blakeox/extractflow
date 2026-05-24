@@ -47,19 +47,23 @@ def build_export_target(result_id: int, export_format: ExportFormat, timestamp: 
     return reference, resolve_export_download_path(reference)
 
 
+def ensure_exports_directory() -> Path:
+    exports_root = Path(settings.exports_dir).expanduser().resolve()
+    exports_root.mkdir(parents=True, exist_ok=True)
+    return exports_root
+
+
 def write_result_export_file(
     *,
-    result_id: int,
-    export_format: str,
-    timestamp: str,
+    reference: str,
+    export_format: ExportFormat,
     summary: ExtractionValidationSummary,
 ) -> str:
-    fmt = parse_export_format(export_format)
-    reference, path = build_export_target(result_id, fmt, timestamp)
+    path = resolve_export_download_path(reference)
 
-    if fmt == "json":
+    if export_format == "json":
         path.write_text(json.dumps(summary.model_dump(mode="json"), indent=2), encoding="utf-8")
-    elif fmt == "csv":
+    elif export_format == "csv":
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["field_name", "label", "kind", "value", "status", "requires_review"])
@@ -129,7 +133,8 @@ def resolve_document_storage_path(file_path: str) -> Path:
 
 
 def resolve_managed_path(candidate: str | Path, *, root: Path) -> Path:
-    return resolve_storage_path(candidate, root=root)
+    reference = candidate.as_posix() if isinstance(candidate, Path) else candidate
+    return resolve_storage_path(reference, root=root)
 
 
 def build_document_storage_reference(file_path: str | Path) -> str:

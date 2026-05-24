@@ -19,17 +19,13 @@ def normalize_storage_reference(reference: str) -> str:
     return cleaned
 
 
-def resolve_storage_path(candidate: str | Path, *, root: str | Path) -> Path:
+def resolve_storage_path(candidate: str, *, root: str | Path) -> Path:
     resolved_root = Path(root).expanduser().resolve()
-    if isinstance(candidate, Path):
-        if candidate.is_absolute():
-            resolved_candidate = candidate.resolve()
-        else:
-            cleaned = normalize_storage_reference(candidate.as_posix())
-            resolved_candidate = (resolved_root / cleaned).resolve()
-    else:
-        cleaned = normalize_storage_reference(candidate)
-        resolved_candidate = (resolved_root / cleaned).resolve()
+    cleaned = normalize_storage_reference(candidate)
+    resolved_candidate = resolved_root
+    for segment in cleaned.split("/"):
+        resolved_candidate /= segment
+    resolved_candidate = resolved_candidate.resolve()
     if not resolved_candidate.is_relative_to(resolved_root):
         raise ValueError(f"Managed path must stay inside {resolved_root}.")
     return resolved_candidate
@@ -37,5 +33,12 @@ def resolve_storage_path(candidate: str | Path, *, root: str | Path) -> Path:
 
 def build_storage_reference(candidate: str | Path, *, root: str | Path) -> str:
     resolved_root = Path(root).expanduser().resolve()
-    resolved_candidate = resolve_storage_path(candidate, root=resolved_root)
-    return resolved_candidate.relative_to(resolved_root).as_posix()
+    raw = Path(candidate).expanduser()
+    if raw.is_absolute():
+        resolved = raw.resolve()
+        if not resolved.is_relative_to(resolved_root):
+            raise ValueError(f"Managed path must stay inside {resolved_root}.")
+        reference = resolved.relative_to(resolved_root).as_posix()
+    else:
+        reference = raw.as_posix()
+    return normalize_storage_reference(reference)
