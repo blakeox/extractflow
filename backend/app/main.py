@@ -9,8 +9,8 @@ from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import router
 from app.bootstrap.seed import seed_sample_template
