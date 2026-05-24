@@ -17,10 +17,10 @@ def main() -> int:
         description="Run LangExtract golden-set evaluation cases against the configured local runtime."
     )
     parser.add_argument(
-        "path",
-        nargs="?",
-        default=str(ROOT_DIR / "evals" / "langextract" / "cases"),
-        help="JSON case file or directory of JSON cases. Defaults to evals/langextract/cases.",
+        "paths",
+        nargs="*",
+        default=[str(ROOT_DIR / "evals" / "langextract" / "cases")],
+        help="One or more JSON case files or directories of JSON cases. Defaults to evals/langextract/cases.",
     )
     parser.add_argument(
         "--duckdb",
@@ -37,17 +37,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    case_path = Path(args.path)
-    if not case_path.exists():
-        parser.error(f"path does not exist: {case_path}")
-
-    cases = load_eval_cases(case_path)
+    cases = []
+    for path_arg in args.paths:
+        case_path = Path(path_arg)
+        if not case_path.exists():
+            parser.error(f"path does not exist: {case_path}")
+        cases.extend(load_eval_cases(case_path))
     if not cases:
-        print(f"No LangExtract eval cases found under {case_path}.")
+        print(f"No LangExtract eval cases found under {', '.join(args.paths)}.")
         return 1
 
     if args.validate_only:
-        print(f"Validated {len(cases)} LangExtract eval case(s) under {case_path}.")
+        print(f"Validated {len(cases)} LangExtract eval case(s).")
         for case in cases:
             print(f"- {case.name}")
         return 0
@@ -57,7 +58,9 @@ def main() -> int:
     if args.duckdb:
         from app.services.langextract_eval import store_eval_report
 
-        run_id = store_eval_report(Path(args.duckdb), report, source_path=case_path, label=args.label)
+        run_id = store_eval_report(
+            Path(args.duckdb), report, source_path=Path(args.paths[0]), label=args.label
+        )
         print(f"Stored benchmark run {run_id} in {Path(args.duckdb)}")
     return 0 if report.failed_cases == 0 and report.failed_checks == 0 else 1
 

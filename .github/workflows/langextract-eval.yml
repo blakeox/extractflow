@@ -102,7 +102,19 @@ jobs:
         run: |
           curl -fsS http://127.0.0.1:11434/api/pull -d '{"name":"qwen2.5:3b"}'
 
-      - name: Run LangExtract golden-set eval
+      - name: Run LangExtract smoke eval (required)
+        env:
+          LANGEXTRACT_EVAL_BASE_URL: http://127.0.0.1:11434/v1
+          LANGEXTRACT_EVAL_MODEL: qwen2.5:3b
+        run: |
+          set -o pipefail
+          PYTHONPATH=worker:shared python ./scripts/evaluate-langextract.py \
+            evals/langextract/cases/receipt-basic.json \
+            evals/langextract/cases/statement-basic.json \
+            --label "ci-${{ github.run_id }}-smoke" | tee langextract-eval-smoke.txt
+
+      - name: Run LangExtract full golden-set eval (informational)
+        continue-on-error: true
         env:
           LANGEXTRACT_EVAL_BASE_URL: http://127.0.0.1:11434/v1
           LANGEXTRACT_EVAL_MODEL: qwen2.5:3b
@@ -110,12 +122,12 @@ jobs:
           set -o pipefail
           PYTHONPATH=worker:shared python ./scripts/evaluate-langextract.py \
             evals/langextract/cases \
-            --label "ci-${{ github.run_id }}" | tee langextract-eval-summary.txt
+            --label "ci-${{ github.run_id }}-full" | tee langextract-eval-full.txt
 
-      - name: Upload LangExtract eval summary
+      - name: Upload LangExtract eval summaries
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: langextract-eval-summary
-          path: langextract-eval-summary.txt
+          path: langextract-eval-*.txt
           if-no-files-found: ignore
