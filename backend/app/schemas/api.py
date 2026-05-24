@@ -38,6 +38,16 @@ class TemplateVersionCreateRequest(BaseModel):
     definition: ExtractionTemplate
 
 
+class SchemaDryRunRequest(BaseModel):
+    definition: dict[str, Any]
+    sample_text: str
+
+
+class TemplateVersionDiffRequest(BaseModel):
+    before_definition: dict[str, Any]
+    after_definition: dict[str, Any]
+
+
 class JobCreateRequest(BaseModel):
     document_id: int
     template_version_id: int

@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -77,6 +78,46 @@ type TemplateSummary = {
   latest_version: string;
   created_at: string;
   updated_at: string;
+};
+
+type SchemaDryRunFieldResult = {
+  field_name: string;
+  label: string;
+  data_type: string;
+  validation_status: string;
+  validation_errors: string[];
+  requires_review: boolean;
+  confidence_score: number;
+  extracted_value: string | null;
+  normalized_value: unknown;
+  source_text: string;
+  extraction_notes: string;
+};
+
+type SchemaDryRunResponse = {
+  ok: boolean;
+  schema_errors: string[];
+  document_level_notes: string[];
+  extracted_fields: SchemaDryRunFieldResult[];
+  fields_requiring_review: string[];
+};
+
+type TemplateFieldChange = {
+  name: string;
+  change: string;
+  details: string[];
+};
+
+type TemplateVersionDiff = {
+  before_version: string;
+  after_version: string;
+  extracted_added: string[];
+  extracted_removed: string[];
+  extracted_changed: TemplateFieldChange[];
+  calculated_added: string[];
+  calculated_removed: string[];
+  calculated_changed: TemplateFieldChange[];
+  langextract_changed: boolean;
 };
 
 type TemplateDefinitionField = {
@@ -950,6 +991,18 @@ function buildTemplatePayload(
   };
 }
 
+function buildDraftTemplateDefinitionSafe(
+  draft: DraftTemplate,
+  provider: ProviderSettings | null,
+  base: TemplateDefinition,
+): TemplateDefinition {
+  try {
+    return buildTemplatePayload(draft, provider, base);
+  } catch {
+    return base;
+  }
+}
+
 function buildDraftTemplateFromDefinition(
   definition: TemplateDefinition,
 ): DraftTemplate {
@@ -1777,6 +1830,27 @@ function DesktopSetupNotice({
   );
 }
 
+function templateVersionDiffHasChanges(diff: TemplateVersionDiff): boolean {
+  return (
+    (diff.extracted_added?.length ?? 0) > 0 ||
+    (diff.extracted_removed?.length ?? 0) > 0 ||
+    (diff.extracted_changed?.length ?? 0) > 0 ||
+    (diff.calculated_added?.length ?? 0) > 0 ||
+    (diff.calculated_removed?.length ?? 0) > 0 ||
+    (diff.calculated_changed?.length ?? 0) > 0 ||
+    Boolean(diff.langextract_changed)
+  );
+}
+
+function isTemplateVersionDiff(value: unknown): value is TemplateVersionDiff {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as TemplateVersionDiff).extracted_added) &&
+    Array.isArray((value as TemplateVersionDiff).extracted_removed)
+  );
+}
+
 function SchemaPage({
   templates,
   templateVersions,
@@ -1785,6 +1859,7 @@ function SchemaPage({
   selectedTemplateVersionId,
   setSelectedTemplateVersionId,
   currentTemplateDefinition,
+  draftTemplateDefinition,
   provider,
   draft,
   setDraft,
@@ -1805,6 +1880,7 @@ function SchemaPage({
   selectedTemplateVersionId: number | null;
   setSelectedTemplateVersionId: (id: number | null) => void;
   currentTemplateDefinition: TemplateDefinition | null;
+  draftTemplateDefinition: TemplateDefinition;
   provider: ProviderSettings | null;
   draft: DraftTemplate;
   setDraft: Dispatch<SetStateAction<DraftTemplate>>;
@@ -1822,6 +1898,16 @@ function SchemaPage({
   onCreateTemplate: () => Promise<void>;
   busyAction: string | null;
 }) {
+  const [dryRunSampleText, setDryRunSampleText] = useState(
+    "Vendor Name: Acme Corp\nTotal Due: $1,200.00",
+  );
+  const [dryRunResult, setDryRunResult] = useState<SchemaDryRunResponse | null>(
+    null,
+  );
+  const [dryRunBusy, setDryRunBusy] = useState(false);
+  const [versionDiff, setVersionDiff] = useState<TemplateVersionDiff | null>(
+    null,
+  );
   const definition = currentTemplateDefinition ?? starterTemplateDefinition;
   const effectiveProvider = provider ?? definition.llm_provider_settings;
   const showLangExtractEditor =
@@ -1844,6 +1930,73 @@ function SchemaPage({
     definition.output_settings.export_formats.join(" · ");
   const searchParametersStepNumber = showLangExtractEditor ? 4 : 3;
   const outputRulesStepNumber = showLangExtractEditor ? 5 : 4;
+  const dryRunStepNumber = outputRulesStepNumber + 1;
+  const selectedSavedVersion =
+    selectedVersions.find((item) => item.id === selectedTemplateVersionId) ??
+    null;
+
+  useEffect(() => {
+    if (!selectedSavedVersion) {
+      setVersionDiff(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const diff = await readJson<TemplateVersionDiff>(
+          "/templates/version-diff",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              before_definition: selectedSavedVersion.definition,
+              after_definition: draftTemplateDefinition,
+            }),
+          },
+        );
+        if (!cancelled && isTemplateVersionDiff(diff)) {
+          setVersionDiff(diff);
+        }
+      } catch {
+        if (!cancelled) {
+          setVersionDiff(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [draftTemplateDefinition, selectedSavedVersion]);
+
+  async function handleSchemaDryRun() {
+    setDryRunBusy(true);
+    try {
+      const result = await readJson<SchemaDryRunResponse>(
+        "/templates/dry-run",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            definition: draftTemplateDefinition,
+            sample_text: dryRunSampleText,
+          }),
+        },
+      );
+      setDryRunResult(result);
+    } catch (error) {
+      setDryRunResult({
+        ok: false,
+        schema_errors: [
+          error instanceof Error ? error.message : "Dry run request failed.",
+        ],
+        document_level_notes: [],
+        extracted_fields: [],
+        fields_requiring_review: [],
+      });
+    } finally {
+      setDryRunBusy(false);
+    }
+  }
 
   return (
     <PageStack>
@@ -1937,6 +2090,63 @@ function SchemaPage({
                 </Badge>
               </div>
             </PanelCard>
+            {selectedSavedVersion && versionDiff ? (
+              <PanelCard
+                tone="subtle"
+                spacing="compact"
+                className="col-span-full"
+              >
+                <MetricLabel>Version diff</MetricLabel>
+                <SupportingText className="mt-[0.45rem]">
+                  {versionDiff.before_version} → {versionDiff.after_version}
+                </SupportingText>
+                {templateVersionDiffHasChanges(versionDiff) ? (
+                  <ul className="mt-[0.65rem] pl-[1.1rem] text-[0.92rem] text-default">
+                    {versionDiff.extracted_added.length ? (
+                      <li>
+                        Added fields: {versionDiff.extracted_added.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.extracted_removed.length ? (
+                      <li>
+                        Removed fields:{" "}
+                        {versionDiff.extracted_removed.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.extracted_changed.map((change) => (
+                      <li key={change.name}>
+                        Modified {change.name}: {change.details.join("; ")}
+                      </li>
+                    ))}
+                    {versionDiff.calculated_added.length ? (
+                      <li>
+                        Added formulas:{" "}
+                        {versionDiff.calculated_added.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.calculated_removed.length ? (
+                      <li>
+                        Removed formulas:{" "}
+                        {versionDiff.calculated_removed.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.calculated_changed.map((change) => (
+                      <li key={change.name}>
+                        Modified formula {change.name}:{" "}
+                        {change.details.join("; ")}
+                      </li>
+                    ))}
+                    {versionDiff.langextract_changed ? (
+                      <li>LangExtract prompt or examples changed</li>
+                    ) : null}
+                  </ul>
+                ) : (
+                  <SupportingText className="mt-[0.45rem]">
+                    Current draft matches the selected saved version.
+                  </SupportingText>
+                )}
+              </PanelCard>
+            ) : null}
           </div>
         </TitledSurface>
 
@@ -2286,6 +2496,102 @@ function SchemaPage({
                 {exportFormatsLabel}
               </SupportingText>
             </NoteCard>
+          </div>
+        </TitledSurface>
+
+        <TitledSurface
+          as="section"
+          className="col-span-12"
+          aria-labelledby="schema-dry-run-title"
+          titleId="schema-dry-run-title"
+          title={`${dryRunStepNumber}. Validate with sample text`}
+          subtitle="Run mock extraction and field validation without queueing a document job."
+        >
+          <div className="grid gap-4">
+            <label className="col-span-full">
+              <span>Sample document text</span>
+              <textarea
+                rows={5}
+                aria-label="Sample document text"
+                value={dryRunSampleText}
+                onChange={(event) => setDryRunSampleText(event.target.value)}
+              />
+            </label>
+            <div>
+              <Button
+                variant="secondary"
+                onClick={() => void handleSchemaDryRun()}
+                disabled={dryRunBusy}
+              >
+                {dryRunBusy ? "Running dry run..." : "Run dry run"}
+              </Button>
+            </div>
+            {dryRunResult?.schema_errors.length ? (
+              <NoteCard tone="info" density="compact">
+                <strong className="block">Schema errors</strong>
+                <ul className="mt-[0.45rem] pl-[1.1rem]">
+                  {dryRunResult.schema_errors.map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              </NoteCard>
+            ) : null}
+            {dryRunResult?.extracted_fields.length ? (
+              <div className="overflow-x-auto rounded-[var(--ds-radius-lg)] border border-border">
+                <table className="w-full min-w-[640px] border-collapse text-left text-[0.92rem]">
+                  <thead>
+                    <tr className="border-b border-border bg-panel">
+                      <TableHeaderCell>Field</TableHeaderCell>
+                      <TableHeaderCell>Status</TableHeaderCell>
+                      <TableHeaderCell>Value</TableHeaderCell>
+                      <TableHeaderCell>Notes</TableHeaderCell>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dryRunResult.extracted_fields.map((field) => (
+                      <tr
+                        key={field.field_name}
+                        className="border-b border-subtle last:border-b-0"
+                      >
+                        <TableDataCell>
+                          <strong>{field.label}</strong>
+                          <SupportingText className="mt-1 block">
+                            {field.field_name}
+                          </SupportingText>
+                        </TableDataCell>
+                        <TableDataCell>
+                          <StatusBadge
+                            tone={
+                              field.validation_status === "valid"
+                                ? "success"
+                                : "warning"
+                            }
+                          >
+                            {field.validation_status}
+                          </StatusBadge>
+                          {field.validation_errors.length ? (
+                            <SupportingText className="mt-1 block">
+                              {field.validation_errors.join(" ")}
+                            </SupportingText>
+                          ) : null}
+                        </TableDataCell>
+                        <TableDataCell>
+                          {field.extracted_value ?? "—"}
+                        </TableDataCell>
+                        <TableDataCell>
+                          {field.extraction_notes || "—"}
+                        </TableDataCell>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {dryRunResult && dryRunResult.ok ? (
+              <SupportingText>
+                Dry run passed validation for all extracted fields.
+              </SupportingText>
+            ) : null}
           </div>
         </TitledSurface>
       </div>
@@ -4854,6 +5160,15 @@ export function App() {
   const currentTemplateDefinition =
     templateVersions.find((item) => item.id === selectedTemplateVersionId)
       ?.definition ?? null;
+  const draftTemplateDefinition = useMemo(
+    () =>
+      buildDraftTemplateDefinitionSafe(
+        draftTemplate,
+        provider,
+        currentTemplateDefinition ?? starterTemplateDefinition,
+      ),
+    [currentTemplateDefinition, draftTemplate, provider],
+  );
   const draftMatchedLangExtractSuggestionKeys =
     getAppliedLangExtractSuggestionKeys(
       draftTemplate.langextract_examples,
@@ -6054,6 +6369,7 @@ export function App() {
               selectedTemplateVersionId={selectedTemplateVersionId}
               setSelectedTemplateVersionId={setSelectedTemplateVersionId}
               currentTemplateDefinition={currentTemplateDefinition}
+              draftTemplateDefinition={draftTemplateDefinition}
               provider={provider}
               draft={draftTemplate}
               setDraft={setDraftTemplate}

@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 
 from extraction_core import evaluate_calculated_fields
+from extraction_core.dry_run import append_note, reconcile_extracted_fields
 from extraction_core.job_progress import (
     JOB_STAGE_CALCULATING,
     JOB_STAGE_EXTRACTING,
@@ -13,7 +14,6 @@ from extraction_core.job_progress import (
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import (
     CalculatedFieldResult,
-    ExtractionFieldDefinition,
     ExtractionFieldResult,
     ExtractionTemplate,
     ExtractionValidationSummary,
@@ -135,52 +135,6 @@ def execute_extraction(
     return summary.model_dump(mode="json")
 
 
-def reconcile_extracted_fields(
-    field_definitions: list[ExtractionFieldDefinition],
-    provider_results: list[ExtractionFieldResult],
-    minimum_confidence_threshold: float,
-    review_required_on_low_confidence: bool,
-) -> tuple[list[ExtractionFieldResult], list[str]]:
-    notes: list[str] = []
-    field_names = {field.name for field in field_definitions}
-    grouped_results: dict[str, list[ExtractionFieldResult]] = {}
-
-    for result in provider_results:
-        if result.field_name not in field_names:
-            notes.append(f"Provider returned unexpected field '{result.field_name}'.")
-            continue
-        grouped_results.setdefault(result.field_name, []).append(result)
-
-    reconciled: list[ExtractionFieldResult] = []
-    for definition in field_definitions:
-        candidates = grouped_results.get(definition.name, [])
-        if not candidates:
-            result = build_missing_field_result(definition)
-        else:
-            result = max(candidates, key=score_extraction_result)
-            if len(candidates) > 1:
-                result.requires_review = True
-                result.extraction_notes = append_note(
-                    result.extraction_notes,
-                    f"Selected highest-confidence match from {len(candidates)} chunk candidates.",
-                )
-        result = validate_extracted_field(definition, result)
-        if definition.citation_required and not result.source_text:
-            result.validation_errors.append("Citation evidence is required.")
-            result.validation_status = "invalid"
-            result.requires_review = True
-        if review_required_on_low_confidence and result.normalized_value is not None:
-            if result.confidence_score < minimum_confidence_threshold:
-                result.requires_review = True
-                result.extraction_notes = append_note(
-                    result.extraction_notes,
-                    f"Confidence {result.confidence_score:.2f} is below the {minimum_confidence_threshold:.2f} review threshold.",
-                )
-        reconciled.append(result)
-
-    return reconciled, notes
-
-
 def sanitize_redacted_provider_results(provider_results: list[ExtractionFieldResult]) -> list[ExtractionFieldResult]:
     for result in provider_results:
         if MASK_CHAR not in result.source_text and not (
@@ -195,32 +149,6 @@ def sanitize_redacted_provider_results(provider_results: list[ExtractionFieldRes
             "External-provider evidence contained redacted spans, so the extracted value was cleared for review.",
         )
     return provider_results
-
-
-def build_missing_field_result(definition: ExtractionFieldDefinition) -> ExtractionFieldResult:
-    return ExtractionFieldResult(
-        field_name=definition.name,
-        label=definition.label,
-        data_type=definition.type,
-        extracted_value=None,
-        normalized_value=None,
-        confidence_score=0.0,
-        source_text="",
-        page_number=None,
-        location_reference="",
-        extraction_notes="Provider response did not include this schema field.",
-        requires_review=True,
-    )
-
-
-def append_note(current: str, note: str) -> str:
-    return f"{current} {note}".strip() if current else note
-
-
-def score_extraction_result(result: ExtractionFieldResult) -> tuple[int, float, int]:
-    has_value = int(result.normalized_value is not None)
-    has_citation = int(bool(result.source_text))
-    return (has_value + has_citation, result.confidence_score, len(result.source_text))
 
 
 def summarize_review_signals(

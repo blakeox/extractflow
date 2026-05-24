@@ -81,6 +81,40 @@ def test_template_creation_lists_latest_version(client) -> None:
     assert list_response.json()[0]["name"] == "Invoice Schema"
 
 
+def test_schema_dry_run_endpoint_returns_field_validation(client) -> None:
+    definition = build_template_definition()
+    response = client.post(
+        "/api/templates/dry-run",
+        json={
+            "definition": definition,
+            "sample_text": "Vendor Name: Acme Corp\nTotal Due: $1,200.00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["extracted_fields"]
+
+
+def test_template_version_diff_endpoint_reports_field_changes(client) -> None:
+    before = build_template_definition()
+    after = build_template_definition()
+    after["template_version"] = "1.1.0"
+    after["extracted_fields"][0]["label"] = "Supplier Name"
+
+    response = client.post(
+        "/api/templates/version-diff",
+        json={"before_definition": before, "after_definition": after},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["before_version"] == "1.0.0"
+    assert payload["after_version"] == "1.1.0"
+    assert payload["extracted_changed"]
+
+
 def test_template_creation_rejects_duplicate_names(client) -> None:
     payload = {
         "name": "Invoice Schema",

@@ -5,9 +5,11 @@ import shutil
 from copy import deepcopy
 from pathlib import Path
 
+from extraction_core.dry_run import SchemaDryRunResponse, run_schema_dry_run
 from extraction_core.job_progress import JOB_STAGE_QUEUED
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
+from extraction_core.template_diff import TemplateVersionDiff, diff_template_definitions
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
@@ -36,9 +38,11 @@ from app.schemas.api import (
     ProviderProbeResponse,
     ProviderSettingsRequest,
     ResultEnvelope,
+    SchemaDryRunRequest,
     TemplateCreateRequest,
     TemplateResponse,
     TemplateVersionCreateRequest,
+    TemplateVersionDiffRequest,
     TemplateVersionResponse,
 )
 from app.services.job_service import build_job_response, retry_failed_job
@@ -159,6 +163,16 @@ def list_template_versions(
         )
         for item in versions
     ]
+
+
+@router.post("/templates/dry-run", response_model=SchemaDryRunResponse)
+def schema_dry_run_endpoint(payload: SchemaDryRunRequest):
+    return run_schema_dry_run(payload.definition, payload.sample_text)
+
+
+@router.post("/templates/version-diff", response_model=TemplateVersionDiff)
+def template_version_diff_endpoint(payload: TemplateVersionDiffRequest):
+    return diff_template_definitions(payload.before_definition, payload.after_definition)
 
 
 @router.get(
