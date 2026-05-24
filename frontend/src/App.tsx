@@ -56,6 +56,7 @@ import {
   buildDraftLangExtractExamples,
   getAppliedLangExtractSuggestionKeys,
   buildLangExtractExamples,
+  getLangExtractExtractionReadiness,
   type DraftLangExtractExample,
 } from "./langextract";
 
@@ -2325,6 +2326,7 @@ function ExtractionWorkspacePage({
   onOpenSchemas,
   onOpenHelp,
   onRetryConnection,
+  provider,
 }: {
   documents: DocumentRecord[];
   jobs: JobRecord[];
@@ -2358,6 +2360,7 @@ function ExtractionWorkspacePage({
   onOpenSchemas: () => void;
   onOpenHelp: () => void;
   onRetryConnection: () => Promise<void>;
+  provider: ProviderSettings | null;
 }) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const selectedJob = selectedJobId
@@ -2392,6 +2395,14 @@ function ExtractionWorkspacePage({
   const selectedSchemaVersions = templateVersions.filter(
     (item) => item.template_id === (selectedTemplate?.id ?? selectedTemplateId),
   );
+  const langExtractRunReadiness = selectedTemplateVersion?.definition
+    ? getLangExtractExtractionReadiness(
+        selectedTemplateVersion.definition,
+        provider?.is_persisted_default && isLangExtractProvider(provider)
+          ? provider
+          : null,
+      )
+    : { ready: true, message: null };
   const [showVersionSelector, setShowVersionSelector] = useState(false);
   const stage: WorkspaceStage = selectedJob
     ? selectedJob.status === "failed"
@@ -2714,6 +2725,7 @@ function ExtractionWorkspacePage({
                         !selectedDocument ||
                         !selectedTemplateVersion ||
                         !workspaceInteractive ||
+                        !langExtractRunReadiness.ready ||
                         busyAction === "run"
                       }
                     >
@@ -2750,15 +2762,23 @@ function ExtractionWorkspacePage({
                   value={
                     !selectedDocument
                       ? "Upload a file"
-                      : selectedTemplateVersion
-                        ? "Run extraction"
-                        : templates.length
-                          ? "Choose a schema"
-                          : "Open schema builder"
+                      : !langExtractRunReadiness.ready
+                        ? "Complete LangExtract examples"
+                        : selectedTemplateVersion
+                          ? "Run extraction"
+                          : templates.length
+                            ? "Choose a schema"
+                            : "Open schema builder"
                   }
                   valueClassName="text-[0.95rem] tracking-[-0.02em]"
                 />
               </div>
+            ) : null}
+
+            {stage === "draft" && !langExtractRunReadiness.ready ? (
+              <NoteCard className="mt-4 border-[rgba(208,70,86,0.2)] bg-[rgba(255,244,246,0.96)]">
+                {langExtractRunReadiness.message}
+              </NoteCard>
             ) : null}
 
             <div className="mt-4 grid items-start gap-4 [grid-template-columns:minmax(320px,0.95fr)_minmax(0,1.25fr)] max-[1280px]:grid-cols-1">
@@ -5026,6 +5046,26 @@ export function App() {
       });
       return;
     }
+    const templateVersion = templateVersions.find(
+      (item) => item.id === selectedTemplateVersionId,
+    );
+    if (templateVersion) {
+      const readiness = getLangExtractExtractionReadiness(
+        templateVersion.definition,
+        provider?.is_persisted_default && isLangExtractProvider(provider)
+          ? provider
+          : null,
+      );
+      if (!readiness.ready) {
+        setBanner({
+          tone: "error",
+          message:
+            readiness.message ??
+            "Complete LangExtract examples in the schema builder before running extraction.",
+        });
+        return;
+      }
+    }
     try {
       setBusyAction("run");
       const providerOverride = provider?.is_persisted_default
@@ -6001,6 +6041,7 @@ export function App() {
               onOpenSchemas={() => setActivePage("templates")}
               onOpenHelp={() => setActivePage("help")}
               onRetryConnection={refreshCoreData}
+              provider={provider}
             />
           ) : null}
 

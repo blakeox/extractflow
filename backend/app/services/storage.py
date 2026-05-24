@@ -41,3 +41,17 @@ def resolve_managed_path(candidate: str | Path, *, root: Path) -> Path:
 
 def build_document_storage_reference(file_path: str | Path) -> str:
     return build_storage_reference(file_path, root=Path(settings.data_dir))
+
+
+def read_managed_document_text(reference: str) -> str | None:
+    try:
+        path = resolve_document_storage_path(reference)
+    except ValueError:
+        return None
+    if not path.exists():
+        return None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return content if content.strip() else None

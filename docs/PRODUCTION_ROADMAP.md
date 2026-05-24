@@ -32,7 +32,7 @@ Real providers and measurable quality before calling deployments “production.�
 - Golden-set eval in CI (nightly + provider/Docling bumps)
 - Per-schema quality SLOs and benchmark reporting
 - Onboarding off `mock`; production warning when mock is active
-- Parser/OCR failure taxonomy + operator runbook
+- Parser/OCR failure taxonomy + operator runbook — see [PARSER_FAILURE_RUNBOOK.md](PARSER_FAILURE_RUNBOOK.md)
 - Parsed text available for debug and citation review
 - Schema dry-run, version diff, LangExtract readiness gates
 

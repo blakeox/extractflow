@@ -72,6 +72,12 @@ class DocumentResponse(BaseModel):
     created_at: datetime
 
 
+class DocumentParsedTextResponse(BaseModel):
+    document_id: int
+    text: str
+    source: str
+
+
 class ProviderSettingsRequest(BaseModel):
     settings: LLMProviderSettings
 

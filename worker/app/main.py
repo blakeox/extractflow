@@ -17,6 +17,7 @@ from sqlalchemy import select, update
 from app.core.config import settings
 from app.core.database import SessionLocal, engine
 from app.models import Document, ExtractionJob, ExtractionResult, TemplateVersion
+from app.services.document_text import parse_and_persist_document_text
 from app.services.executor import execute_extraction
 from app.services.job_progress import build_progress_reporter, update_job_progress
 from app.services.parser import prewarm_docling_converters
@@ -83,6 +84,12 @@ def process_once() -> None:
                 },
             )
             document_path = resolve_storage_path(document.stored_path, root=settings.data_dir)
+            parsed_text_path, parsed_text = parse_and_persist_document_text(
+                document.id,
+                str(document_path),
+            )
+            document.parsed_text_path = parsed_text_path
+            db.commit()
 
             result_json = execute_extraction(
                 document_path=str(document_path),
@@ -90,6 +97,7 @@ def process_once() -> None:
                 template_definition=template_version.definition,
                 provider_override=job.provider_override,
                 progress_reporter=build_progress_reporter(db, job.id),
+                parsed_text=parsed_text,
             )
             result = db.query(ExtractionResult).filter(ExtractionResult.job_id == job.id).first()
             if result is None:

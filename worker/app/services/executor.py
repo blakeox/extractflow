@@ -36,6 +36,7 @@ def execute_extraction(
     template_definition: dict,
     provider_override: dict | None = None,
     progress_reporter: Callable[[str], None] | None = None,
+    parsed_text: str | None = None,
 ) -> dict:
     template = ExtractionTemplate.model_validate(template_definition)
     settings = (
@@ -58,7 +59,7 @@ def execute_extraction(
         )
     if progress_reporter:
         progress_reporter(JOB_STAGE_PARSING)
-    text = parse_document(document_path)
+    text = parsed_text if parsed_text is not None else parse_document(document_path)
     redaction_note: str | None = None
     if settings.allow_external_processing and app_settings.require_redaction_for_external_processing:
         if document_path.lower().endswith((".csv", ".xlsx")):

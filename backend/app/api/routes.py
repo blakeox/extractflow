@@ -20,6 +20,7 @@ from app.models import Document, ExportRecord, ExtractionJob, ExtractionResult, 
 from app.schemas.api import (
     CustomProviderProfileListResponse,
     CustomProviderProfileRequest,
+    DocumentParsedTextResponse,
     DocumentResponse,
     ExportResponse,
     JobCreateRequest,
@@ -58,7 +59,11 @@ from app.services.provider_profiles import (
     update_custom_provider_profile,
 )
 from app.services.result_service import apply_review_edits, export_result
-from app.services.storage import build_upload_target, resolve_export_download_path
+from app.services.storage import (
+    build_upload_target,
+    read_managed_document_text,
+    resolve_export_download_path,
+)
 from app.services.template_service import create_template, create_template_version
 
 router = APIRouter()
@@ -243,6 +248,33 @@ def list_documents(db: Session = Depends(get_db), tenant_id: str = Depends(get_c
         )
         for doc in docs
     ]
+
+
+@router.get("/documents/{document_id}/parsed-text", response_model=DocumentParsedTextResponse)
+def get_document_parsed_text(
+    document_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    document = db.query(Document).filter(Document.id == document_id, Document.tenant_id == tenant_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    for candidate, source in (
+        (document.parsed_text_path, "parsed_file"),
+        (document.stored_path if "text" in document.content_type else None, "upload"),
+    ):
+        if not candidate:
+            continue
+        text = read_managed_document_text(candidate)
+        if text:
+            return DocumentParsedTextResponse(
+                document_id=document.id,
+                text=text,
+                source=source,
+            )
+
+    raise HTTPException(status_code=404, detail="Parsed document text is not available yet.")
 
 
 @router.post("/jobs", response_model=JobResponse)

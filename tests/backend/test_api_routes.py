@@ -328,6 +328,32 @@ def test_document_upload_and_job_creation(client) -> None:
     assert job_response.json()["status"] == "queued"
 
 
+def test_document_parsed_text_endpoint_returns_stored_text(client) -> None:
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme\nTotal Amount: $1200.00", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["id"]
+
+    parsed_reference = f"parsed/doc-{document_id}.txt"
+    parsed_path = Path(os.environ["DATA_DIR"]) / parsed_reference
+    parsed_path.parent.mkdir(parents=True, exist_ok=True)
+    parsed_path.write_text("Parsed body for review", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = db.query(Document).filter(Document.id == document_id).one()
+        document.parsed_text_path = parsed_reference
+        db.commit()
+
+    response = client.get(f"/api/documents/{document_id}/parsed-text")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["document_id"] == document_id
+    assert payload["text"] == "Parsed body for review"
+    assert payload["source"] == "parsed_file"
+
+
 def test_parser_status_returns_worker_runtime_details(client) -> None:
     status_path = Path(os.environ["DATA_DIR"]) / "worker-status.json"
     status_path.write_text(
