@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import router
 from app.bootstrap.seed import seed_sample_template
@@ -48,22 +49,7 @@ async def request_logging_middleware(request: Request, call_next):
     started_at = time.perf_counter()
     client_host = request.client.host if request.client else None
 
-    try:
-        response = await call_next(request)
-    except Exception:
-        duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        log_event(
-            logger,
-            40,
-            "request_failed",
-            request_id=request_id,
-            method=request.method,
-            path=request.url.path,
-            client=client_host,
-            duration_ms=duration_ms,
-        )
-        raise
-
+    response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
     log_event(
@@ -83,6 +69,36 @@ async def request_logging_middleware(request: Request, call_next):
 app.include_router(router, prefix=settings.api_prefix)
 
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    request_id = getattr(request.state, "request_id", None)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={"X-Request-ID": request_id} if request_id else None,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", None)
+    log_event(
+        logger,
+        40,
+        "unhandled_exception",
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        error_type=type(exc).__name__,
+    )
+    headers = {"X-Request-ID": request_id} if request_id else None
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error."},
+        headers=headers,
+    )
+
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "service": "backend", "app_name": settings.app_name}
@@ -94,7 +110,13 @@ def _build_readiness_payload() -> tuple[int, dict[str, object]]:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
     except Exception as exc:  # noqa: BLE001
-        database_check = {"ready": False, "detail": str(exc)}
+        log_event(
+            logger,
+            40,
+            "readiness_database_failed",
+            error_type=type(exc).__name__,
+        )
+        database_check = {"ready": False, "detail": "database connection failed"}
 
     storage_checks: dict[str, dict[str, object]] = {}
     storage_ready = True

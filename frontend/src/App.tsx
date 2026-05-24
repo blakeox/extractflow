@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -16,6 +17,12 @@ import { reviewFieldHint } from "./components/review/review-field-hint";
 import { SourceEvidencePanel } from "./components/review/SourceEvidencePanel";
 import { API_BASE } from "./lib/config";
 import { clampProgressPct, getJobStageLabel } from "./lib/job-progress";
+import {
+  CUSTOM_PROVIDER_DRAFT_STORAGE_KEY,
+  readPersistedCustomProviderDraft,
+  writePersistedCustomProviderDraft,
+  type CustomProviderDraftWithEnvVar,
+} from "./lib/custom-provider-draft-storage";
 import {
   dismissMockProviderWarning,
   isBootstrapMockProvider,
@@ -56,6 +63,7 @@ import {
   buildDraftLangExtractExamples,
   getAppliedLangExtractSuggestionKeys,
   buildLangExtractExamples,
+  getLangExtractExtractionReadiness,
   type DraftLangExtractExample,
 } from "./langextract";
 
@@ -76,6 +84,46 @@ type TemplateSummary = {
   latest_version: string;
   created_at: string;
   updated_at: string;
+};
+
+type SchemaDryRunFieldResult = {
+  field_name: string;
+  label: string;
+  data_type: string;
+  validation_status: string;
+  validation_errors: string[];
+  requires_review: boolean;
+  confidence_score: number;
+  extracted_value: string | null;
+  normalized_value: unknown;
+  source_text: string;
+  extraction_notes: string;
+};
+
+type SchemaDryRunResponse = {
+  ok: boolean;
+  schema_errors: string[];
+  document_level_notes: string[];
+  extracted_fields: SchemaDryRunFieldResult[];
+  fields_requiring_review: string[];
+};
+
+type TemplateFieldChange = {
+  name: string;
+  change: string;
+  details: string[];
+};
+
+type TemplateVersionDiff = {
+  before_version: string;
+  after_version: string;
+  extracted_added: string[];
+  extracted_removed: string[];
+  extracted_changed: TemplateFieldChange[];
+  calculated_added: string[];
+  calculated_removed: string[];
+  calculated_changed: TemplateFieldChange[];
+  langextract_changed: boolean;
 };
 
 type TemplateDefinitionField = {
@@ -187,24 +235,7 @@ type CustomProviderProfile = {
   updated_at: string;
 };
 
-type CustomProviderDraft = {
-  label: string;
-  mode: "local" | "cloud";
-  api_style: "openai_compatible" | "azure_openai";
-  provider_type: string;
-  base_url: string;
-  api_key_env_var: string;
-  model: string;
-  deployment: string;
-  api_version: string;
-  allow_external_processing: boolean;
-  supports_json_mode: boolean;
-  temperature: string;
-  max_tokens: string;
-  timeout_seconds: string;
-  retry_count: string;
-  chunk_size: string;
-};
+type CustomProviderDraft = CustomProviderDraftWithEnvVar;
 
 type TemplateDefinition = {
   template_name: string;
@@ -382,7 +413,7 @@ const pageLabels: Record<PageId, string> = {
   help: "Help",
 };
 
-const CUSTOM_PROVIDER_KEY = "custom-provider-draft";
+const CUSTOM_PROVIDER_KEY = CUSTOM_PROVIDER_DRAFT_STORAGE_KEY;
 const DEFAULT_CUSTOM_PROVIDER_PROBE_MAX_AGE_HOURS = 24;
 
 const DEFAULT_CUSTOM_PROVIDER_DRAFT: CustomProviderDraft = {
@@ -420,22 +451,7 @@ const EMPTY_LANGEXTRACT_FEEDBACK_DIAGNOSTICS: LangExtractFeedbackDiagnostics = {
 };
 
 function loadSavedCustomProviderDraft(): CustomProviderDraft {
-  if (typeof window === "undefined") {
-    return DEFAULT_CUSTOM_PROVIDER_DRAFT;
-  }
-
-  const savedDraft = window.localStorage.getItem(CUSTOM_PROVIDER_KEY);
-  if (!savedDraft) {
-    return DEFAULT_CUSTOM_PROVIDER_DRAFT;
-  }
-
-  try {
-    const parsed = JSON.parse(savedDraft) as Partial<CustomProviderDraft>;
-    return { ...DEFAULT_CUSTOM_PROVIDER_DRAFT, ...parsed };
-  } catch {
-    window.localStorage.removeItem(CUSTOM_PROVIDER_KEY);
-    return DEFAULT_CUSTOM_PROVIDER_DRAFT;
-  }
+  return readPersistedCustomProviderDraft(DEFAULT_CUSTOM_PROVIDER_DRAFT);
 }
 
 function customProviderProfileProbeIsStale(
@@ -947,6 +963,18 @@ function buildTemplatePayload(
     llm_provider_settings: effectiveProvider,
     langextract_config: langextractConfig,
   };
+}
+
+function buildDraftTemplateDefinitionSafe(
+  draft: DraftTemplate,
+  provider: ProviderSettings | null,
+  base: TemplateDefinition,
+): TemplateDefinition {
+  try {
+    return buildTemplatePayload(draft, provider, base);
+  } catch {
+    return base;
+  }
 }
 
 function buildDraftTemplateFromDefinition(
@@ -1776,6 +1804,27 @@ function DesktopSetupNotice({
   );
 }
 
+function templateVersionDiffHasChanges(diff: TemplateVersionDiff): boolean {
+  return (
+    (diff.extracted_added?.length ?? 0) > 0 ||
+    (diff.extracted_removed?.length ?? 0) > 0 ||
+    (diff.extracted_changed?.length ?? 0) > 0 ||
+    (diff.calculated_added?.length ?? 0) > 0 ||
+    (diff.calculated_removed?.length ?? 0) > 0 ||
+    (diff.calculated_changed?.length ?? 0) > 0 ||
+    Boolean(diff.langextract_changed)
+  );
+}
+
+function isTemplateVersionDiff(value: unknown): value is TemplateVersionDiff {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as TemplateVersionDiff).extracted_added) &&
+    Array.isArray((value as TemplateVersionDiff).extracted_removed)
+  );
+}
+
 function SchemaPage({
   templates,
   templateVersions,
@@ -1784,6 +1833,7 @@ function SchemaPage({
   selectedTemplateVersionId,
   setSelectedTemplateVersionId,
   currentTemplateDefinition,
+  draftTemplateDefinition,
   provider,
   draft,
   setDraft,
@@ -1804,6 +1854,7 @@ function SchemaPage({
   selectedTemplateVersionId: number | null;
   setSelectedTemplateVersionId: (id: number | null) => void;
   currentTemplateDefinition: TemplateDefinition | null;
+  draftTemplateDefinition: TemplateDefinition;
   provider: ProviderSettings | null;
   draft: DraftTemplate;
   setDraft: Dispatch<SetStateAction<DraftTemplate>>;
@@ -1821,6 +1872,16 @@ function SchemaPage({
   onCreateTemplate: () => Promise<void>;
   busyAction: string | null;
 }) {
+  const [dryRunSampleText, setDryRunSampleText] = useState(
+    "Vendor Name: Acme Corp\nTotal Due: $1,200.00",
+  );
+  const [dryRunResult, setDryRunResult] = useState<SchemaDryRunResponse | null>(
+    null,
+  );
+  const [dryRunBusy, setDryRunBusy] = useState(false);
+  const [versionDiff, setVersionDiff] = useState<TemplateVersionDiff | null>(
+    null,
+  );
   const definition = currentTemplateDefinition ?? starterTemplateDefinition;
   const effectiveProvider = provider ?? definition.llm_provider_settings;
   const showLangExtractEditor =
@@ -1843,6 +1904,73 @@ function SchemaPage({
     definition.output_settings.export_formats.join(" · ");
   const searchParametersStepNumber = showLangExtractEditor ? 4 : 3;
   const outputRulesStepNumber = showLangExtractEditor ? 5 : 4;
+  const dryRunStepNumber = outputRulesStepNumber + 1;
+  const selectedSavedVersion =
+    selectedVersions.find((item) => item.id === selectedTemplateVersionId) ??
+    null;
+
+  useEffect(() => {
+    if (!selectedSavedVersion) {
+      setVersionDiff(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const diff = await readJson<TemplateVersionDiff>(
+          "/templates/version-diff",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              before_definition: selectedSavedVersion.definition,
+              after_definition: draftTemplateDefinition,
+            }),
+          },
+        );
+        if (!cancelled && isTemplateVersionDiff(diff)) {
+          setVersionDiff(diff);
+        }
+      } catch {
+        if (!cancelled) {
+          setVersionDiff(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [draftTemplateDefinition, selectedSavedVersion]);
+
+  async function handleSchemaDryRun() {
+    setDryRunBusy(true);
+    try {
+      const result = await readJson<SchemaDryRunResponse>(
+        "/templates/dry-run",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            definition: draftTemplateDefinition,
+            sample_text: dryRunSampleText,
+          }),
+        },
+      );
+      setDryRunResult(result);
+    } catch (error) {
+      setDryRunResult({
+        ok: false,
+        schema_errors: [
+          error instanceof Error ? error.message : "Dry run request failed.",
+        ],
+        document_level_notes: [],
+        extracted_fields: [],
+        fields_requiring_review: [],
+      });
+    } finally {
+      setDryRunBusy(false);
+    }
+  }
 
   return (
     <PageStack>
@@ -1936,6 +2064,63 @@ function SchemaPage({
                 </Badge>
               </div>
             </PanelCard>
+            {selectedSavedVersion && versionDiff ? (
+              <PanelCard
+                tone="subtle"
+                spacing="compact"
+                className="col-span-full"
+              >
+                <MetricLabel>Version diff</MetricLabel>
+                <SupportingText className="mt-[0.45rem]">
+                  {versionDiff.before_version} → {versionDiff.after_version}
+                </SupportingText>
+                {templateVersionDiffHasChanges(versionDiff) ? (
+                  <ul className="mt-[0.65rem] pl-[1.1rem] text-[0.92rem] text-default">
+                    {versionDiff.extracted_added.length ? (
+                      <li>
+                        Added fields: {versionDiff.extracted_added.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.extracted_removed.length ? (
+                      <li>
+                        Removed fields:{" "}
+                        {versionDiff.extracted_removed.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.extracted_changed.map((change) => (
+                      <li key={change.name}>
+                        Modified {change.name}: {change.details.join("; ")}
+                      </li>
+                    ))}
+                    {versionDiff.calculated_added.length ? (
+                      <li>
+                        Added formulas:{" "}
+                        {versionDiff.calculated_added.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.calculated_removed.length ? (
+                      <li>
+                        Removed formulas:{" "}
+                        {versionDiff.calculated_removed.join(", ")}
+                      </li>
+                    ) : null}
+                    {versionDiff.calculated_changed.map((change) => (
+                      <li key={change.name}>
+                        Modified formula {change.name}:{" "}
+                        {change.details.join("; ")}
+                      </li>
+                    ))}
+                    {versionDiff.langextract_changed ? (
+                      <li>LangExtract prompt or examples changed</li>
+                    ) : null}
+                  </ul>
+                ) : (
+                  <SupportingText className="mt-[0.45rem]">
+                    Current draft matches the selected saved version.
+                  </SupportingText>
+                )}
+              </PanelCard>
+            ) : null}
           </div>
         </TitledSurface>
 
@@ -2287,6 +2472,102 @@ function SchemaPage({
             </NoteCard>
           </div>
         </TitledSurface>
+
+        <TitledSurface
+          as="section"
+          className="col-span-12"
+          aria-labelledby="schema-dry-run-title"
+          titleId="schema-dry-run-title"
+          title={`${dryRunStepNumber}. Validate with sample text`}
+          subtitle="Run mock extraction and field validation without queueing a document job."
+        >
+          <div className="grid gap-4">
+            <label className="col-span-full">
+              <span>Sample document text</span>
+              <textarea
+                rows={5}
+                aria-label="Sample document text"
+                value={dryRunSampleText}
+                onChange={(event) => setDryRunSampleText(event.target.value)}
+              />
+            </label>
+            <div>
+              <Button
+                variant="secondary"
+                onClick={() => void handleSchemaDryRun()}
+                disabled={dryRunBusy}
+              >
+                {dryRunBusy ? "Running dry run..." : "Run dry run"}
+              </Button>
+            </div>
+            {dryRunResult?.schema_errors.length ? (
+              <NoteCard tone="info" density="compact">
+                <strong className="block">Schema errors</strong>
+                <ul className="mt-[0.45rem] pl-[1.1rem]">
+                  {dryRunResult.schema_errors.map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              </NoteCard>
+            ) : null}
+            {dryRunResult?.extracted_fields.length ? (
+              <div className="overflow-x-auto rounded-[var(--ds-radius-lg)] border border-border">
+                <table className="w-full min-w-[640px] border-collapse text-left text-[0.92rem]">
+                  <thead>
+                    <tr className="border-b border-border bg-panel">
+                      <TableHeaderCell>Field</TableHeaderCell>
+                      <TableHeaderCell>Status</TableHeaderCell>
+                      <TableHeaderCell>Value</TableHeaderCell>
+                      <TableHeaderCell>Notes</TableHeaderCell>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dryRunResult.extracted_fields.map((field) => (
+                      <tr
+                        key={field.field_name}
+                        className="border-b border-subtle last:border-b-0"
+                      >
+                        <TableDataCell>
+                          <strong>{field.label}</strong>
+                          <SupportingText className="mt-1 block">
+                            {field.field_name}
+                          </SupportingText>
+                        </TableDataCell>
+                        <TableDataCell>
+                          <StatusBadge
+                            tone={
+                              field.validation_status === "valid"
+                                ? "success"
+                                : "warning"
+                            }
+                          >
+                            {field.validation_status}
+                          </StatusBadge>
+                          {field.validation_errors.length ? (
+                            <SupportingText className="mt-1 block">
+                              {field.validation_errors.join(" ")}
+                            </SupportingText>
+                          ) : null}
+                        </TableDataCell>
+                        <TableDataCell>
+                          {field.extracted_value ?? "—"}
+                        </TableDataCell>
+                        <TableDataCell>
+                          {field.extraction_notes || "—"}
+                        </TableDataCell>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {dryRunResult && dryRunResult.ok ? (
+              <SupportingText>
+                Dry run passed validation for all extracted fields.
+              </SupportingText>
+            ) : null}
+          </div>
+        </TitledSurface>
       </div>
     </PageStack>
   );
@@ -2325,6 +2606,7 @@ function ExtractionWorkspacePage({
   onOpenSchemas,
   onOpenHelp,
   onRetryConnection,
+  provider,
 }: {
   documents: DocumentRecord[];
   jobs: JobRecord[];
@@ -2358,6 +2640,7 @@ function ExtractionWorkspacePage({
   onOpenSchemas: () => void;
   onOpenHelp: () => void;
   onRetryConnection: () => Promise<void>;
+  provider: ProviderSettings | null;
 }) {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const selectedJob = selectedJobId
@@ -2392,6 +2675,14 @@ function ExtractionWorkspacePage({
   const selectedSchemaVersions = templateVersions.filter(
     (item) => item.template_id === (selectedTemplate?.id ?? selectedTemplateId),
   );
+  const langExtractRunReadiness = selectedTemplateVersion?.definition
+    ? getLangExtractExtractionReadiness(
+        selectedTemplateVersion.definition,
+        provider?.is_persisted_default && isLangExtractProvider(provider)
+          ? provider
+          : null,
+      )
+    : { ready: true, message: null };
   const [showVersionSelector, setShowVersionSelector] = useState(false);
   const stage: WorkspaceStage = selectedJob
     ? selectedJob.status === "failed"
@@ -2714,6 +3005,7 @@ function ExtractionWorkspacePage({
                         !selectedDocument ||
                         !selectedTemplateVersion ||
                         !workspaceInteractive ||
+                        !langExtractRunReadiness.ready ||
                         busyAction === "run"
                       }
                     >
@@ -2750,15 +3042,23 @@ function ExtractionWorkspacePage({
                   value={
                     !selectedDocument
                       ? "Upload a file"
-                      : selectedTemplateVersion
-                        ? "Run extraction"
-                        : templates.length
-                          ? "Choose a schema"
-                          : "Open schema builder"
+                      : !langExtractRunReadiness.ready
+                        ? "Complete LangExtract examples"
+                        : selectedTemplateVersion
+                          ? "Run extraction"
+                          : templates.length
+                            ? "Choose a schema"
+                            : "Open schema builder"
                   }
                   valueClassName="text-[0.95rem] tracking-[-0.02em]"
                 />
               </div>
+            ) : null}
+
+            {stage === "draft" && !langExtractRunReadiness.ready ? (
+              <NoteCard className="mt-4 border-[rgba(208,70,86,0.2)] bg-[rgba(255,244,246,0.96)]">
+                {langExtractRunReadiness.message}
+              </NoteCard>
             ) : null}
 
             <div className="mt-4 grid items-start gap-4 [grid-template-columns:minmax(320px,0.95fr)_minmax(0,1.25fr)] max-[1280px]:grid-cols-1">
@@ -4784,10 +5084,7 @@ export function App() {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(
-      CUSTOM_PROVIDER_KEY,
-      JSON.stringify(customProviderDraft),
-    );
+    writePersistedCustomProviderDraft(customProviderDraft);
   }, [customProviderDraft]);
 
   const hasActiveJobs = jobs.some(
@@ -4834,6 +5131,15 @@ export function App() {
   const currentTemplateDefinition =
     templateVersions.find((item) => item.id === selectedTemplateVersionId)
       ?.definition ?? null;
+  const draftTemplateDefinition = useMemo(
+    () =>
+      buildDraftTemplateDefinitionSafe(
+        draftTemplate,
+        provider,
+        currentTemplateDefinition ?? starterTemplateDefinition,
+      ),
+    [currentTemplateDefinition, draftTemplate, provider],
+  );
   const draftMatchedLangExtractSuggestionKeys =
     getAppliedLangExtractSuggestionKeys(
       draftTemplate.langextract_examples,
@@ -5025,6 +5331,26 @@ export function App() {
           "Select a document and schema version before running extraction.",
       });
       return;
+    }
+    const templateVersion = templateVersions.find(
+      (item) => item.id === selectedTemplateVersionId,
+    );
+    if (templateVersion) {
+      const readiness = getLangExtractExtractionReadiness(
+        templateVersion.definition,
+        provider?.is_persisted_default && isLangExtractProvider(provider)
+          ? provider
+          : null,
+      );
+      if (!readiness.ready) {
+        setBanner({
+          tone: "error",
+          message:
+            readiness.message ??
+            "Complete LangExtract examples in the schema builder before running extraction.",
+        });
+        return;
+      }
     }
     try {
       setBusyAction("run");
@@ -6001,6 +6327,7 @@ export function App() {
               onOpenSchemas={() => setActivePage("templates")}
               onOpenHelp={() => setActivePage("help")}
               onRetryConnection={refreshCoreData}
+              provider={provider}
             />
           ) : null}
 
@@ -6013,6 +6340,7 @@ export function App() {
               selectedTemplateVersionId={selectedTemplateVersionId}
               setSelectedTemplateVersionId={setSelectedTemplateVersionId}
               currentTemplateDefinition={currentTemplateDefinition}
+              draftTemplateDefinition={draftTemplateDefinition}
               provider={provider}
               draft={draftTemplate}
               setDraft={setDraftTemplate}

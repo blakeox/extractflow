@@ -16,6 +16,10 @@ from app.services.storage import build_document_storage_reference
 from tests.support.sample_data import build_template_definition
 
 
+def _parsed_text_reference(path: Path) -> str:
+    return path.relative_to(Path(os.environ["DATA_DIR"])).as_posix()
+
+
 def _build_result_payload(
     *,
     document_id: int,
@@ -171,16 +175,16 @@ def test_list_langextract_feedback_suggestions_dedupes_matching_review_examples(
         _create_result_with_review_edit(
             db,
             template_version_id=version.id,
-            parsed_text_path=str(parsed_path),
-            stored_path=str(parsed_path),
+            parsed_text_path=_parsed_text_reference(parsed_path),
+            stored_path="uploads/langextract-feedback-dedupe.txt",
             content_type="text/plain",
             result_json=payload,
         )
         _create_result_with_review_edit(
             db,
             template_version_id=version.id,
-            parsed_text_path=str(parsed_path),
-            stored_path=str(parsed_path),
+            parsed_text_path=_parsed_text_reference(parsed_path),
+            stored_path="uploads/langextract-feedback-dedupe.txt",
             content_type="text/plain",
             result_json=payload,
         )
@@ -259,8 +263,8 @@ def test_list_langextract_feedback_suggestions_logs_diagnostics(monkeypatch) -> 
         _create_result_with_review_edit(
             db,
             template_version_id=version.id,
-            parsed_text_path=str(parsed_path),
-            stored_path=str(parsed_path),
+            parsed_text_path=_parsed_text_reference(parsed_path),
+            stored_path="uploads/langextract-feedback-logged.txt",
             content_type="text/plain",
             result_json=payload,
         )
@@ -330,8 +334,8 @@ def test_list_langextract_feedback_suggestions_skips_stale_document_span_mismatc
         _create_result_with_review_edit(
             db,
             template_version_id=version.id,
-            parsed_text_path=str(parsed_path),
-            stored_path=str(parsed_path),
+            parsed_text_path=_parsed_text_reference(parsed_path),
+            stored_path="uploads/langextract-feedback-stale-span.txt",
             content_type="text/plain",
             result_json=payload,
         )
@@ -364,8 +368,8 @@ def test_list_langextract_feedback_suggestions_filters_persisted_dismissals() ->
         _create_result_with_review_edit(
             db,
             template_version_id=version.id,
-            parsed_text_path=str(parsed_path),
-            stored_path=str(parsed_path),
+            parsed_text_path=_parsed_text_reference(parsed_path),
+            stored_path="uploads/langextract-feedback-dismissed.txt",
             content_type="text/plain",
             result_json=payload,
         )

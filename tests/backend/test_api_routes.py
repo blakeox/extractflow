@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import httpx
-import pytest
 from app.core.tenant import build_tenant_setting_key, get_current_tenant_id
 from app.db.database import SessionLocal
 from app.main import app
@@ -79,6 +78,40 @@ def test_template_creation_lists_latest_version(client) -> None:
     list_response = client.get("/api/templates")
     assert list_response.status_code == 200
     assert list_response.json()[0]["name"] == "Invoice Schema"
+
+
+def test_schema_dry_run_endpoint_returns_field_validation(client) -> None:
+    definition = build_template_definition()
+    response = client.post(
+        "/api/templates/dry-run",
+        json={
+            "definition": definition,
+            "sample_text": "Vendor Name: Acme Corp\nTotal Due: $1,200.00",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["extracted_fields"]
+
+
+def test_template_version_diff_endpoint_reports_field_changes(client) -> None:
+    before = build_template_definition()
+    after = build_template_definition()
+    after["template_version"] = "1.1.0"
+    after["extracted_fields"][0]["label"] = "Supplier Name"
+
+    response = client.post(
+        "/api/templates/version-diff",
+        json={"before_definition": before, "after_definition": after},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["before_version"] == "1.0.0"
+    assert payload["after_version"] == "1.1.0"
+    assert payload["extracted_changed"]
 
 
 def test_template_creation_rejects_duplicate_names(client) -> None:
@@ -326,6 +359,32 @@ def test_document_upload_and_job_creation(client) -> None:
     )
     assert job_response.status_code == 200
     assert job_response.json()["status"] == "queued"
+
+
+def test_document_parsed_text_endpoint_returns_stored_text(client) -> None:
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme\nTotal Amount: $1200.00", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["id"]
+
+    parsed_reference = f"parsed/doc-{document_id}.txt"
+    parsed_path = Path(os.environ["DATA_DIR"]) / parsed_reference
+    parsed_path.parent.mkdir(parents=True, exist_ok=True)
+    parsed_path.write_text("Parsed body for review", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = db.query(Document).filter(Document.id == document_id).one()
+        document.parsed_text_path = parsed_reference
+        db.commit()
+
+    response = client.get(f"/api/documents/{document_id}/parsed-text")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["document_id"] == document_id
+    assert payload["text"] == "Parsed body for review"
+    assert payload["source"] == "parsed_file"
 
 
 def test_parser_status_returns_worker_runtime_details(client) -> None:
@@ -1054,7 +1113,7 @@ def test_langextract_feedback_suggestions_surface_contextual_review_examples(cli
             original_filename="invoice.txt",
             content_type="text/plain",
             stored_path=str(Path("invoice.txt")),
-            parsed_text_path=str(parsed_path),
+            parsed_text_path=parsed_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="completed",
         )
         db.add(document)
@@ -1196,7 +1255,7 @@ def test_langextract_feedback_suggestions_skip_span_overrides(client) -> None:
             original_filename="invoice.txt",
             content_type="text/plain",
             stored_path=str(Path("invoice.txt")),
-            parsed_text_path=str(parsed_path),
+            parsed_text_path=parsed_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="completed",
         )
         db.add(document)
@@ -1300,7 +1359,7 @@ def test_langextract_feedback_suggestion_dismissal_persists_across_fetches(clien
             original_filename="invoice.txt",
             content_type="text/plain",
             stored_path=str(Path("invoice.txt")),
-            parsed_text_path=str(parsed_path),
+            parsed_text_path=parsed_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="completed",
         )
         db.add(document)
@@ -1473,8 +1532,9 @@ def test_export_routes_cover_csv_excel_and_invalid_format(client) -> None:
     assert excel_path.exists()
     assert "vendor_name" in csv_path.read_text(encoding="utf-8")
 
-    with pytest.raises(ValueError, match="Unsupported export format: xml"):
-        client.post(f"/api/results/{result_id}/exports/xml")
+    unsupported_response = client.post(f"/api/results/{result_id}/exports/xml")
+    assert unsupported_response.status_code == 400
+    assert "Unsupported export format" in unsupported_response.json()["detail"]
 
 
 def test_export_list_and_download_routes_return_saved_export_metadata(client) -> None:
@@ -1601,7 +1661,7 @@ def test_export_download_route_rejects_paths_outside_exports_dir(client, tmp_pat
     response = client.get(f"/api/exports/{export_id}/download")
 
     assert response.status_code == 400
-    assert "Managed path must stay inside" in response.json()["detail"]
+    assert "Invalid storage reference" in response.json()["detail"]
 
 
 def test_provider_settings_round_trip(client) -> None:

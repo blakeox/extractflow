@@ -8,6 +8,7 @@ import {
   buildLangExtractPreview,
   doesDraftLangExtractExampleMatchSuggestion,
   getAppliedLangExtractSuggestionKeys,
+  getLangExtractExtractionReadiness,
   getLangExtractFieldCoverage,
 } from "./langextract";
 
@@ -164,6 +165,30 @@ describe("langextract helpers", () => {
     expect(coverage.coveredFields).toEqual(["vendor_name"]);
     expect(coverage.coveredRequiredFields).toEqual(["vendor_name"]);
     expect(coverage.missingRequiredFields).toEqual(["total_amount"]);
+  });
+
+  it("blocks LangExtract extraction when required example coverage is missing", () => {
+    const readiness = getLangExtractExtractionReadiness({
+      extracted_fields: [
+        { name: "vendor_name", required: true },
+        { name: "total_amount", required: true },
+      ],
+      langextract_config: {
+        prompt_description: "Extract invoice facts.",
+        examples: [
+          {
+            extractions: [{ extraction_class: "vendor_name" }],
+          },
+        ],
+      },
+      llm_provider_settings: {
+        provider_type: "langextract",
+        api_style: "langextract",
+      },
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.message).toContain("total_amount");
   });
 
   it("rejects unknown fields during draft parsing", () => {

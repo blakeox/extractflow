@@ -278,6 +278,80 @@ function validateLangExtractAttributes(
   }
 }
 
+type LangExtractProviderSettings = {
+  provider_type?: string;
+  api_style?: string;
+};
+
+type LangExtractTemplateDefinition = {
+  extracted_fields: Array<{ name: string; required?: boolean }>;
+  langextract_config?: {
+    prompt_description?: string;
+    examples?: Array<{
+      extractions: Array<{
+        extraction_class: string;
+      }>;
+    }>;
+  } | null;
+  llm_provider_settings?: LangExtractProviderSettings;
+};
+
+function isLangExtractProviderSettings(
+  settings?: LangExtractProviderSettings | null,
+): boolean {
+  return (
+    settings?.provider_type === "langextract" &&
+    settings.api_style === "langextract"
+  );
+}
+
+export function getLangExtractExtractionReadiness(
+  definition: LangExtractTemplateDefinition,
+  providerOverride?: LangExtractProviderSettings | null,
+): { ready: boolean; message: string | null } {
+  const settings = providerOverride ?? definition.llm_provider_settings;
+  if (!isLangExtractProviderSettings(settings)) {
+    return { ready: true, message: null };
+  }
+
+  const config = definition.langextract_config;
+  if (!config?.examples?.length) {
+    return {
+      ready: false,
+      message:
+        "Add LangExtract examples in the schema builder before running extraction.",
+    };
+  }
+
+  const validFieldNames = definition.extracted_fields.map(
+    (field) => field.name,
+  );
+  const requiredFieldNames = definition.extracted_fields
+    .filter((field) => field.required)
+    .map((field) => field.name);
+  const coverage = getLangExtractFieldCoverage(
+    config.examples,
+    validFieldNames,
+    requiredFieldNames,
+  );
+  if (coverage.missingRequiredFields.length) {
+    return {
+      ready: false,
+      message: `LangExtract examples must cover every required field. Missing: ${coverage.missingRequiredFields.join(", ")}.`,
+    };
+  }
+
+  if (!config.prompt_description?.trim()) {
+    return {
+      ready: false,
+      message:
+        "Add a LangExtract prompt description in the schema builder before running extraction.",
+    };
+  }
+
+  return { ready: true, message: null };
+}
+
 export function getLangExtractFieldCoverage(
   examples: Array<{
     extractions: Array<{

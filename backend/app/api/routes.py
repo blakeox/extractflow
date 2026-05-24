@@ -5,9 +5,11 @@ import shutil
 from copy import deepcopy
 from pathlib import Path
 
+from extraction_core.dry_run import SchemaDryRunResponse, run_schema_dry_run
 from extraction_core.job_progress import JOB_STAGE_QUEUED
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
+from extraction_core.template_diff import TemplateVersionDiff, diff_template_definitions
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
@@ -20,6 +22,7 @@ from app.models import Document, ExportRecord, ExtractionJob, ExtractionResult, 
 from app.schemas.api import (
     CustomProviderProfileListResponse,
     CustomProviderProfileRequest,
+    DocumentParsedTextResponse,
     DocumentResponse,
     ExportResponse,
     JobCreateRequest,
@@ -35,9 +38,11 @@ from app.schemas.api import (
     ProviderProbeResponse,
     ProviderSettingsRequest,
     ResultEnvelope,
+    SchemaDryRunRequest,
     TemplateCreateRequest,
     TemplateResponse,
     TemplateVersionCreateRequest,
+    TemplateVersionDiffRequest,
     TemplateVersionResponse,
 )
 from app.services.job_service import build_job_response, retry_failed_job
@@ -58,7 +63,11 @@ from app.services.provider_profiles import (
     update_custom_provider_profile,
 )
 from app.services.result_service import apply_review_edits, export_result
-from app.services.storage import build_upload_target, resolve_export_download_path
+from app.services.storage import (
+    build_upload_target,
+    read_managed_document_text,
+    resolve_export_download_path,
+)
 from app.services.template_service import create_template, create_template_version
 
 router = APIRouter()
@@ -156,6 +165,16 @@ def list_template_versions(
     ]
 
 
+@router.post("/templates/dry-run", response_model=SchemaDryRunResponse)
+def schema_dry_run_endpoint(payload: SchemaDryRunRequest):
+    return run_schema_dry_run(payload.definition, payload.sample_text)
+
+
+@router.post("/templates/version-diff", response_model=TemplateVersionDiff)
+def template_version_diff_endpoint(payload: TemplateVersionDiffRequest):
+    return diff_template_definitions(payload.before_definition, payload.after_definition)
+
+
 @router.get(
     "/template-versions/{template_version_id}/langextract-feedback-suggestions",
     response_model=LangExtractFeedbackSuggestionListResponse,
@@ -243,6 +262,33 @@ def list_documents(db: Session = Depends(get_db), tenant_id: str = Depends(get_c
         )
         for doc in docs
     ]
+
+
+@router.get("/documents/{document_id}/parsed-text", response_model=DocumentParsedTextResponse)
+def get_document_parsed_text(
+    document_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
+    document = db.query(Document).filter(Document.id == document_id, Document.tenant_id == tenant_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    for candidate, source in (
+        (document.parsed_text_path, "parsed_file"),
+        (document.stored_path if "text" in document.content_type else None, "upload"),
+    ):
+        if not candidate:
+            continue
+        text = read_managed_document_text(candidate)
+        if text:
+            return DocumentParsedTextResponse(
+                document_id=document.id,
+                text=text,
+                source=source,
+            )
+
+    raise HTTPException(status_code=404, detail="Parsed document text is not available yet.")
 
 
 @router.post("/jobs", response_model=JobResponse)
@@ -362,7 +408,10 @@ def export_result_endpoint(
     )
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
-    record = export_result(db, result, export_format)
+    try:
+        record = export_result(db, result, export_format)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"export_id": record.id, "path": record.file_path}
 
 
