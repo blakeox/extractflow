@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from hashlib import sha256
+from pathlib import Path
 
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.langextract_feedback import build_langextract_feedback_attributes
@@ -25,7 +26,8 @@ from app.schemas.api import (
     LangExtractFeedbackSuggestionListResponse,
     LangExtractFeedbackSuggestionResponse,
 )
-from app.services.storage import resolve_document_storage_path
+from app.core.config import settings
+from app.services.storage import resolve_storage_path
 
 CONTEXT_RADIUS = 160
 SKIP_MISSING_DOCUMENT_TEXT = "missing_document_text"
@@ -290,11 +292,15 @@ def _get_dismissed_suggestion_keys(
 
 
 def _read_document_text(document: Document) -> str | None:
-    for candidate in (document.parsed_text_path, document.stored_path if "text" in document.content_type else None):
-        if not candidate:
-            continue
+    candidates: list[tuple[str, Path]] = []
+    if document.parsed_text_path:
+        candidates.append((document.parsed_text_path, Path(settings.data_dir)))
+    if document.stored_path and "text" in document.content_type:
+        candidates.append((document.stored_path, Path(settings.data_dir)))
+
+    for candidate, root in candidates:
         try:
-            path = resolve_document_storage_path(candidate)
+            path = resolve_storage_path(candidate, root=root)
         except ValueError:
             continue
         if not path.exists():

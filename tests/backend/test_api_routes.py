@@ -1113,7 +1113,7 @@ def test_langextract_feedback_suggestions_surface_contextual_review_examples(cli
             original_filename="invoice.txt",
             content_type="text/plain",
             stored_path=str(Path("invoice.txt")),
-            parsed_text_path=str(parsed_path),
+            parsed_text_path=parsed_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="completed",
         )
         db.add(document)
@@ -1255,7 +1255,7 @@ def test_langextract_feedback_suggestions_skip_span_overrides(client) -> None:
             original_filename="invoice.txt",
             content_type="text/plain",
             stored_path=str(Path("invoice.txt")),
-            parsed_text_path=str(parsed_path),
+            parsed_text_path=parsed_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="completed",
         )
         db.add(document)
@@ -1359,7 +1359,7 @@ def test_langextract_feedback_suggestion_dismissal_persists_across_fetches(clien
             original_filename="invoice.txt",
             content_type="text/plain",
             stored_path=str(Path("invoice.txt")),
-            parsed_text_path=str(parsed_path),
+            parsed_text_path=parsed_path.relative_to(Path(os.environ["DATA_DIR"])).as_posix(),
             status="completed",
         )
         db.add(document)
