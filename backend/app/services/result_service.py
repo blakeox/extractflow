@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+
 from extraction_core import evaluate_calculated_fields
 from extraction_core.models import ExtractionTemplate, ExtractionValidationSummary, ReviewEditPayload
 from sqlalchemy.orm import Session
