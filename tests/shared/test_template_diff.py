@@ -23,9 +23,7 @@ def test_template_diff_reports_added_and_removed_fields() -> None:
             "validation": {"allow_null": True},
         },
     ]
-    after["extracted_fields"] = [
-        field for field in after["extracted_fields"] if field["name"] != "vendor_name"
-    ]
+    after["extracted_fields"] = [field for field in after["extracted_fields"] if field["name"] != "vendor_name"]
 
     diff = diff_template_definitions(before, after)
 

@@ -76,9 +76,7 @@ def run_schema_dry_run(definition: dict, sample_text: str) -> SchemaDryRunRespon
         extracted_fields=extracted_fields,
         calculated_fields=calculated_fields,
         document_level_notes=document_notes,
-        fields_requiring_review=[
-            field.field_name for field in extracted_fields if field.requires_review
-        ]
+        fields_requiring_review=[field.field_name for field in extracted_fields if field.requires_review]
         + [field.field_name for field in calculated_fields if field.requires_review],
     )
 

@@ -21,9 +21,7 @@ def test_schema_dry_run_extracts_and_validates_currency_field() -> None:
 
     assert response.ok is True
     assert response.extracted_fields
-    total_field = next(
-        field for field in response.extracted_fields if field.field_name == "total_amount"
-    )
+    total_field = next(field for field in response.extracted_fields if field.field_name == "total_amount")
     assert total_field.validation_status == "valid"
     assert total_field.extracted_value is not None
 
