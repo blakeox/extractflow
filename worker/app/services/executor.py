@@ -25,6 +25,7 @@ from app.core.config import settings as app_settings
 from app.services.parser import parse_document
 from app.services.provider import ExtractionProvider
 from app.services.redaction import MASK_CHAR, redact_text
+
 logger = configure_logger("extractflow.worker.executor")
 
 
