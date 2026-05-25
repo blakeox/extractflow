@@ -4709,6 +4709,192 @@ describe("App", () => {
     ).toHaveAttribute("aria-current", "true");
   });
 
+  it("honors ?status=failed and filters the job list", async () => {
+    window.history.pushState({}, "", "/?status=failed");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                definition: {
+                  template_name: "Invoice Schema",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "mock",
+                    base_url: null,
+                    model: "mock-extractor",
+                    temperature: 0.1,
+                    max_tokens: 4000,
+                    supports_json_mode: true,
+                    allow_external_processing: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json"] },
+                },
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 2,
+                original_filename: "failed-invoice.txt",
+                content_type: "text/plain",
+                status: "failed",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+              {
+                id: 3,
+                original_filename: "ready-invoice.txt",
+                content_type: "text/plain",
+                status: "completed",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                document_id: 2,
+                template_version_id: 11,
+                status: "failed",
+                error_message: "Provider timed out.",
+                progress_stage: "failed",
+                progress_pct: 0,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:01:00Z",
+              },
+              {
+                id: 8,
+                document_id: 3,
+                template_version_id: 11,
+                status: "completed",
+                error_message: null,
+                progress_stage: "completed",
+                progress_pct: 100,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:02:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs/8/result")) {
+          return Promise.resolve(
+            jsonResponse({
+              result_id: 22,
+              job_id: 8,
+              result: {
+                document_id: "3",
+                document_type: "invoice",
+                template_name: "Invoice Schema",
+                template_version: "1.0.0",
+                llm_provider: {
+                  mode: "local",
+                  provider_type: "mock",
+                  base_url: null,
+                  model: "mock-extractor",
+                  temperature: 0.1,
+                  max_tokens: 4000,
+                  supports_json_mode: true,
+                  allow_external_processing: false,
+                  timeout_seconds: 120,
+                  retry_count: 2,
+                  chunk_size: 16000,
+                },
+                extraction_status: "completed",
+                extracted_fields: [],
+                calculated_fields: [],
+                fields_requiring_review: [],
+                document_level_notes: [],
+                reviewed_at: "2026-05-02T00:02:00Z",
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: false }),
+          );
+        }
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(jsonResponse({ events: [], total: 0 }));
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 2, jobs: 2, results: 1 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /failed-invoice\.txt/i }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      within(
+        screen.getByRole("button", { name: /failed-invoice\.txt/i }),
+      ).getByText("Failed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /ready-invoice\.txt/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("blocks export when review backlog policy is enabled", async () => {
     vi.stubGlobal(
       "fetch",

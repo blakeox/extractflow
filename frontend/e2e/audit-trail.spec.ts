@@ -22,6 +22,7 @@ test("audit page renders live events and deep links to a job", async ({
   await page.getByRole("button", { name: "Export JSON" }).click();
 
   await page.getByRole("button", { name: "Audit" }).click();
+  await expect(page.getByText("document · uploaded")).toBeVisible();
   await expect(page.getByText("review · saved")).toBeVisible();
   await expect(page.getByText("export · created")).toBeVisible();
 

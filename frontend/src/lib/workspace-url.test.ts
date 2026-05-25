@@ -9,4 +9,10 @@ describe("workspace-url", () => {
     expect(parsed.status).toBe("failed");
     expect(buildWorkspaceSearch(parsed)).toBe("?job=12&status=failed");
   });
+
+  it("round-trips result param", () => {
+    const parsed = parseWorkspaceSearch("?result=501");
+    expect(parsed.resultId).toBe(501);
+    expect(buildWorkspaceSearch(parsed)).toBe("?result=501");
+  });
 });

@@ -20,4 +20,7 @@ test("operator can cancel a queued extraction job", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Cancel job" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel job" }).click();
   await expect(page.getByText("Extraction job cancelled.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Audit" }).click();
+  await expect(page.getByText("job · cancelled")).toBeVisible();
 });

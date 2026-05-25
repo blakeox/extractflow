@@ -334,6 +334,24 @@ def test_template_creation_rejects_circular_calculated_field_dependencies(client
     assert "Calculated field dependency graph is invalid" in response.text
 
 
+def test_document_upload_records_audit_event(client) -> None:
+    upload_response = client.post(
+        "/api/documents",
+        files={"file": ("invoice.txt", b"Vendor Name: Acme", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["id"]
+
+    audit_response = client.get(f"/api/audit/events?document_id={document_id}")
+    assert audit_response.status_code == 200
+    events = audit_response.json()["events"]
+    assert any(event["action"] == "document.uploaded" for event in events)
+    uploaded = next(event for event in events if event["action"] == "document.uploaded")
+    assert uploaded["object_type"] == "document"
+    assert uploaded["metadata"]["document_id"] == document_id
+    assert uploaded["metadata"]["original_filename"] == "invoice.txt"
+
+
 def test_document_upload_and_job_creation(client) -> None:
     template_payload = {
         "name": "Invoice Schema",
@@ -2745,6 +2763,38 @@ def test_retry_failed_job_rejects_external_provider_when_processing_disabled(cli
         assert refreshed_document.status == "failed"
 
 
+def test_retry_cancelled_job_returns_conflict(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="queued",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="queued")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    cancel_response = client.post(f"/api/jobs/{job_id}/cancel")
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    retry_response = client.post(f"/api/jobs/{job_id}/retry")
+    assert retry_response.status_code == 409
+    assert retry_response.json()["detail"] == "Only failed jobs can be retried."
+
+
 def test_retry_job_rejects_non_failed_status(client) -> None:
     template_definition = build_template_definition()
 
@@ -3099,16 +3149,27 @@ def test_export_manifest_includes_sha256(client) -> None:
         db.add(result)
         db.commit()
         result_id = result.id
+        job_id = job.id
+        template_version_id = version.id
 
     export_response = client.post(f"/api/results/{result_id}/exports/json")
     assert export_response.status_code == 200
     payload = export_response.json()
     assert payload["content_sha256"]
     assert len(payload["content_sha256"]) == 64
+    assert payload["reviewer"] == "local-user"
+    assert payload["template_version_id"] == template_version_id
+    assert payload["manifest"]["result_id"] == result_id
+    assert payload["manifest"]["job_id"] == job_id
+    assert payload["manifest"]["export_format"] == "json"
+    assert payload["manifest"]["content_sha256"] == payload["content_sha256"]
 
     list_response = client.get("/api/exports")
     assert list_response.status_code == 200
-    assert list_response.json()[0]["content_sha256"] == payload["content_sha256"]
+    listed = list_response.json()[0]
+    assert listed["content_sha256"] == payload["content_sha256"]
+    assert listed["manifest_json"]["result_id"] == result_id
+    assert listed["reviewer"] == "local-user"
 
 
 def test_export_blocked_when_review_backlog_enabled(client) -> None:
