@@ -538,6 +538,19 @@ async function mockExtractionApiWithState(
         created_at: now,
       };
       state.documents = [document];
+      state.auditEvents.unshift({
+        id: state.auditEvents.length + 1,
+        actor: "local-user",
+        action: "document.uploaded",
+        object_type: "document",
+        object_id: String(document.id),
+        metadata: {
+          document_id: document.id,
+          original_filename: document.original_filename,
+          content_type: document.content_type,
+        },
+        created_at: now,
+      });
       return json(route, 200, document);
     }
     if (method === "POST" && /^\/jobs\/\d+\/retry$/.test(path)) {
@@ -765,6 +778,20 @@ async function mockExtractionApiWithState(
           : job,
       );
       const job = state.jobs.find((item) => item.id === jobId);
+      if (job) {
+        state.auditEvents.unshift({
+          id: state.auditEvents.length + 1,
+          actor: "local-user",
+          action: "job.cancelled",
+          object_type: "job",
+          object_id: String(job.id),
+          metadata: {
+            job_id: job.id,
+            document_id: job.document_id,
+          },
+          created_at: "2026-05-02T12:06:00.000Z",
+        });
+      }
       return json(route, 200, job);
     }
 

@@ -36,6 +36,7 @@ test("operator playbook: upload, review, export, audit chain", async ({
   await expect(page.getByText(/SHA-256/i)).toBeVisible();
 
   await page.getByRole("button", { name: "Audit" }).click();
+  await expect(page.getByText("document · uploaded")).toBeVisible();
   await expect(page.getByText("review · saved")).toBeVisible();
   await expect(page.getByText("export · created")).toBeVisible();
 });

@@ -195,10 +195,17 @@ def test_process_once_fails_job_when_tenant_chain_is_inconsistent(monkeypatch) -
     process_once()
 
     with SessionLocal() as db:
+        from app.models import AuditEvent
+
         refreshed_job = db.get(ExtractionJob, job_id)
         assert refreshed_job is not None
         assert refreshed_job.status == "failed"
         assert "Tenant mismatch between job, document, and template version." in refreshed_job.error_message
+        failed_events = (
+            db.query(AuditEvent).filter(AuditEvent.action == "job.failed", AuditEvent.object_id == str(job_id)).all()
+        )
+        assert len(failed_events) == 1
+        assert failed_events[0].metadata_json["job_id"] == job_id
 
 
 def test_process_once_stops_when_job_cancelled_during_parse(monkeypatch) -> None:
@@ -271,3 +278,69 @@ def test_process_once_stops_when_job_cancelled_during_parse(monkeypatch) -> None
         assert refreshed_document is not None
         assert refreshed_document.status == "uploaded"
         assert db.query(ExtractionResult).filter(ExtractionResult.job_id == job_id).count() == 0
+
+
+def test_process_once_records_job_completed_audit_event(monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.models import AuditEvent, Document, ExtractionJob, TemplateVersion
+
+    uploads_dir = Path(os.environ["UPLOADS_DIR"])
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    document_path = uploads_dir / "invoice-complete.txt"
+    document_path.write_text("Vendor Name: Acme", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = Document(
+            original_filename="invoice-complete.txt",
+            content_type="text/plain",
+            stored_path="uploads/invoice-complete.txt",
+            status="uploaded",
+        )
+        db.add(document)
+        db.flush()
+        version = TemplateVersion(
+            template_id=1,
+            version="1.0.0",
+            definition={
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "extracted_fields": [],
+            },
+        )
+        db.add(version)
+        db.flush()
+        job = ExtractionJob(
+            document_id=document.id,
+            template_version_id=version.id,
+            status="queued",
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    def fake_execute_extraction(**kwargs):
+        return {
+            "document_id": str(kwargs["document_id"]),
+            "document_type": "invoice",
+            "template_name": "Invoice Extraction",
+            "template_version": "1.0.0",
+            "llm_provider": {},
+            "extraction_status": "completed",
+            "extracted_fields": [],
+            "calculated_fields": [],
+            "fields_requiring_review": [],
+            "document_level_notes": [],
+            "reviewed_at": None,
+        }
+
+    monkeypatch.setattr(worker_main, "execute_extraction", fake_execute_extraction)
+    monkeypatch.setattr(worker_main, "write_worker_status", lambda *_args, **_kwargs: None)
+
+    worker_main.process_once()
+
+    with SessionLocal() as db:
+        events = (
+            db.query(AuditEvent).filter(AuditEvent.action == "job.completed", AuditEvent.object_id == str(job_id)).all()
+        )
+        assert len(events) == 1
+        assert events[0].metadata_json["job_id"] == job_id
