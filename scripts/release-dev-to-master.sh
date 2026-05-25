@@ -76,3 +76,4 @@ EOF
 )"
 
 echo "Release PR opened. After it merges, run: ./scripts/sync-master-to-dev.sh"
+echo "Upgrade gates: docs/RELEASE_UPGRADE.md"

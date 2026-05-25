@@ -38,11 +38,13 @@ Real providers and measurable quality before calling deployments “production.�
 
 **Gate:** Golden-set stable; new installs complete a real extraction in &lt;30 minutes.
 
+**Status:** P0 issues [#58](https://github.com/blakeox/extractflow/issues/58)–[#65](https://github.com/blakeox/extractflow/issues/65) closed on `master` (docs, dry-run, diff, parsed text, LangExtract gates, mock warning).
+
 ### P1 — Operator trust
 
 Humans can defend exports; audit is real—not mock UI.
 
-Implementation plan: [P1_OPERATOR_TRUST_PLAN.md](P1_OPERATOR_TRUST_PLAN.md) (implemented on `dev`).
+Implementation plan: [P1_OPERATOR_TRUST_PLAN.md](P1_OPERATOR_TRUST_PLAN.md) (**completed** on `master` via [#109](https://github.com/blakeox/extractflow/pull/109)).
 
 - Structured review for `table`, `json_object`, `structured_object`
 - Citation highlight in parsed document text
@@ -52,6 +54,8 @@ Implementation plan: [P1_OPERATOR_TRUST_PLAN.md](P1_OPERATOR_TRUST_PLAN.md) (imp
 - Optional policy: block export while review backlog exists
 
 **Gate:** Playbook: PDF → review → export → audit chain visible end-to-end.
+
+**Status:** P1 issues [#66](https://github.com/blakeox/extractflow/issues/66)–[#73](https://github.com/blakeox/extractflow/issues/73) closed on `master` ([#109](https://github.com/blakeox/extractflow/pull/109)).
 
 ### P2 — Production operations
 
@@ -87,15 +91,15 @@ Only if the project pursues a managed product: multi-tenant hardening, object st
 
 ## Minimum company production checklist
 
-- [ ] Real default provider in prod (not `mock`)
+- [ ] Real default provider in prod (not `mock`) — mock warning shipped; default still bootstrap-friendly
 - [ ] Golden-set eval green on release tag
-- [ ] Review supports all field types in shipped schemas
-- [ ] Audit API + UI backed by database events
-- [ ] Postgres + 2+ workers + cancel/retry documented
+- [x] Review supports all field types in shipped schemas (P1)
+- [x] Audit API + UI backed by database events (P1)
+- [ ] Postgres + 2+ workers + cancel/retry documented — cancel/retry shipped on SQLite; Postgres/multi-worker is P3
 - [ ] Auth + RBAC + tenant isolation tested
 - [ ] Backups + restore tested
 - [ ] Metrics/alerts for failures and queue depth
-- [ ] Runbooks: weak PDF, provider down, disk, upgrade rollback
+- [x] Runbooks: weak PDF ([PARSER_FAILURE_RUNBOOK.md](PARSER_FAILURE_RUNBOOK.md)); provider/disk/upgrade rollback still P2
 
 ## KPIs
 
@@ -134,16 +138,13 @@ Or create a project manually at [github.com/blakeox?tab=projects](https://github
 
 ## Good first issues (starter tasks)
 
-Completed: [#57](https://github.com/blakeox/extractflow/issues/57) (golden-set eval CI), [#60](https://github.com/blakeox/extractflow/issues/60) (mock provider warning).
+Completed: P0 [#57](https://github.com/blakeox/extractflow/issues/57)–[#65](https://github.com/blakeox/extractflow/issues/65), P1 [#66](https://github.com/blakeox/extractflow/issues/66)–[#73](https://github.com/blakeox/extractflow/issues/73) (see milestone [P1: Operator trust](https://github.com/blakeox/extractflow/milestone/2)).
 
-| Issue                                                   | Title                                          |
-| ------------------------------------------------------- | ---------------------------------------------- |
-| [#65](https://github.com/blakeox/extractflow/issues/65) | Block run when LangExtract examples incomplete |
-| [#71](https://github.com/blakeox/extractflow/issues/71) | Cancel queued extraction jobs                  |
-| [#73](https://github.com/blakeox/extractflow/issues/73) | Job list filters and deep links                |
-| [#75](https://github.com/blakeox/extractflow/issues/75) | Alerting runbook                               |
-| [#78](https://github.com/blakeox/extractflow/issues/78) | Release and upgrade gate documentation         |
-| [#79](https://github.com/blakeox/extractflow/issues/79) | Capacity and performance baselines             |
-| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide                       |
+| Issue                                                   | Title                                       |
+| ------------------------------------------------------- | ------------------------------------------- |
+| [#75](https://github.com/blakeox/extractflow/issues/75) | Alerting runbook (P2)                       |
+| [#78](https://github.com/blakeox/extractflow/issues/78) | Release and upgrade gate documentation (P2) |
+| [#79](https://github.com/blakeox/extractflow/issues/79) | Capacity and performance baselines (P2)     |
+| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide (P3)               |
 
 Contributions: pick an unassigned issue in the earliest open milestone you can help close; comment before large PRs per [CONTRIBUTING.md](../CONTRIBUTING.md).
