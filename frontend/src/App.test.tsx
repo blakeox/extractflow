@@ -4886,6 +4886,244 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Export JSON" })).toBeDisabled();
   });
 
+  it("requires saving pending review before export when no fields are flagged", async () => {
+    let reviewStatus = "pending";
+    let reviewedAt: string | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        if (url.endsWith("/results/21/review") && init?.method === "POST") {
+          reviewStatus = "reviewed";
+          reviewedAt = "2026-05-02T00:03:00Z";
+          return Promise.resolve(
+            jsonResponse({
+              document_id: "2",
+              document_type: "invoice",
+              template_name: "Invoice Schema",
+              template_version: "1.0.0",
+              llm_provider: {
+                mode: "local",
+                provider_type: "mock",
+                base_url: null,
+                model: "mock-extractor",
+                temperature: 0.1,
+                max_tokens: 4000,
+                supports_json_mode: true,
+                allow_external_processing: false,
+                timeout_seconds: 120,
+                retry_count: 2,
+                chunk_size: 16000,
+              },
+              extraction_status: "completed",
+              extracted_fields: [
+                {
+                  field_name: "vendor_name",
+                  label: "Vendor Name",
+                  field_kind: "extracted",
+                  data_type: "text",
+                  extracted_value: "Acme Corp",
+                  normalized_value: { value: "Acme Corp" },
+                  confidence_score: 0.99,
+                  validation_status: "reviewed",
+                  validation_errors: [],
+                  requires_review: false,
+                },
+              ],
+              calculated_fields: [],
+              fields_requiring_review: [],
+              document_level_notes: [],
+              reviewed_at: reviewedAt,
+              review_status: reviewStatus,
+            }),
+          );
+        }
+        if (url.endsWith("/templates")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 1,
+                name: "Invoice Schema",
+                description: "Invoice extraction schema.",
+                document_type: "invoice",
+                is_locked: false,
+                latest_version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/templates/1/versions")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 11,
+                template_id: 1,
+                version: "1.0.0",
+                created_at: "2026-05-02T00:00:00Z",
+                definition: {
+                  template_name: "Invoice Schema",
+                  template_version: "1.0.0",
+                  document_type: "invoice",
+                  description: "Invoice extraction schema.",
+                  llm_provider_settings: {
+                    mode: "local",
+                    provider_type: "mock",
+                    base_url: null,
+                    model: "mock-extractor",
+                    temperature: 0.1,
+                    max_tokens: 4000,
+                    supports_json_mode: true,
+                    allow_external_processing: false,
+                    timeout_seconds: 120,
+                    retry_count: 2,
+                    chunk_size: 16000,
+                  },
+                  extracted_fields: [
+                    {
+                      name: "vendor_name",
+                      label: "Vendor Name",
+                      type: "text",
+                      required: true,
+                    },
+                  ],
+                  calculated_fields: [],
+                  output_settings: { export_formats: ["json"] },
+                },
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/documents")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 2,
+                original_filename: "invoice.pdf",
+                content_type: "application/pdf",
+                status: "completed",
+                created_at: "2026-05-02T00:00:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs")) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                id: 7,
+                document_id: 2,
+                template_version_id: 11,
+                status: "completed",
+                error_message: null,
+                created_at: "2026-05-02T00:00:00Z",
+                updated_at: "2026-05-02T00:01:00Z",
+              },
+            ]),
+          );
+        }
+        if (url.endsWith("/jobs/7/result")) {
+          return Promise.resolve(
+            jsonResponse({
+              result_id: 21,
+              job_id: 7,
+              result: {
+                document_id: "2",
+                document_type: "invoice",
+                template_name: "Invoice Schema",
+                template_version: "1.0.0",
+                llm_provider: {
+                  mode: "local",
+                  provider_type: "mock",
+                  base_url: null,
+                  model: "mock-extractor",
+                  temperature: 0.1,
+                  max_tokens: 4000,
+                  supports_json_mode: true,
+                  allow_external_processing: false,
+                  timeout_seconds: 120,
+                  retry_count: 2,
+                  chunk_size: 16000,
+                },
+                extraction_status: "completed",
+                extracted_fields: [
+                  {
+                    field_name: "vendor_name",
+                    label: "Vendor Name",
+                    field_kind: "extracted",
+                    data_type: "text",
+                    extracted_value: "Acme Corp",
+                    normalized_value: { value: "Acme Corp" },
+                    confidence_score: 0.99,
+                    validation_status: "reviewed",
+                    validation_errors: [],
+                    requires_review: false,
+                  },
+                ],
+                calculated_fields: [],
+                fields_requiring_review: [],
+                document_level_notes: [],
+                reviewed_at: reviewedAt,
+                review_status: reviewStatus,
+              },
+            }),
+          );
+        }
+        if (url.endsWith("/exports")) return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/provider"))
+          return Promise.resolve(jsonResponse(null));
+        if (url.endsWith("/settings/providers"))
+          return Promise.resolve(jsonResponse({ providers: [] }));
+        if (url.endsWith("/settings/providers/health"))
+          return Promise.resolve(jsonResponse([]));
+        if (url.endsWith("/settings/export-policy")) {
+          return Promise.resolve(
+            jsonResponse({ require_review_cleared: true }),
+          );
+        }
+        if (url.includes("/audit/events")) {
+          return Promise.resolve(jsonResponse({ events: [], total: 0 }));
+        }
+        if (url.endsWith("/dev/status")) {
+          return Promise.resolve(
+            jsonResponse({ templates: 1, documents: 1, jobs: 1, results: 1 }),
+          );
+        }
+
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Review confirmation required"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "Save review" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export JSON" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save review" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Export JSON" })).toBeEnabled();
+    });
+    expect(
+      screen.queryByRole("button", { name: "Save review" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("cancels a queued extraction job from the workspace", async () => {
     vi.stubGlobal(
       "fetch",

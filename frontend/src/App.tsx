@@ -346,6 +346,7 @@ type ResultPayload = {
   template_version: string;
   llm_provider: ProviderSettings;
   extraction_status: string;
+  review_status?: string;
   extracted_fields: ReviewFieldResult[];
   calculated_fields: ReviewFieldResult[];
   fields_requiring_review: string[];
@@ -2608,7 +2609,9 @@ function ExtractionWorkspacePage({
       ? "failed"
       : selectedJob.status === "completed"
         ? selectedResult &&
-          selectedResult.result.fields_requiring_review.length > 0
+          (selectedResult.result.fields_requiring_review.length > 0 ||
+            (exportPolicy.require_review_cleared &&
+              selectedResult.result.review_status === "pending"))
           ? "review"
           : "ready"
         : "processing"
@@ -3701,10 +3704,17 @@ function ExtractionWorkspacePage({
                       </div>
                     ) : (
                       <NoteCard>
-                        <strong>No manual review required</strong>
+                        <strong>
+                          {exportPolicy.require_review_cleared &&
+                          selectedResult?.result.review_status === "pending"
+                            ? "Review confirmation required"
+                            : "No manual review required"}
+                        </strong>
                         <p>
-                          The result is already ready for export. Do not make
-                          the user visit another page just to download it.
+                          {exportPolicy.require_review_cleared &&
+                          selectedResult?.result.review_status === "pending"
+                            ? "No fields need edits, but you still need to save review before export is unlocked."
+                            : "The result is already ready for export. Do not make the user visit another page just to download it."}
                         </p>
                       </NoteCard>
                     )}
@@ -5195,7 +5205,8 @@ export function App() {
   const exportBlocked =
     exportPolicy.require_review_cleared &&
     Boolean(
-      selectedResultForExport?.result.fields_requiring_review.length ?? 0,
+      (selectedResultForExport?.result.fields_requiring_review.length ?? 0) >
+        0 || selectedResultForExport?.result.review_status === "pending",
     );
 
   function handleJobStatusFilterChange(status: string | null) {
@@ -5766,7 +5777,10 @@ export function App() {
         [selectedJobId]: {
           result_id: selectedResult.result_id,
           job_id: selectedJobId,
-          result: updatedResult,
+          result: {
+            ...updatedResult,
+            review_status: "reviewed",
+          },
         },
       }));
       setReviewDrafts(

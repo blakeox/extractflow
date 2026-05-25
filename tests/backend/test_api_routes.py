@@ -20,6 +20,7 @@ from app.models import (
     Template,
     TemplateVersion,
 )
+from app.services.audit_service import record_audit_event
 from app.services.storage import resolve_document_storage_path
 from fastapi import HTTPException
 
@@ -3193,6 +3194,61 @@ def test_export_blocked_when_review_backlog_enabled(client) -> None:
     assert allowed.status_code == 200
 
 
+def test_result_routes_include_review_status_for_review_gating(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            review_status="pending",
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [],
+                "calculated_fields": [],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        job_id = job.id
+        result_id = result.id
+
+    get_response = client.get(f"/api/jobs/{job_id}/result")
+    assert get_response.status_code == 200
+    assert get_response.json()["result"]["review_status"] == "pending"
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={"reviewer": "qa-user", "edits": [], "recalculate": False},
+    )
+    assert review_response.status_code == 200
+    assert review_response.json()["review_status"] == "reviewed"
+
+
 def test_review_table_field_round_trip(client) -> None:
     template_definition = build_template_definition()
     template_definition["extracted_fields"].append(
@@ -3412,6 +3468,57 @@ def test_audit_events_filter_by_job_id(client) -> None:
     events = filtered.json()["events"]
     assert events
     assert all(event["metadata"]["job_id"] == job_id for event in events)
+
+
+def test_audit_events_metadata_filters_apply_before_pagination(client) -> None:
+    with SessionLocal() as db:
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="job.started",
+            object_type="job",
+            object_id="other-1",
+            metadata={"job_id": 99},
+        )
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="review.saved",
+            object_type="result",
+            object_id="11",
+            metadata={"job_id": 5},
+        )
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="job.completed",
+            object_type="job",
+            object_id="other-2",
+            metadata={"job_id": 99},
+        )
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="export.created",
+            object_type="export",
+            object_id="22",
+            metadata={"job_id": 5},
+        )
+        db.commit()
+
+    first_page = client.get("/api/audit/events?job_id=5&limit=1")
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 2
+    assert [event["object_id"] for event in first_page.json()["events"]] == ["22"]
+
+    second_page = client.get("/api/audit/events?job_id=5&limit=1&offset=1")
+    assert second_page.status_code == 200
+    assert second_page.json()["total"] == 2
+    assert [event["object_id"] for event in second_page.json()["events"]] == ["11"]
 
 
 def test_cancel_completed_job_returns_conflict(client) -> None:

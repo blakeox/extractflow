@@ -50,7 +50,7 @@ from app.schemas.api import (
     TemplateVersionDiffRequest,
     TemplateVersionResponse,
 )
-from app.services.audit_service import list_audit_events, record_audit_event
+from app.services.audit_service import list_audit_events_page, record_audit_event
 from app.services.job_service import build_job_response, cancel_job, retry_failed_job
 from app.services.langextract_feedback import (
     list_langextract_feedback_suggestions,
@@ -442,7 +442,11 @@ def get_job_result(job_id: int, db: Session = Depends(get_db), tenant_id: str = 
     )
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
-    return ResultEnvelope(result_id=result.id, job_id=job_id, result=result.result_json)
+    return ResultEnvelope(
+        result_id=result.id,
+        job_id=job_id,
+        result={**result.result_json, "review_status": result.review_status},
+    )
 
 
 @router.post("/results/{result_id}/review")
@@ -460,7 +464,7 @@ def review_result(
     if not result:
         raise HTTPException(status_code=404, detail="Result not found.")
     updated = apply_review_edits(db, result, payload)
-    return updated.result_json
+    return {**updated.result_json, "review_status": updated.review_status}
 
 
 @router.post("/results/{result_id}/exports/{export_format}")
@@ -551,7 +555,7 @@ def list_audit_events_route(
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
 ):
-    events = list_audit_events(
+    events, total = list_audit_events_page(
         db,
         tenant_id=tenant_id,
         result_id=result_id,
@@ -576,7 +580,7 @@ def list_audit_events_route(
             )
             for event in events
         ],
-        total=len(events),
+        total=total,
     )
 
 

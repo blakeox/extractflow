@@ -39,19 +39,14 @@ def record_audit_event(
     return event
 
 
-def list_audit_events(
+def _build_audit_event_query(
     db: Session,
     *,
     tenant_id: str,
-    result_id: int | None = None,
-    document_id: int | None = None,
-    job_id: int | None = None,
     action: str | None = None,
     from_time: datetime | None = None,
     to_time: datetime | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[AuditEvent]:
+):
     query = db.query(AuditEvent).filter(AuditEvent.tenant_id == tenant_id)
     if action:
         query = query.filter(AuditEvent.action == action)
@@ -59,9 +54,17 @@ def list_audit_events(
         query = query.filter(AuditEvent.created_at >= from_time)
     if to_time:
         query = query.filter(AuditEvent.created_at <= to_time)
+    return query
 
-    events = query.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit).all()
-    if not (result_id or document_id or job_id):
+
+def _filter_audit_events_by_metadata(
+    events: list[AuditEvent],
+    *,
+    result_id: int | None = None,
+    document_id: int | None = None,
+    job_id: int | None = None,
+) -> list[AuditEvent]:
+    if not (result_id is not None or document_id is not None or job_id is not None):
         return events
 
     filtered: list[AuditEvent] = []
@@ -75,3 +78,68 @@ def list_audit_events(
             continue
         filtered.append(event)
     return filtered
+
+
+def list_audit_events_page(
+    db: Session,
+    *,
+    tenant_id: str,
+    result_id: int | None = None,
+    document_id: int | None = None,
+    job_id: int | None = None,
+    action: str | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[AuditEvent], int]:
+    query = _build_audit_event_query(
+        db,
+        tenant_id=tenant_id,
+        action=action,
+        from_time=from_time,
+        to_time=to_time,
+    )
+    ordered_query = query.order_by(AuditEvent.created_at.desc())
+    metadata_filtered = result_id is not None or document_id is not None or job_id is not None
+
+    if not metadata_filtered:
+        events = ordered_query.offset(offset).limit(limit).all()
+        return events, query.count()
+
+    filtered_events = _filter_audit_events_by_metadata(
+        ordered_query.all(),
+        result_id=result_id,
+        document_id=document_id,
+        job_id=job_id,
+    )
+    total = len(filtered_events)
+    return filtered_events[offset : offset + limit], total
+
+
+def list_audit_events(
+    db: Session,
+    *,
+    tenant_id: str,
+    result_id: int | None = None,
+    document_id: int | None = None,
+    job_id: int | None = None,
+    action: str | None = None,
+    from_time: datetime | None = None,
+    to_time: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[AuditEvent]:
+    events, _ = list_audit_events_page(
+        db,
+        tenant_id=tenant_id,
+        result_id=result_id,
+        document_id=document_id,
+        job_id=job_id,
+        action=action,
+        from_time=from_time,
+        to_time=to_time,
+        limit=limit,
+        offset=offset,
+    )
+    return events
