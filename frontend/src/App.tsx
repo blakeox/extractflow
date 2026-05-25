@@ -2517,6 +2517,7 @@ function ExtractionWorkspacePage({
   onApproveHighConfidenceReview,
   onExport,
   exportBlocked,
+  exportPolicy,
   jobStatusFilter,
   onJobStatusFilterChange,
   onOpenSchemas,
@@ -2555,6 +2556,7 @@ function ExtractionWorkspacePage({
   onApproveHighConfidenceReview: () => Promise<void>;
   onExport: (format: "json" | "csv" | "excel") => Promise<void>;
   exportBlocked: boolean;
+  exportPolicy: ExportPolicy;
   jobStatusFilter: string | null;
   onJobStatusFilterChange: (status: string | null) => void;
   onOpenSchemas: () => void;
@@ -6560,6 +6562,7 @@ export function App() {
               onApproveHighConfidenceReview={handleApproveHighConfidenceReview}
               onExport={handleExport}
               exportBlocked={exportBlocked}
+              exportPolicy={exportPolicy}
               jobStatusFilter={jobStatusFilter}
               onJobStatusFilterChange={handleJobStatusFilterChange}
               onOpenSchemas={() => setActivePage("templates")}
