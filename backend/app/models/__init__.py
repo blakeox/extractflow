@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AuditEvent,
     Document,
     ExportRecord,
     ExtractionJob,
@@ -11,6 +12,7 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "AuditEvent",
     "Document",
     "ExportRecord",
     "ExtractionJob",

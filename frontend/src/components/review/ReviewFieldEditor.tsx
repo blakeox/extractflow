@@ -1,3 +1,6 @@
+import { JsonObjectReviewEditor } from "./JsonObjectReviewEditor";
+import { StructuredObjectReviewEditor } from "./StructuredObjectReviewEditor";
+import { TableReviewEditor } from "./TableReviewEditor";
 import type { TemplateFieldDefinition } from "../../lib/review-helpers";
 
 type ReviewFieldEditorProps = {
@@ -6,6 +9,7 @@ type ReviewFieldEditorProps = {
   draftValue: string;
   definition?: TemplateFieldDefinition | null;
   onChange: (value: string) => void;
+  onValidationChange?: (error: string | null) => void;
 };
 
 export function ReviewFieldEditor({
@@ -14,8 +18,43 @@ export function ReviewFieldEditor({
   draftValue,
   definition,
   onChange,
+  onValidationChange,
 }: ReviewFieldEditorProps) {
   const allowedValues = definition?.allowed_values ?? [];
+
+  if (fieldType === "json_object") {
+    return (
+      <JsonObjectReviewEditor
+        fieldLabel={fieldLabel}
+        draftValue={draftValue}
+        onChange={onChange}
+        onValidationChange={onValidationChange}
+      />
+    );
+  }
+
+  if (fieldType === "structured_object") {
+    return (
+      <StructuredObjectReviewEditor
+        fieldLabel={fieldLabel}
+        draftValue={draftValue}
+        definition={definition}
+        onChange={onChange}
+        onValidationChange={onValidationChange}
+      />
+    );
+  }
+
+  if (fieldType === "table") {
+    return (
+      <TableReviewEditor
+        fieldLabel={fieldLabel}
+        draftValue={draftValue}
+        onChange={onChange}
+        onValidationChange={onValidationChange}
+      />
+    );
+  }
 
   if (fieldType === "boolean") {
     return (

@@ -214,4 +214,32 @@ class ExportResponse(BaseModel):
     job_id: int
     export_format: str
     file_path: str
+    content_sha256: str | None = None
+    exported_at: datetime | None = None
+    reviewer: str | None = None
+    template_version_id: int | None = None
+    manifest_json: dict[str, Any] | None = None
     created_at: datetime
+
+
+class AuditEventResponse(BaseModel):
+    id: int
+    actor: str
+    action: str
+    object_type: str
+    object_id: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class AuditEventListResponse(BaseModel):
+    events: list[AuditEventResponse] = Field(default_factory=list)
+    total: int
+
+
+class ExportPolicyResponse(BaseModel):
+    require_review_cleared: bool = False
+
+
+class ExportPolicyRequest(BaseModel):
+    require_review_cleared: bool

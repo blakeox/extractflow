@@ -17,6 +17,8 @@ export type TemplateFieldDefinition = {
   type: string;
   allowed_values?: string[];
   output_format?: { currency?: string | null } | null;
+  schema?: Record<string, unknown> | null;
+  field_schema?: Record<string, unknown> | null;
 };
 
 export function isHighConfidenceField(

@@ -28,6 +28,7 @@ def reset_worker_state() -> None:
     from app.core.database import engine
 
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS audit_events"))
         connection.execute(text("DROP TABLE IF EXISTS extraction_results"))
         connection.execute(text("DROP TABLE IF EXISTS extraction_jobs"))
         connection.execute(text("DROP TABLE IF EXISTS template_versions"))
@@ -82,6 +83,22 @@ def reset_worker_state() -> None:
                     progress_pct INTEGER NOT NULL DEFAULT 0,
                     created_at DATETIME,
                     updated_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE audit_events (
+                    id INTEGER PRIMARY KEY,
+                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+                    actor VARCHAR(255) NOT NULL DEFAULT 'system',
+                    action VARCHAR(100) NOT NULL,
+                    object_type VARCHAR(100) NOT NULL,
+                    object_id VARCHAR(100) NOT NULL,
+                    metadata JSON NOT NULL,
+                    created_at DATETIME
                 )
                 """
             )

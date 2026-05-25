@@ -42,6 +42,8 @@ Real providers and measurable quality before calling deployments “production.�
 
 Humans can defend exports; audit is real—not mock UI.
 
+Implementation plan: [P1_OPERATOR_TRUST_PLAN.md](P1_OPERATOR_TRUST_PLAN.md) (implemented on `dev`).
+
 - Structured review for `table`, `json_object`, `structured_object`
 - Citation highlight in parsed document text
 - Audit API + live Audit page (`ReviewEdit`, jobs, exports)

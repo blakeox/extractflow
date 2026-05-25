@@ -20,6 +20,7 @@ from app.models import (
     Template,
     TemplateVersion,
 )
+from app.services.audit_service import record_audit_event
 from app.services.storage import resolve_document_storage_path
 from fastapi import HTTPException
 
@@ -2855,3 +2856,810 @@ def test_review_approve_high_confidence_leaves_low_confidence_flagged(client) ->
     assert fields["vendor_name"]["requires_review"] is False
     assert fields["total_amount"]["requires_review"] is True
     assert review_response.json()["fields_requiring_review"] == ["total_amount"]
+
+
+def test_review_json_object_field_round_trip(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["extracted_fields"].append(
+        {
+            "name": "metadata",
+            "label": "Metadata",
+            "description": "Structured metadata blob.",
+            "type": "json_object",
+            "required": False,
+        }
+    )
+
+    with SessionLocal() as db:
+        template = Template(name="Metadata Schema", description="Metadata schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "metadata",
+                        "label": "Metadata",
+                        "field_kind": "extracted",
+                        "data_type": "json_object",
+                        "extracted_value": {"vendor": "Acme"},
+                        "normalized_value": {"vendor": "Acme"},
+                        "confidence_score": 0.5,
+                        "validation_status": "invalid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["metadata"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "metadata",
+                    "normalized_value": {"vendor": "Acme Updated", "tier": "gold"},
+                    "reason": "Corrected metadata.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    assert review_response.status_code == 200
+    field = review_response.json()["extracted_fields"][0]
+    assert field["normalized_value"] == {"vendor": "Acme Updated", "tier": "gold"}
+
+
+def test_audit_events_list_returns_upload_review_export_chain(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.42,
+                        "validation_status": "invalid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "vendor_name",
+                    "normalized_value": {"value": "Acme Corporation"},
+                    "reason": "Reviewed.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    client.post(f"/api/results/{result_id}/exports/json")
+
+    audit_response = client.get("/api/audit/events")
+    assert audit_response.status_code == 200
+    actions = {event["action"] for event in audit_response.json()["events"]}
+    assert "review.saved" in actions
+    assert "export.created" in actions
+
+
+def test_cancel_queued_job_updates_status(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="queued",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="queued")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    response = client.post(f"/api/jobs/{job_id}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+
+
+def test_export_manifest_includes_sha256(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            review_status="reviewed",
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.99,
+                        "validation_status": "reviewed",
+                        "validation_errors": [],
+                        "requires_review": False,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    export_response = client.post(f"/api/results/{result_id}/exports/json")
+    assert export_response.status_code == 200
+    payload = export_response.json()
+    assert payload["content_sha256"]
+    assert len(payload["content_sha256"]) == 64
+
+    list_response = client.get("/api/exports")
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["content_sha256"] == payload["content_sha256"]
+
+
+def test_export_blocked_when_review_backlog_enabled(client) -> None:
+    template_definition = build_template_definition()
+
+    client.put(
+        "/api/settings/export-policy",
+        json={"require_review_cleared": True},
+    )
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            review_status="pending",
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "vendor_name",
+                        "label": "Vendor Name",
+                        "field_kind": "extracted",
+                        "data_type": "text",
+                        "extracted_value": "Acme Corp",
+                        "normalized_value": {"value": "Acme Corp"},
+                        "confidence_score": 0.42,
+                        "validation_status": "invalid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["vendor_name"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    blocked = client.post(f"/api/results/{result_id}/exports/json")
+    assert blocked.status_code == 409
+
+    review_clear = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "vendor_name",
+                    "normalized_value": {"value": "Acme Corporation"},
+                    "reason": "Reviewed.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    assert review_clear.status_code == 200
+
+    allowed = client.post(f"/api/results/{result_id}/exports/json")
+    assert allowed.status_code == 200
+
+
+def test_result_routes_include_review_status_for_review_gating(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            review_status="pending",
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [],
+                "calculated_fields": [],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        job_id = job.id
+        result_id = result.id
+
+    get_response = client.get(f"/api/jobs/{job_id}/result")
+    assert get_response.status_code == 200
+    assert get_response.json()["result"]["review_status"] == "pending"
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={"reviewer": "qa-user", "edits": [], "recalculate": False},
+    )
+    assert review_response.status_code == 200
+    assert review_response.json()["review_status"] == "reviewed"
+
+
+def test_review_table_field_round_trip(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["extracted_fields"].append(
+        {
+            "name": "line_items",
+            "label": "Line Items",
+            "description": "Invoice line items.",
+            "type": "table",
+            "required": False,
+        }
+    )
+
+    with SessionLocal() as db:
+        template = Template(name="Table Schema", description="Table schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "line_items",
+                        "label": "Line Items",
+                        "field_kind": "extracted",
+                        "data_type": "table",
+                        "extracted_value": [{"sku": "A1", "qty": 2}],
+                        "normalized_value": [{"sku": "A1", "qty": 2}],
+                        "confidence_score": 0.5,
+                        "validation_status": "invalid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["line_items"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "line_items",
+                    "normalized_value": [{"sku": "A1", "qty": 3}, {"sku": "B2", "qty": 1}],
+                    "reason": "Corrected quantities.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    assert review_response.status_code == 200
+    field = review_response.json()["extracted_fields"][0]
+    assert field["normalized_value"] == [{"sku": "A1", "qty": 3}, {"sku": "B2", "qty": 1}]
+
+
+def test_review_structured_object_field_round_trip(client) -> None:
+    template_definition = build_template_definition()
+    template_definition["extracted_fields"].append(
+        {
+            "name": "party",
+            "label": "Party",
+            "description": "Structured party details.",
+            "type": "structured_object",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "active": {"type": "boolean"},
+                },
+            },
+        }
+    )
+
+    with SessionLocal() as db:
+        template = Template(name="Structured Schema", description="Structured schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [
+                    {
+                        "field_name": "party",
+                        "label": "Party",
+                        "field_kind": "extracted",
+                        "data_type": "structured_object",
+                        "extracted_value": {"name": "Acme", "active": True},
+                        "normalized_value": {"name": "Acme", "active": True},
+                        "confidence_score": 0.5,
+                        "validation_status": "invalid",
+                        "validation_errors": [],
+                        "requires_review": True,
+                    }
+                ],
+                "calculated_fields": [],
+                "fields_requiring_review": ["party"],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    review_response = client.post(
+        f"/api/results/{result_id}/review",
+        json={
+            "reviewer": "qa-user",
+            "edits": [
+                {
+                    "field_name": "party",
+                    "normalized_value": {"name": "Acme Corporation", "active": False},
+                    "reason": "Corrected party.",
+                }
+            ],
+            "recalculate": False,
+        },
+    )
+    assert review_response.status_code == 200
+    field = review_response.json()["extracted_fields"][0]
+    assert field["normalized_value"] == {"name": "Acme Corporation", "active": False}
+
+
+def test_audit_events_filter_by_job_id(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [],
+                "calculated_fields": [],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+        job_id = job.id
+
+    client.post(f"/api/results/{result_id}/exports/json")
+
+    filtered = client.get(f"/api/audit/events?job_id={job_id}")
+    assert filtered.status_code == 200
+    events = filtered.json()["events"]
+    assert events
+    assert all(event["metadata"]["job_id"] == job_id for event in events)
+
+
+def test_audit_events_metadata_filters_apply_before_pagination(client) -> None:
+    with SessionLocal() as db:
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="job.started",
+            object_type="job",
+            object_id="other-1",
+            metadata={"job_id": 99},
+        )
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="review.saved",
+            object_type="result",
+            object_id="11",
+            metadata={"job_id": 5},
+        )
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="job.completed",
+            object_type="job",
+            object_id="other-2",
+            metadata={"job_id": 99},
+        )
+        record_audit_event(
+            db,
+            tenant_id="default",
+            actor="qa-user",
+            action="export.created",
+            object_type="export",
+            object_id="22",
+            metadata={"job_id": 5},
+        )
+        db.commit()
+
+    first_page = client.get("/api/audit/events?job_id=5&limit=1")
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 2
+    assert len(first_page.json()["events"]) == 1
+    assert all(event["metadata"]["job_id"] == 5 for event in first_page.json()["events"])
+
+    second_page = client.get("/api/audit/events?job_id=5&limit=1&offset=1")
+    assert second_page.status_code == 200
+    assert second_page.json()["total"] == 2
+    assert len(second_page.json()["events"]) == 1
+    assert all(event["metadata"]["job_id"] == 5 for event in second_page.json()["events"])
+    assert {event["object_id"] for event in first_page.json()["events"] + second_page.json()["events"]} == {"11", "22"}
+
+
+def test_cancel_completed_job_returns_conflict(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    response = client.post(f"/api/jobs/{job_id}/cancel")
+    assert response.status_code == 409
+
+
+def test_cancel_job_records_audit_event(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="queued",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="queued")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    cancel_response = client.post(f"/api/jobs/{job_id}/cancel")
+    assert cancel_response.status_code == 200
+
+    audit_response = client.get(f"/api/audit/events?job_id={job_id}")
+    assert audit_response.status_code == 200
+    actions = {event["action"] for event in audit_response.json()["events"]}
+    assert "job.cancelled" in actions
+
+
+def test_cancel_running_job_succeeds(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="processing",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="running")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+
+    response = client.post(f"/api/jobs/{job_id}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+
+
+def test_audit_events_filter_by_result_id_and_action(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(document_id=document.id, template_version_id=version.id, status="completed")
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            review_status="reviewed",
+            result_json={
+                "document_id": str(document.id),
+                "document_type": "invoice",
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "llm_provider": template_definition["llm_provider_settings"],
+                "extraction_status": "completed",
+                "extracted_fields": [],
+                "calculated_fields": [],
+                "fields_requiring_review": [],
+                "document_level_notes": [],
+                "reviewed_at": None,
+            },
+        )
+        db.add(result)
+        db.commit()
+        result_id = result.id
+
+    client.post(f"/api/results/{result_id}/exports/json")
+
+    by_result = client.get(f"/api/audit/events?result_id={result_id}")
+    assert by_result.status_code == 200
+    assert by_result.json()["events"]
+    assert all(event["metadata"]["result_id"] == result_id for event in by_result.json()["events"])
+
+    by_action = client.get("/api/audit/events?action=export.created")
+    assert by_action.status_code == 200
+    assert all(event["action"] == "export.created" for event in by_action.json()["events"])

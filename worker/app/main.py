@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.core.database import SessionLocal, engine
-from app.models import Document, ExtractionJob, ExtractionResult, TemplateVersion
+from app.models import AuditEvent, Document, ExtractionJob, ExtractionResult, TemplateVersion
 from app.services.document_text import parse_and_persist_document_text
 from app.services.executor import execute_extraction
 from app.services.job_progress import build_progress_reporter, update_job_progress
@@ -24,6 +24,46 @@ from app.services.parser import prewarm_docling_converters
 
 logger = configure_logger("extractflow.worker")
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
+
+
+def record_worker_audit(
+    db,
+    *,
+    tenant_id: str,
+    action: str,
+    object_type: str,
+    object_id: int,
+    metadata: dict | None = None,
+) -> None:
+    db.add(
+        AuditEvent(
+            tenant_id=tenant_id,
+            actor="worker",
+            action=action,
+            object_type=object_type,
+            object_id=str(object_id),
+            metadata_json=metadata or {},
+        )
+    )
+
+
+def is_job_cancelled(db, job_id: int) -> bool:
+    job = db.get(ExtractionJob, job_id)
+    return job is not None and job.status == "cancelled"
+
+
+def finalize_cancelled_job(db, job: ExtractionJob, document: Document) -> None:
+    document.status = "uploaded"
+    db.commit()
+    write_worker_status(
+        "idle",
+        {
+            "job_id": job.id,
+            "document_id": document.id,
+            "tenant_id": job.tenant_id,
+            "reason": "cancelled",
+        },
+    )
 
 
 def write_worker_status(state: str, details: dict | None = None) -> None:
@@ -91,6 +131,10 @@ def process_once() -> None:
             document.parsed_text_path = parsed_text_path
             db.commit()
 
+            if is_job_cancelled(db, job.id):
+                finalize_cancelled_job(db, job, document)
+                return
+
             result_json = execute_extraction(
                 document_path=str(document_path),
                 document_id=document.id,
@@ -99,6 +143,10 @@ def process_once() -> None:
                 progress_reporter=build_progress_reporter(db, job.id),
                 parsed_text=parsed_text,
             )
+            if is_job_cancelled(db, job.id):
+                finalize_cancelled_job(db, job, document)
+                return
+
             result = db.query(ExtractionResult).filter(ExtractionResult.job_id == job.id).first()
             if result is None:
                 result = ExtractionResult(
@@ -109,10 +157,23 @@ def process_once() -> None:
                 result.tenant_id = job.tenant_id
                 result.result_json = result_json
                 result.review_status = "pending"
+            db.flush()
             job.status = "completed"
             job.progress_stage = JOB_STAGE_COMPLETED
             job.progress_pct = 100
             document.status = "completed"
+            record_worker_audit(
+                db,
+                tenant_id=job.tenant_id,
+                action="job.completed",
+                object_type="job",
+                object_id=job.id,
+                metadata={
+                    "job_id": job.id,
+                    "document_id": document.id,
+                    "result_id": result.id,
+                },
+            )
             db.commit()
             write_worker_status(
                 "completed",
@@ -125,11 +186,27 @@ def process_once() -> None:
                 },
             )
         except Exception as exc:  # noqa: BLE001
+            db.refresh(job)
+            if job.status == "cancelled":
+                finalize_cancelled_job(db, job, document)
+                return
             job.status = "failed"
             job.error_message = str(exc)
             job.progress_stage = JOB_STAGE_FAILED
             job.progress_pct = 0
             document.status = "failed"
+            record_worker_audit(
+                db,
+                tenant_id=job.tenant_id,
+                action="job.failed",
+                object_type="job",
+                object_id=job.id,
+                metadata={
+                    "job_id": job.id,
+                    "document_id": document.id,
+                    "reason": str(exc),
+                },
+            )
             db.commit()
             write_worker_status(
                 "failed",

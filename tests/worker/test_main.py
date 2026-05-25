@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from app import main as worker_main
 
 
@@ -196,3 +199,75 @@ def test_process_once_fails_job_when_tenant_chain_is_inconsistent(monkeypatch) -
         assert refreshed_job is not None
         assert refreshed_job.status == "failed"
         assert "Tenant mismatch between job, document, and template version." in refreshed_job.error_message
+
+
+def test_process_once_stops_when_job_cancelled_during_parse(monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.models import Document, ExtractionJob, TemplateVersion
+
+    uploads_dir = Path(os.environ["UPLOADS_DIR"])
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    document_path = uploads_dir / "invoice.txt"
+    document_path.write_text("Vendor Name: Acme", encoding="utf-8")
+
+    with SessionLocal() as db:
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path="uploads/invoice.txt",
+            status="uploaded",
+        )
+        db.add(document)
+        db.flush()
+        version = TemplateVersion(
+            template_id=1,
+            version="1.0.0",
+            definition={
+                "template_name": "Invoice Extraction",
+                "template_version": "1.0.0",
+                "extracted_fields": [],
+            },
+        )
+        db.add(version)
+        db.flush()
+        job = ExtractionJob(
+            document_id=document.id,
+            template_version_id=version.id,
+            status="queued",
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+        document_id = document.id
+
+    def cancel_during_parse(document_id_arg: int, document_path_arg: str) -> tuple[str, str]:
+        with SessionLocal() as db:
+            queued_job = db.get(ExtractionJob, job_id)
+            assert queued_job is not None
+            queued_job.status = "cancelled"
+            db.commit()
+        return ("parsed/invoice.txt", "Vendor Name: Acme")
+
+    def fail_execute(**_kwargs: object) -> dict[str, object]:
+        raise AssertionError("execute_extraction should not run")
+
+    monkeypatch.setattr(
+        worker_main,
+        "parse_and_persist_document_text",
+        cancel_during_parse,
+    )
+    monkeypatch.setattr(worker_main, "execute_extraction", fail_execute)
+    monkeypatch.setattr(worker_main, "write_worker_status", lambda *_args, **_kwargs: None)
+
+    worker_main.process_once()
+
+    with SessionLocal() as db:
+        from app.models import ExtractionResult
+
+        refreshed_job = db.get(ExtractionJob, job_id)
+        refreshed_document = db.get(Document, document_id)
+        assert refreshed_job is not None
+        assert refreshed_job.status == "cancelled"
+        assert refreshed_document is not None
+        assert refreshed_document.status == "uploaded"
+        assert db.query(ExtractionResult).filter(ExtractionResult.job_id == job_id).count() == 0

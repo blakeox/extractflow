@@ -32,3 +32,15 @@ def retry_failed_job(job: ExtractionJob, document: Document) -> ExtractionJob:
     job.worker_id = None
     document.status = "queued"
     return job
+
+
+def cancel_job(job: ExtractionJob, document: Document) -> ExtractionJob:
+    job.status = "cancelled"
+    job.error_message = "Cancelled by operator."
+    job.progress_stage = "cancelled"
+    job.progress_pct = 0
+    job.claimed_at = None
+    job.worker_id = None
+    if document.status in {"queued", "processing"}:
+        document.status = "uploaded"
+    return job
