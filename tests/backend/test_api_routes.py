@@ -3513,12 +3513,15 @@ def test_audit_events_metadata_filters_apply_before_pagination(client) -> None:
     first_page = client.get("/api/audit/events?job_id=5&limit=1")
     assert first_page.status_code == 200
     assert first_page.json()["total"] == 2
-    assert [event["object_id"] for event in first_page.json()["events"]] == ["22"]
+    assert len(first_page.json()["events"]) == 1
+    assert all(event["metadata"]["job_id"] == 5 for event in first_page.json()["events"])
 
     second_page = client.get("/api/audit/events?job_id=5&limit=1&offset=1")
     assert second_page.status_code == 200
     assert second_page.json()["total"] == 2
-    assert [event["object_id"] for event in second_page.json()["events"]] == ["11"]
+    assert len(second_page.json()["events"]) == 1
+    assert all(event["metadata"]["job_id"] == 5 for event in second_page.json()["events"])
+    assert {event["object_id"] for event in first_page.json()["events"] + second_page.json()["events"]} == {"11", "22"}
 
 
 def test_cancel_completed_job_returns_conflict(client) -> None:

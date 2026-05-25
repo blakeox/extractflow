@@ -2517,7 +2517,7 @@ function ExtractionWorkspacePage({
   onApproveHighConfidenceReview,
   onExport,
   exportBlocked,
-  exportPolicy,
+  requireReviewCleared,
   jobStatusFilter,
   onJobStatusFilterChange,
   onOpenSchemas,
@@ -2556,7 +2556,7 @@ function ExtractionWorkspacePage({
   onApproveHighConfidenceReview: () => Promise<void>;
   onExport: (format: "json" | "csv" | "excel") => Promise<void>;
   exportBlocked: boolean;
-  exportPolicy: ExportPolicy;
+  requireReviewCleared: boolean;
   jobStatusFilter: string | null;
   onJobStatusFilterChange: (status: string | null) => void;
   onOpenSchemas: () => void;
@@ -2612,7 +2612,7 @@ function ExtractionWorkspacePage({
       : selectedJob.status === "completed"
         ? selectedResult &&
           (selectedResult.result.fields_requiring_review.length > 0 ||
-            (exportPolicy.require_review_cleared &&
+            (requireReviewCleared &&
               selectedResult.result.review_status === "pending"))
           ? "review"
           : "ready"
@@ -3707,13 +3707,13 @@ function ExtractionWorkspacePage({
                     ) : (
                       <NoteCard>
                         <strong>
-                          {exportPolicy.require_review_cleared &&
+                          {requireReviewCleared &&
                           selectedResult?.result.review_status === "pending"
                             ? "Review confirmation required"
                             : "No manual review required"}
                         </strong>
                         <p>
-                          {exportPolicy.require_review_cleared &&
+                          {requireReviewCleared &&
                           selectedResult?.result.review_status === "pending"
                             ? "No fields need edits, but you still need to save review before export is unlocked."
                             : "The result is already ready for export. Do not make the user visit another page just to download it."}
@@ -6562,7 +6562,7 @@ export function App() {
               onApproveHighConfidenceReview={handleApproveHighConfidenceReview}
               onExport={handleExport}
               exportBlocked={exportBlocked}
-              exportPolicy={exportPolicy}
+              requireReviewCleared={exportPolicy.require_review_cleared}
               jobStatusFilter={jobStatusFilter}
               onJobStatusFilterChange={handleJobStatusFilterChange}
               onOpenSchemas={() => setActivePage("templates")}
