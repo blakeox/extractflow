@@ -24,7 +24,7 @@ if "WORKER_STATUS_PATH" not in os.environ:
     os.environ["WORKER_STATUS_PATH"] = str(TEST_ROOT / "data" / "worker-status.json")
 os.environ.setdefault("WORKER_POLL_SECONDS", "1")
 
-from app.models import Base  # noqa: E402
+from app.models import Base, Document, TemplateVersion  # noqa: E402
 
 if "templates" not in Base.metadata.tables:
     Table("templates", Base.metadata, Column("id", Integer, primary_key=True))
@@ -39,6 +39,54 @@ def _reset_database_schema(engine) -> None:
     else:
         Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    _seed_reference_rows(engine)
+
+
+def _seed_reference_rows(engine) -> None:
+    from sqlalchemy.orm import Session
+
+    seed_definition = {
+        "template_name": "Worker Test Seed",
+        "template_version": "1.0.0",
+        "extracted_fields": [],
+    }
+    with Session(engine) as session:
+        if session.execute(text("SELECT 1 FROM templates WHERE id = 1")).first() is None:
+            session.execute(text("INSERT INTO templates (id) VALUES (1)"))
+        if session.get(Document, 1) is None:
+            session.add(
+                Document(
+                    id=1,
+                    original_filename="seed.txt",
+                    content_type="text/plain",
+                    stored_path="uploads/seed.txt",
+                    status="uploaded",
+                )
+            )
+        if session.get(TemplateVersion, 1) is None:
+            session.add(
+                TemplateVersion(
+                    id=1,
+                    template_id=1,
+                    version="1.0.0",
+                    definition=seed_definition,
+                )
+            )
+        session.commit()
+
+    if is_postgres_url(os.environ["DATABASE_URL"]):
+        with engine.begin() as connection:
+            for table_name, column_name in (
+                ("templates", "id"),
+                ("documents", "id"),
+                ("template_versions", "id"),
+            ):
+                connection.execute(
+                    text(
+                        f"SELECT setval(pg_get_serial_sequence('{table_name}', '{column_name}'), "
+                        f"COALESCE((SELECT MAX({column_name}) FROM {table_name}), 1))"
+                    )
+                )
 
 
 @pytest.fixture(autouse=True)

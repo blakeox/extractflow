@@ -26,6 +26,7 @@ from extraction_core.models import (
     ExtractionTemplate,
     LLMProviderSettings,
 )
+from extraction_core.runtime import is_postgres_url
 from pydantic import ValidationError
 
 from tests.support.sample_data import build_template_definition
@@ -1665,6 +1666,10 @@ def test_azure_openai_adapter_builds_deployment_scoped_request(monkeypatch) -> N
     assert captured["headers"] == {"Content-Type": "application/json", "api-key": "azure-token"}
 
 
+@pytest.mark.skipif(
+    is_postgres_url(os.environ.get("DATABASE_URL", "")),
+    reason="PostgreSQL enforces foreign keys when inserting orphan jobs.",
+)
 def test_process_once_marks_job_failed_when_document_or_template_missing() -> None:
     from app.core.database import SessionLocal
     from app.main import process_once
