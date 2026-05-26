@@ -194,7 +194,9 @@ def test_postgres_claim_path_completes_each_job_exactly_once(monkeypatch) -> Non
     monkeypatch.setattr(worker_main.settings, "database_url", "postgresql://localhost/extractflow")
 
     with SessionLocal() as db:
-        jobs = [ExtractionJob(document_id=index + 1, template_version_id=index + 1, status="queued") for index in range(10)]
+        jobs = [
+            ExtractionJob(document_id=index + 1, template_version_id=index + 1, status="queued") for index in range(10)
+        ]
         db.add_all(jobs)
         db.commit()
         seeded_job_ids = {job.id for job in jobs}
@@ -226,10 +228,7 @@ def test_postgres_claim_path_completes_each_job_exactly_once(monkeypatch) -> Non
     assert len(workers_with_jobs) == 3
 
     with SessionLocal() as db:
-        completed_ids = {
-            row[0]
-            for row in db.query(ExtractionJob.id).filter(ExtractionJob.status == "completed").all()
-        }
+        completed_ids = {row[0] for row in db.query(ExtractionJob.id).filter(ExtractionJob.status == "completed").all()}
     assert completed_ids == seeded_job_ids
 
 
