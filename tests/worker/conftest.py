@@ -51,27 +51,28 @@ def _seed_reference_rows(engine) -> None:
         "extracted_fields": [],
     }
     with Session(engine) as session:
-        if session.execute(text("SELECT 1 FROM templates WHERE id = 1")).first() is None:
-            session.execute(text("INSERT INTO templates (id) VALUES (1)"))
-        if session.get(Document, 1) is None:
-            session.add(
-                Document(
-                    id=1,
-                    original_filename="seed.txt",
-                    content_type="text/plain",
-                    stored_path="uploads/seed.txt",
-                    status="uploaded",
+        for row_id in range(1, 11):
+            if session.execute(text("SELECT 1 FROM templates WHERE id = :id"), {"id": row_id}).first() is None:
+                session.execute(text("INSERT INTO templates (id) VALUES (:id)"), {"id": row_id})
+            if session.get(Document, row_id) is None:
+                session.add(
+                    Document(
+                        id=row_id,
+                        original_filename=f"seed-{row_id}.txt",
+                        content_type="text/plain",
+                        stored_path=f"uploads/seed-{row_id}.txt",
+                        status="uploaded",
+                    )
                 )
-            )
-        if session.get(TemplateVersion, 1) is None:
-            session.add(
-                TemplateVersion(
-                    id=1,
-                    template_id=1,
-                    version="1.0.0",
-                    definition=seed_definition,
+            if session.get(TemplateVersion, row_id) is None:
+                session.add(
+                    TemplateVersion(
+                        id=row_id,
+                        template_id=row_id,
+                        version="1.0.0",
+                        definition=seed_definition,
+                    )
                 )
-            )
         session.commit()
 
     if is_postgres_url(os.environ["DATABASE_URL"]):
