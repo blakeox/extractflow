@@ -14,11 +14,11 @@ ExtractFlow uses [Alembic](https://alembic.sqlalchemy.org/) for versioned schema
 ## Fresh database
 
 ```bash
-export DATABASE_URL="sqlite:////data/extractflow.db"   # or your Postgres URL
+export DATABASE_URL="sqlite:////data/app.db"   # or your Postgres URL
 ./scripts/db-migrate.sh
 ```
 
-Revision `0001_baseline` creates all tables from `Base.metadata`.
+Revision `0001_baseline` creates the baseline schema snapshot for all current tables.
 
 ## Existing SQLite database (pre-Alembic)
 
@@ -27,7 +27,7 @@ If the DB was created by `Base.metadata.create_all` at backend startup and alrea
 ```bash
 cd backend
 export PYTHONPATH="../backend:../shared"
-export DATABASE_URL="sqlite:////data/extractflow.db"
+export DATABASE_URL="sqlite:////data/app.db"
 alembic stamp head
 ```
 

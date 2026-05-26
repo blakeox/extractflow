@@ -5,6 +5,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}/backend"
 
 export PYTHONPATH="${ROOT}/backend:${ROOT}/shared"
-export DATABASE_URL="${DATABASE_URL:-sqlite:////data/extractflow.db}"
+export DATABASE_URL="${DATABASE_URL:-sqlite:////data/app.db}"
 
 alembic upgrade head
