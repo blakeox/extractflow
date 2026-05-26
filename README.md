@@ -91,6 +91,14 @@ Optional Ollama sidecar:
 docker compose --profile ollama up --build
 ```
 
+PostgreSQL for company-style deployments:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+```
+
+See [docs/POSTGRES_PRODUCTION.md](docs/POSTGRES_PRODUCTION.md).
+
 Useful commands:
 
 ```bash

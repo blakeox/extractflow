@@ -75,7 +75,7 @@ Run like a service: observe, backup, release safely.
 
 What most companies need from the open-source edition.
 
-- PostgreSQL as recommended production database
+- PostgreSQL as recommended production database — [POSTGRES_PRODUCTION.md](POSTGRES_PRODUCTION.md), `docker-compose.postgres.yml`, CI `python-postgres` job ([#80](https://github.com/blakeox/extractflow/issues/80))
 - Job queue: `FOR UPDATE SKIP LOCKED` or Redis/SQS
 - Multiple workers, no double-processing
 - Authentication (OIDC/SAML recommended)

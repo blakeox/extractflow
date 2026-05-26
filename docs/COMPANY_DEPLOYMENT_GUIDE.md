@@ -45,7 +45,17 @@ Set the same `DATABASE_URL` and `DATA_DIR` family values for backend and workers
 | `CURRENT_TENANT_ID`      | explicit org value (not a random default)         |
 | `TRUST_TENANT_HEADER`    | `false` unless fronted by trusted auth middleware |
 
-## 3) Database migration flow
+## 3) PostgreSQL compose profile
+
+For a local company-style stack with Postgres:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+```
+
+See [POSTGRES_PRODUCTION.md](POSTGRES_PRODUCTION.md) for DSN details and CI coverage.
+
+## 4) Database migration flow
 
 Before each release rollout:
 
@@ -66,7 +76,7 @@ alembic stamp head
 
 See [DATABASE_MIGRATIONS.md](DATABASE_MIGRATIONS.md) for details.
 
-## 4) Service topology
+## 5) Service topology
 
 Recommended minimum:
 
@@ -75,7 +85,7 @@ Recommended minimum:
 
 Workers now use PostgreSQL queue claims with `FOR UPDATE SKIP LOCKED`, which allows multiple workers to claim queued jobs without double-executing the same row.
 
-## 5) Auth and access model
+## 6) Auth and access model
 
 Current project status:
 
@@ -88,7 +98,7 @@ Minimum recommendation now:
 - require TLS and authenticated ingress at proxy/LB layer
 - avoid public internet exposure without additional access controls
 
-## 6) Reverse proxy and TLS
+## 7) Reverse proxy and TLS
 
 Terminate TLS at your reverse proxy or load balancer and forward to backend service.
 
@@ -99,7 +109,7 @@ Proxy requirements:
 - upstream timeout suitable for upload + job submit latency
 - preserve `X-Request-ID` if your platform injects one
 
-## 7) Backups and restore drills
+## 8) Backups and restore drills
 
 - Use the backup process in [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
 - Run a restore drill at least quarterly.
@@ -109,7 +119,7 @@ Proxy requirements:
   - `GET /api/ops/metrics`
   - successful download of a known export artifact
 
-## 8) Release and rollback
+## 9) Release and rollback
 
 Use the documented release workflow:
 
@@ -127,7 +137,7 @@ Operational sequence:
 
 If rollback is needed, follow forward-fix or revert on `master`, then resync `dev`.
 
-## 9) Day-2 operations checklist
+## 10) Day-2 operations checklist
 
 - [ ] Alerting configured from [OPERATOR_ALERTING.md](OPERATOR_ALERTING.md)
 - [ ] Capacity baselines tracked from [CAPACITY_BASELINES.md](CAPACITY_BASELINES.md)

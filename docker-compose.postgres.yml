@@ -1,0 +1,36 @@
+# PostgreSQL profile for company/team deployments.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: extractflow
+      POSTGRES_PASSWORD: extractflow
+      POSTGRES_DB: extractflow
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U extractflow -d extractflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://extractflow:extractflow@db:5432/extractflow
+
+  worker:
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://extractflow:extractflow@db:5432/extractflow
+
+volumes:
+  postgres_data:

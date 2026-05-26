@@ -9,12 +9,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="extractflow-backend-tests-"))
-os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'backend-test.db'}"
-os.environ["DATA_DIR"] = str(TEST_ROOT / "data")
-os.environ["UPLOADS_DIR"] = str(TEST_ROOT / "data" / "uploads")
-os.environ["EXPORTS_DIR"] = str(TEST_ROOT / "data" / "exports")
-os.environ["PARSED_DIR"] = str(TEST_ROOT / "data" / "parsed")
-os.environ["SEED_SAMPLES_ON_STARTUP"] = "false"
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'backend-test.db'}"
+if "DATA_DIR" not in os.environ:
+    os.environ["DATA_DIR"] = str(TEST_ROOT / "data")
+if "UPLOADS_DIR" not in os.environ:
+    os.environ["UPLOADS_DIR"] = str(TEST_ROOT / "data" / "uploads")
+if "EXPORTS_DIR" not in os.environ:
+    os.environ["EXPORTS_DIR"] = str(TEST_ROOT / "data" / "exports")
+if "PARSED_DIR" not in os.environ:
+    os.environ["PARSED_DIR"] = str(TEST_ROOT / "data" / "parsed")
+os.environ.setdefault("SEED_SAMPLES_ON_STARTUP", "false")
 
 
 @pytest.fixture(autouse=True)

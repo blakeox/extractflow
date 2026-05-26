@@ -72,6 +72,46 @@ jobs:
       - name: Run Python test suites
         run: ./scripts/verify-python.sh
 
+  python-postgres:
+    name: Python Tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: extractflow
+          POSTGRES_PASSWORD: extractflow
+          POSTGRES_DB: extractflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U extractflow -d extractflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://extractflow:extractflow@localhost:5432/extractflow
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install Python test dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Run Python test suites on PostgreSQL
+        run: ./scripts/verify-python.sh
+
   frontend:
     name: Frontend Tests
     runs-on: ubuntu-latest
