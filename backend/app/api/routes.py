@@ -35,6 +35,7 @@ from app.schemas.api import (
     LangExtractFeedbackSuggestionDismissalRequest,
     LangExtractFeedbackSuggestionDismissalResponse,
     LangExtractFeedbackSuggestionListResponse,
+    OpsMetricsResponse,
     ParserStatusResponse,
     ProviderCatalogResponse,
     ProviderControlsResponse,
@@ -56,6 +57,7 @@ from app.services.langextract_feedback import (
     list_langextract_feedback_suggestions,
     set_langextract_feedback_suggestion_dismissed,
 )
+from app.services.ops_metrics_service import build_ops_metrics
 from app.services.provider_catalog import list_provider_catalog
 from app.services.provider_health import get_provider_health
 from app.services.provider_probe import probe_provider, require_reachable_provider
@@ -93,6 +95,11 @@ def dev_status(db: Session = Depends(get_db), tenant_id: str = Depends(get_curre
         "jobs": db.query(ExtractionJob).filter(ExtractionJob.tenant_id == tenant_id).count(),
         "results": db.query(ExtractionResult).filter(ExtractionResult.tenant_id == tenant_id).count(),
     }
+
+
+@router.get("/ops/metrics", response_model=OpsMetricsResponse)
+def ops_metrics(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+    return OpsMetricsResponse.model_validate(build_ops_metrics(db, tenant_id=tenant_id))
 
 
 @router.get("/templates", response_model=list[TemplateResponse])

@@ -243,3 +243,17 @@ class ExportPolicyResponse(BaseModel):
 
 class ExportPolicyRequest(BaseModel):
     require_review_cleared: bool
+
+
+class OpsMetricsResponse(BaseModel):
+    jobs_by_status: dict[str, int] = Field(default_factory=dict)
+    queue_depth: int = 0
+    failed_jobs: int = 0
+    cancelled_jobs: int = 0
+    completed_jobs: int = 0
+    documents: int = 0
+    templates: int = 0
+    results: int = 0
+    worker_state: str | None = None
+    worker_timestamp: str | None = None
+    worker_active_job_id: int | None = None
