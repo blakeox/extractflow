@@ -6,7 +6,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Column, Integer, Table
+from extraction_core.runtime import is_postgres_url
+from sqlalchemy import Column, Integer, Table, inspect, text
 
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="extractflow-worker-tests-"))
 if "DATABASE_URL" not in os.environ:
@@ -29,12 +30,22 @@ if "templates" not in Base.metadata.tables:
     Table("templates", Base.metadata, Column("id", Integer, primary_key=True))
 
 
+def _reset_database_schema(engine) -> None:
+    if is_postgres_url(os.environ["DATABASE_URL"]):
+        with engine.begin() as connection:
+            table_names = inspect(engine).get_table_names()
+            for table_name in reversed(table_names):
+                connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+    else:
+        Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+
 @pytest.fixture(autouse=True)
 def reset_worker_state() -> None:
     from app.core.database import engine
 
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    _reset_database_schema(engine)
 
     data_dir = Path(os.environ["DATA_DIR"])
     if data_dir.exists():
