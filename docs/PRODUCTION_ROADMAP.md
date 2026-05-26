@@ -142,9 +142,9 @@ Or create a project manually at [github.com/blakeox?tab=projects](https://github
 
 Completed: P0 [#57](https://github.com/blakeox/extractflow/issues/57)–[#65](https://github.com/blakeox/extractflow/issues/65), P1 [#66](https://github.com/blakeox/extractflow/issues/66)–[#73](https://github.com/blakeox/extractflow/issues/73) (see milestone [P1: Operator trust](https://github.com/blakeox/extractflow/milestone/2)).
 
-| Issue                                                   | Title                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------- |
-| [#77](https://github.com/blakeox/extractflow/issues/77) | Formal database migrations (Alembic) (P2) — baseline on `dev` |
-| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide (P3)                                 |
+| Issue                                                   | Title                                                                                      |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [#77](https://github.com/blakeox/extractflow/issues/77) | Formal database migrations (Alembic) (P2) — baseline on `dev`                              |
+| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide (P3) — [COMPANY_DEPLOYMENT_GUIDE.md](COMPANY_DEPLOYMENT_GUIDE.md) |
 
 Contributions: pick an unassigned issue in the earliest open milestone you can help close; comment before large PRs per [CONTRIBUTING.md](../CONTRIBUTING.md).

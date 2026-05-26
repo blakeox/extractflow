@@ -1,0 +1,136 @@
+# Company deployment guide
+
+This guide is for self-hosted team deployments (single company, multiple internal users).
+
+The target operating model is:
+
+- PostgreSQL-backed metadata store
+- one backend API service
+- two or more workers
+- reverse proxy with TLS termination
+- persistent shared storage for `/data`
+- documented backup and restore procedure
+
+## 1) Required components
+
+| Component                | Purpose                                                       | Minimum recommendation                    |
+| ------------------------ | ------------------------------------------------------------- | ----------------------------------------- |
+| PostgreSQL               | Source of truth for templates, jobs, results, audit, settings | Managed Postgres 14+ with daily snapshots |
+| Backend (`backend`)      | API + control plane                                           | 1 replica, 1 vCPU / 1 GB RAM              |
+| Worker (`worker`)        | Async parsing/extraction pipeline                             | 2+ replicas, 1 vCPU / 2 GB RAM each       |
+| Shared storage (`/data`) | Uploads, parsed text, exports, worker heartbeat               | Durable volume or network filesystem      |
+| Reverse proxy            | TLS + upstream routing                                        | Nginx, Caddy, Traefik, or cloud LB        |
+
+## 2) Environment contract
+
+Set the same `DATABASE_URL` and `DATA_DIR` family values for backend and workers.
+
+### Shared core
+
+| Variable             | Example                                                        | Notes                                                               |
+| -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `DATABASE_URL`       | `postgresql+psycopg://extractflow:***@db.internal/extractflow` | Required for production; do not use SQLite                          |
+| `DATA_DIR`           | `/data`                                                        | Must be persistent and mounted in backend + workers                 |
+| `UPLOADS_DIR`        | `/data/uploads`                                                | Must stay under `DATA_DIR`                                          |
+| `PARSED_DIR`         | `/data/parsed`                                                 | Must stay under `DATA_DIR`                                          |
+| `EXPORTS_DIR`        | `/data/exports`                                                | Must stay under `DATA_DIR`                                          |
+| `WORKER_STATUS_PATH` | `/data/worker-status.json`                                     | Must stay under `DATA_DIR`                                          |
+| `DEPLOYMENT_MODE`    | `hosted_single_tenant`                                         | Use `saas_multi_tenant` only if auth + tenant controls are complete |
+
+### Security and tenancy defaults
+
+| Variable                 | Recommended                                       |
+| ------------------------ | ------------------------------------------------- |
+| `REQUIRE_AUTHENTICATION` | `true`                                            |
+| `CURRENT_TENANT_ID`      | explicit org value (not a random default)         |
+| `TRUST_TENANT_HEADER`    | `false` unless fronted by trusted auth middleware |
+
+## 3) Database migration flow
+
+Before each release rollout:
+
+1. Back up current state ([BACKUP_RESTORE.md](BACKUP_RESTORE.md)).
+2. Apply schema migrations:
+
+```bash
+./scripts/db-migrate.sh
+```
+
+For existing pre-Alembic databases, stamp once first:
+
+```bash
+cd backend
+export PYTHONPATH="../backend:../shared"
+alembic stamp head
+```
+
+See [DATABASE_MIGRATIONS.md](DATABASE_MIGRATIONS.md) for details.
+
+## 4) Service topology
+
+Recommended minimum:
+
+- backend replicas: `1`
+- worker replicas: `2` (scale horizontally for throughput)
+
+Workers now use PostgreSQL queue claims with `FOR UPDATE SKIP LOCKED`, which allows multiple workers to claim queued jobs without double-executing the same row.
+
+## 5) Auth and access model
+
+Current project status:
+
+- authentication + RBAC are tracked as roadmap items ([#82](https://github.com/blakeox/extractflow/issues/82), [#83](https://github.com/blakeox/extractflow/issues/83))
+- for company deployments, place ExtractFlow behind your existing identity-aware gateway or SSO proxy until native auth is complete
+
+Minimum recommendation now:
+
+- restrict network access to trusted internal users
+- require TLS and authenticated ingress at proxy/LB layer
+- avoid public internet exposure without additional access controls
+
+## 6) Reverse proxy and TLS
+
+Terminate TLS at your reverse proxy or load balancer and forward to backend service.
+
+Proxy requirements:
+
+- HTTPS only (`TLS 1.2+`)
+- request size limits compatible with your document sizes
+- upstream timeout suitable for upload + job submit latency
+- preserve `X-Request-ID` if your platform injects one
+
+## 7) Backups and restore drills
+
+- Use the backup process in [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+- Run a restore drill at least quarterly.
+- Validate post-restore with:
+  - `GET /healthz`
+  - `GET /readyz`
+  - `GET /api/ops/metrics`
+  - successful download of a known export artifact
+
+## 8) Release and rollback
+
+Use the documented release workflow:
+
+- [RELEASE_UPGRADE.md](RELEASE_UPGRADE.md)
+- [CI_AND_ACTIONS.md](CI_AND_ACTIONS.md)
+
+Operational sequence:
+
+1. Verify release candidate on `dev`.
+2. Promote `dev` -> `master`.
+3. Apply migrations.
+4. Deploy backend, then workers.
+5. Validate health/readiness/metrics.
+6. Sync `master` -> `dev`.
+
+If rollback is needed, follow forward-fix or revert on `master`, then resync `dev`.
+
+## 9) Day-2 operations checklist
+
+- [ ] Alerting configured from [OPERATOR_ALERTING.md](OPERATOR_ALERTING.md)
+- [ ] Capacity baselines tracked from [CAPACITY_BASELINES.md](CAPACITY_BASELINES.md)
+- [ ] Backup + restore drill completed
+- [ ] At least 2 worker replicas running
+- [ ] Release/sync scripts tested in your environment
