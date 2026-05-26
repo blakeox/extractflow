@@ -187,6 +187,52 @@ def test_claim_next_job_uses_postgres_path(monkeypatch) -> None:
     assert claimed_second_status == "running"
 
 
+def test_postgres_claim_path_completes_each_job_exactly_once(monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.models import ExtractionJob
+
+    monkeypatch.setattr(worker_main.settings, "database_url", "postgresql://localhost/extractflow")
+
+    with SessionLocal() as db:
+        jobs = [ExtractionJob(document_id=index + 1, template_version_id=index + 1, status="queued") for index in range(10)]
+        db.add_all(jobs)
+        db.commit()
+        seeded_job_ids = {job.id for job in jobs}
+
+    processed_job_ids: list[int] = []
+    worker_ids = ("worker-a", "worker-b", "worker-c")
+    workers_with_jobs: set[str] = set()
+
+    while True:
+        claimed_any = False
+        for worker_id in worker_ids:
+            with SessionLocal() as db:
+                monkeypatch.setattr(worker_main, "WORKER_ID", worker_id)
+                claimed = worker_main.claim_next_job(db)
+                if claimed is None:
+                    continue
+                claimed_any = True
+                workers_with_jobs.add(worker_id)
+                processed_job_ids.append(claimed.id)
+                db_job = db.get(ExtractionJob, claimed.id)
+                assert db_job is not None
+                db_job.status = "completed"
+                db.commit()
+        if not claimed_any:
+            break
+
+    assert set(processed_job_ids) == seeded_job_ids
+    assert len(processed_job_ids) == len(seeded_job_ids)
+    assert len(workers_with_jobs) == 3
+
+    with SessionLocal() as db:
+        completed_ids = {
+            row[0]
+            for row in db.query(ExtractionJob.id).filter(ExtractionJob.status == "completed").all()
+        }
+    assert completed_ids == seeded_job_ids
+
+
 def test_process_once_fails_job_when_tenant_chain_is_inconsistent(monkeypatch) -> None:
     from app.core.database import SessionLocal
     from app.main import process_once
