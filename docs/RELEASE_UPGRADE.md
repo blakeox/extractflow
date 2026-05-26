@@ -24,7 +24,7 @@ That runs Python verification plus the committed golden-set harness (`evals/lang
 ## Rollback
 
 - **Application:** revert or forward-fix on `master`, then sync `dev` with `./scripts/sync-master-to-dev.sh`.
-- **Data:** SQLite and `/data` paths are not migrated automatically; follow backup guidance in [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) (P2) before major upgrades.
+- **Data:** SQLite and `/data` paths are not migrated automatically; run [BACKUP_RESTORE.md](BACKUP_RESTORE.md) before major upgrades.
 
 ## Pre-release checklist
 

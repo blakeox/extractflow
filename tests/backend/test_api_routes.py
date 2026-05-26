@@ -444,6 +444,62 @@ def test_parser_status_returns_worker_runtime_details(client) -> None:
     assert "PDF" in payload["supported_classes"]
 
 
+def test_ops_metrics_returns_queue_and_status_counts(client) -> None:
+    template_definition = build_template_definition()
+
+    with SessionLocal() as db:
+        template = Template(name="Invoice Schema", description="Invoice extraction schema.", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(template_id=template.id, version="1.0.0", definition=template_definition)
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path=str(Path("invoice.txt")),
+            status="uploaded",
+        )
+        db.add(document)
+        db.flush()
+        document_id = document.id
+        queued_job = ExtractionJob(document_id=document_id, template_version_id=version.id, status="queued")
+        running_job = ExtractionJob(document_id=document_id, template_version_id=version.id, status="running")
+        db.add_all(
+            [
+                queued_job,
+                running_job,
+                ExtractionJob(document_id=document_id, template_version_id=version.id, status="failed"),
+                ExtractionJob(document_id=document_id, template_version_id=version.id, status="completed"),
+            ]
+        )
+        db.commit()
+        running_job_id = running_job.id
+
+    status_path = Path(os.environ["DATA_DIR"]) / "worker-status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "state": "running",
+                "timestamp": "2026-05-15T12:05:00+00:00",
+                "details": {"job_id": running_job_id, "document_id": document_id},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/ops/metrics")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["queue_depth"] == 2
+    assert payload["failed_jobs"] == 1
+    assert payload["completed_jobs"] == 1
+    assert payload["jobs_by_status"]["queued"] == 1
+    assert payload["jobs_by_status"]["running"] == 1
+    assert payload["worker_state"] == "running"
+    assert payload["worker_active_job_id"] == running_job_id
+
+
 def test_job_creation_persists_provider_override(client) -> None:
     template_payload = {
         "name": "Invoice Schema",

@@ -61,13 +61,15 @@ Implementation plan: [P1_OPERATOR_TRUST_PLAN.md](P1_OPERATOR_TRUST_PLAN.md) (**c
 
 Run like a service: observe, backup, release safely.
 
-- Metrics and alerts (queue depth, failures, stage latency)
-- Backup/restore for `/data` (or object storage path) with drill
-- Formal DB migrations (Alembic) before/at Postgres cutover
-- Release gate: `verify-langextract-upgrade` + rollback checklist
-- Capacity doc (jobs/hour per hardware profile)
+- Metrics and alerts — `GET /api/ops/metrics`; [OPERATOR_ALERTING.md](OPERATOR_ALERTING.md)
+- Backup/restore — [BACKUP_RESTORE.md](BACKUP_RESTORE.md), `scripts/backup-data.sh`
+- Formal DB migrations (Alembic) before/at Postgres cutover — [#77](https://github.com/blakeox/extractflow/issues/77) open
+- Release gate — [RELEASE_UPGRADE.md](RELEASE_UPGRADE.md)
+- Capacity — [CAPACITY_BASELINES.md](CAPACITY_BASELINES.md)
 
 **Gate:** 72-hour soak; quarterly restore drill passes.
+
+**Status:** Initial P2 ops docs and metrics API landed on `dev` ([#74](https://github.com/blakeox/extractflow/issues/74)–[#76](https://github.com/blakeox/extractflow/issues/76), [#79](https://github.com/blakeox/extractflow/issues/79) when closed). Alembic remains open.
 
 ### P3 — Team self-host (company production)
 
@@ -140,11 +142,9 @@ Or create a project manually at [github.com/blakeox?tab=projects](https://github
 
 Completed: P0 [#57](https://github.com/blakeox/extractflow/issues/57)–[#65](https://github.com/blakeox/extractflow/issues/65), P1 [#66](https://github.com/blakeox/extractflow/issues/66)–[#73](https://github.com/blakeox/extractflow/issues/73) (see milestone [P1: Operator trust](https://github.com/blakeox/extractflow/milestone/2)).
 
-| Issue                                                   | Title                                       |
-| ------------------------------------------------------- | ------------------------------------------- |
-| [#75](https://github.com/blakeox/extractflow/issues/75) | Alerting runbook (P2)                       |
-| [#78](https://github.com/blakeox/extractflow/issues/78) | Release and upgrade gate documentation (P2) |
-| [#79](https://github.com/blakeox/extractflow/issues/79) | Capacity and performance baselines (P2)     |
-| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide (P3)               |
+| Issue                                                   | Title                                     |
+| ------------------------------------------------------- | ----------------------------------------- |
+| [#77](https://github.com/blakeox/extractflow/issues/77) | Formal database migrations (Alembic) (P2) |
+| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide (P3)             |
 
 Contributions: pick an unassigned issue in the earliest open milestone you can help close; comment before large PRs per [CONTRIBUTING.md](../CONTRIBUTING.md).
