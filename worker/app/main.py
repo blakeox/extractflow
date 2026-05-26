@@ -10,6 +10,7 @@ from pathlib import Path
 
 from extraction_core.job_progress import JOB_STAGE_COMPLETED, JOB_STAGE_FAILED, JOB_STAGE_PARSING
 from extraction_core.observability import configure_logger, log_event
+from extraction_core.runtime import is_postgres_url
 from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
 from extraction_core.storage_refs import resolve_storage_path
 from sqlalchemy import select, update
@@ -221,6 +222,31 @@ def process_once() -> None:
 
 
 def claim_next_job(db) -> ExtractionJob | None:
+    if is_postgres_url(settings.database_url):
+        candidate_id = db.execute(
+            select(ExtractionJob.id)
+            .where(ExtractionJob.status == "queued")
+            .order_by(ExtractionJob.created_at.asc())
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        ).scalar_one_or_none()
+        if candidate_id is None:
+            return None
+
+        claimed_at = datetime.now(UTC)
+        db.execute(
+            update(ExtractionJob)
+            .where(ExtractionJob.id == candidate_id)
+            .values(
+                status="running",
+                claimed_at=claimed_at,
+                worker_id=WORKER_ID,
+                attempt_count=ExtractionJob.attempt_count + 1,
+            )
+        )
+        db.commit()
+        return db.get(ExtractionJob, candidate_id)
+
     for _ in range(5):
         candidate_id = db.execute(
             select(ExtractionJob.id)

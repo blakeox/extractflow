@@ -157,6 +157,36 @@ def test_claim_next_job_claims_oldest_queued_job_once() -> None:
         assert second_job is not None and second_job.status == "running"
 
 
+def test_claim_next_job_uses_postgres_path(monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.models import ExtractionJob
+
+    monkeypatch.setattr(worker_main.settings, "database_url", "postgresql://localhost/extractflow")
+
+    with SessionLocal() as db:
+        first = ExtractionJob(document_id=1, template_version_id=1, status="queued")
+        second = ExtractionJob(document_id=2, template_version_id=2, status="queued")
+        db.add_all([first, second])
+        db.commit()
+        first_id = first.id
+        second_id = second.id
+
+    with SessionLocal() as db:
+        claimed_first = worker_main.claim_next_job(db)
+        claimed_second = worker_main.claim_next_job(db)
+        assert claimed_first is not None
+        assert claimed_second is not None
+        claimed_first_id = claimed_first.id
+        claimed_second_id = claimed_second.id
+        claimed_first_status = claimed_first.status
+        claimed_second_status = claimed_second.status
+
+    assert claimed_first_id == first_id
+    assert claimed_first_status == "running"
+    assert claimed_second_id == second_id
+    assert claimed_second_status == "running"
+
+
 def test_process_once_fails_job_when_tenant_chain_is_inconsistent(monkeypatch) -> None:
     from app.core.database import SessionLocal
     from app.main import process_once
