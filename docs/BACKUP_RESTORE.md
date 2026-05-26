@@ -1,6 +1,6 @@
 # Backup and restore procedure
 
-ExtractFlow stores durable state under `DATA_DIR` (default `/data` in Docker). Back up the whole directory before upgrades, OS migrations, or destructive schema experiments.
+ExtractFlow stores durable state under `DATA_DIR` (default `/data` in Docker). Back up the whole directory before upgrades, OS migrations, or destructive schema experiments. After restore, run [DATABASE_MIGRATIONS.md](DATABASE_MIGRATIONS.md) if the release added Alembic revisions.
 
 ## What to back up
 
