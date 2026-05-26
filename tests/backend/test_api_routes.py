@@ -1728,7 +1728,38 @@ def test_export_download_route_rejects_paths_outside_exports_dir(client, tmp_pat
     outside_file.write_text("{}", encoding="utf-8")
 
     with SessionLocal() as db:
-        record = ExportRecord(result_id=1, export_format="json", file_path=str(outside_file))
+        template = Template(name="Export Path Test", description="", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(
+            template_id=template.id,
+            version="1.0.0",
+            definition=build_template_definition(),
+        )
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path="uploads/invoice.txt",
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(
+            document_id=document.id,
+            template_version_id=version.id,
+            status="completed",
+        )
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={"extracted_fields": [], "calculated_fields": []},
+        )
+        db.add(result)
+        db.flush()
+        record = ExportRecord(result_id=result.id, export_format="json", file_path=str(outside_file))
         db.add(record)
         db.commit()
         export_id = record.id

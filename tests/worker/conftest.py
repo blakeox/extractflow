@@ -6,118 +6,95 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from sqlalchemy import Column, Integer, Table, text
+from extraction_core.runtime import is_postgres_url
+from sqlalchemy import Column, Integer, Table, inspect, text
 
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="extractflow-worker-tests-"))
-os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'worker-test.db'}"
-os.environ["DATA_DIR"] = str(TEST_ROOT / "data")
-os.environ["UPLOADS_DIR"] = str(TEST_ROOT / "data" / "uploads")
-os.environ["EXPORTS_DIR"] = str(TEST_ROOT / "data" / "exports")
-os.environ["PARSED_DIR"] = str(TEST_ROOT / "data" / "parsed")
-os.environ["WORKER_STATUS_PATH"] = str(TEST_ROOT / "data" / "worker-status.json")
-os.environ["WORKER_POLL_SECONDS"] = "1"
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = f"sqlite:///{TEST_ROOT / 'worker-test.db'}"
+if "DATA_DIR" not in os.environ:
+    os.environ["DATA_DIR"] = str(TEST_ROOT / "data")
+if "UPLOADS_DIR" not in os.environ:
+    os.environ["UPLOADS_DIR"] = str(TEST_ROOT / "data" / "uploads")
+if "EXPORTS_DIR" not in os.environ:
+    os.environ["EXPORTS_DIR"] = str(TEST_ROOT / "data" / "exports")
+if "PARSED_DIR" not in os.environ:
+    os.environ["PARSED_DIR"] = str(TEST_ROOT / "data" / "parsed")
+if "WORKER_STATUS_PATH" not in os.environ:
+    os.environ["WORKER_STATUS_PATH"] = str(TEST_ROOT / "data" / "worker-status.json")
+os.environ.setdefault("WORKER_POLL_SECONDS", "1")
 
-from app.models import Base  # noqa: E402
+from app.models import Base, Document, TemplateVersion  # noqa: E402
 
 if "templates" not in Base.metadata.tables:
     Table("templates", Base.metadata, Column("id", Integer, primary_key=True))
+
+
+def _reset_database_schema(engine) -> None:
+    if is_postgres_url(os.environ["DATABASE_URL"]):
+        with engine.begin() as connection:
+            table_names = inspect(engine).get_table_names()
+            for table_name in reversed(table_names):
+                connection.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+    else:
+        Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    _seed_reference_rows(engine)
+
+
+def _seed_reference_rows(engine) -> None:
+    from sqlalchemy.orm import Session
+
+    seed_definition = {
+        "template_name": "Worker Test Seed",
+        "template_version": "1.0.0",
+        "extracted_fields": [],
+    }
+    with Session(engine) as session:
+        for row_id in range(1, 11):
+            if session.execute(text("SELECT 1 FROM templates WHERE id = :id"), {"id": row_id}).first() is None:
+                session.execute(text("INSERT INTO templates (id) VALUES (:id)"), {"id": row_id})
+            if session.get(Document, row_id) is None:
+                session.add(
+                    Document(
+                        id=row_id,
+                        original_filename=f"seed-{row_id}.txt",
+                        content_type="text/plain",
+                        stored_path=f"uploads/seed-{row_id}.txt",
+                        status="uploaded",
+                    )
+                )
+            if session.get(TemplateVersion, row_id) is None:
+                session.add(
+                    TemplateVersion(
+                        id=row_id,
+                        template_id=row_id,
+                        version="1.0.0",
+                        definition=seed_definition,
+                    )
+                )
+        session.commit()
+
+    if is_postgres_url(os.environ["DATABASE_URL"]):
+        with engine.begin() as connection:
+            for table_name, column_name in (
+                ("templates", "id"),
+                ("documents", "id"),
+                ("template_versions", "id"),
+            ):
+                connection.execute(
+                    text(
+                        f"SELECT setval(pg_get_serial_sequence('{table_name}', '{column_name}'), "
+                        f"COALESCE((SELECT MAX({column_name}) FROM {table_name}), 1))"
+                    )
+                )
 
 
 @pytest.fixture(autouse=True)
 def reset_worker_state() -> None:
     from app.core.database import engine
 
-    with engine.begin() as connection:
-        connection.execute(text("DROP TABLE IF EXISTS audit_events"))
-        connection.execute(text("DROP TABLE IF EXISTS extraction_results"))
-        connection.execute(text("DROP TABLE IF EXISTS extraction_jobs"))
-        connection.execute(text("DROP TABLE IF EXISTS template_versions"))
-        connection.execute(text("DROP TABLE IF EXISTS templates"))
-        connection.execute(text("DROP TABLE IF EXISTS documents"))
-        connection.execute(text("CREATE TABLE templates (id INTEGER PRIMARY KEY)"))
-        connection.execute(
-            text(
-                """
-                CREATE TABLE documents (
-                    id INTEGER PRIMARY KEY,
-                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
-                    original_filename VARCHAR(255) NOT NULL,
-                    content_type VARCHAR(255) NOT NULL,
-                    stored_path VARCHAR(500) NOT NULL,
-                    parsed_text_path VARCHAR(500),
-                    status VARCHAR(50) NOT NULL,
-                    created_at DATETIME
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE template_versions (
-                    id INTEGER PRIMARY KEY,
-                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
-                    template_id INTEGER NOT NULL,
-                    version VARCHAR(50) NOT NULL,
-                    definition JSON NOT NULL,
-                    created_at DATETIME
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE extraction_jobs (
-                    id INTEGER PRIMARY KEY,
-                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
-                    document_id INTEGER NOT NULL,
-                    template_version_id INTEGER NOT NULL,
-                    provider_override JSON,
-                    status VARCHAR(50) NOT NULL,
-                    error_message TEXT,
-                    claimed_at DATETIME,
-                    worker_id VARCHAR(255),
-                    attempt_count INTEGER NOT NULL DEFAULT 0,
-                    progress_stage VARCHAR(50),
-                    progress_pct INTEGER NOT NULL DEFAULT 0,
-                    created_at DATETIME,
-                    updated_at DATETIME
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE audit_events (
-                    id INTEGER PRIMARY KEY,
-                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
-                    actor VARCHAR(255) NOT NULL DEFAULT 'system',
-                    action VARCHAR(100) NOT NULL,
-                    object_type VARCHAR(100) NOT NULL,
-                    object_id VARCHAR(100) NOT NULL,
-                    metadata JSON NOT NULL,
-                    created_at DATETIME
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE extraction_results (
-                    id INTEGER PRIMARY KEY,
-                    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
-                    job_id INTEGER NOT NULL UNIQUE,
-                    result_json JSON NOT NULL,
-                    review_status VARCHAR(50) NOT NULL,
-                    created_at DATETIME,
-                    updated_at DATETIME
-                )
-                """
-            )
-        )
+    _reset_database_schema(engine)
 
     data_dir = Path(os.environ["DATA_DIR"])
     if data_dir.exists():
