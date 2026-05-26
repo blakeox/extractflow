@@ -14,11 +14,11 @@ ExtractFlow uses [Alembic](https://alembic.sqlalchemy.org/) for versioned schema
 ## Fresh database
 
 ```bash
-export DATABASE_URL="sqlite:////data/app.db"   # or your Postgres URL
+export DATABASE_URL="sqlite:////data/app.db"   # must match docker-compose / app default
 ./scripts/db-migrate.sh
 ```
 
-Revision `0001_baseline` creates the baseline schema snapshot for all current tables.
+Revision `0001_baseline` creates the schema snapshot for the Alembic era (explicit `create_table` ops). Later revisions must use autogenerate or hand-written DDL — do not change `0001` when models evolve.
 
 ## Existing SQLite database (pre-Alembic)
 
@@ -44,6 +44,8 @@ alembic upgrade head
 ```
 
 Commit the new file under `backend/alembic/versions/`.
+
+**Do not** edit `0001_baseline` when models change. Add `0002_*` with explicit operations so fresh databases run `0001` then `0002` without duplicate DDL.
 
 ## Startup behavior (transition)
 

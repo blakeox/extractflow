@@ -1,4 +1,4 @@
-"""Baseline schema snapshot.
+"""Baseline schema snapshot (frozen DDL).
 
 Revision ID: 0001_baseline
 Revises:
@@ -105,7 +105,11 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["template_version_id"], ["template_versions.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("template_version_id", "suggestion_key", name="uq_langextract_feedback_decision"),
+        sa.UniqueConstraint(
+            "template_version_id",
+            "suggestion_key",
+            name="uq_langextract_feedback_decision",
+        ),
     )
     op.create_table(
         "extraction_results",
