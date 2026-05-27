@@ -99,6 +99,9 @@ class Settings(BaseSettings):
             if not isinstance(payload, dict):
                 raise ValueError("AUTH_BEARER_TOKENS_JSON values must be objects.")
             role = payload.get("role")
+            actor = payload.get("actor")
+            if not isinstance(actor, str) or not actor.strip():
+                raise ValueError("AUTH_BEARER_TOKENS_JSON actor must be a non-empty string.")
             if not isinstance(role, str) or role.lower() not in allowed_roles:
                 raise ValueError("AUTH_BEARER_TOKENS_JSON role must be admin, operator, reviewer, or viewer.")
         return value
