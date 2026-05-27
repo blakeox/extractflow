@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     require_redaction_for_external_processing: bool = False
     presidio_redaction_enabled: bool = True
     require_authentication: bool = False
+    auth_bearer_tokens_json: str | None = None
     current_tenant_id: str = "default"
     trust_tenant_header: bool = False
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://frontend:3000"])
@@ -83,6 +84,25 @@ class Settings(BaseSettings):
             raise ValueError("PROVIDER_CATALOG_JSON must be a JSON array.")
         return value
 
+    @field_validator("auth_bearer_tokens_json")
+    @classmethod
+    def validate_auth_bearer_tokens_json(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise ValueError("AUTH_BEARER_TOKENS_JSON must be a JSON object.")
+        allowed_roles = {"admin", "operator", "reviewer", "viewer"}
+        for token, payload in parsed.items():
+            if not isinstance(token, str) or not token.strip():
+                raise ValueError("AUTH_BEARER_TOKENS_JSON keys must be non-empty strings.")
+            if not isinstance(payload, dict):
+                raise ValueError("AUTH_BEARER_TOKENS_JSON values must be objects.")
+            role = payload.get("role")
+            if not isinstance(role, str) or role.lower() not in allowed_roles:
+                raise ValueError("AUTH_BEARER_TOKENS_JSON role must be admin, operator, reviewer, or viewer.")
+        return value
+
     @field_validator("current_tenant_id")
     @classmethod
     def validate_current_tenant_id(cls, value: str) -> str:
@@ -110,6 +130,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "TRUST_TENANT_HEADER requires a saas_multi_tenant deployment with REQUIRE_AUTHENTICATION=true."
             )
+        if self.require_authentication and not self.auth_bearer_tokens_json:
+            raise ValueError("AUTH_BEARER_TOKENS_JSON is required when REQUIRE_AUTHENTICATION=true.")
         return self
 
     def runtime_directories(self) -> dict[str, Path]:

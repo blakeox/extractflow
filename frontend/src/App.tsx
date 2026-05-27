@@ -16,7 +16,11 @@ import { ReviewFieldEditor } from "./components/review/ReviewFieldEditor";
 import { ParsedTextPanel } from "./components/review/ParsedTextPanel";
 import { reviewFieldHint } from "./components/review/review-field-hint";
 import { SourceEvidencePanel } from "./components/review/SourceEvidencePanel";
-import { API_BASE } from "./lib/config";
+import {
+  API_BASE,
+  readJson,
+  uploadDocument as uploadDocumentFile,
+} from "./lib/api";
 import { clampProgressPct, getJobStageLabel } from "./lib/job-progress";
 import {
   CUSTOM_PROVIDER_DRAFT_STORAGE_KEY,
@@ -906,25 +910,8 @@ function buildDraftTemplateFromDefinition(
   };
 }
 
-async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return (await response.json()) as T;
-}
-
 async function uploadDocument(file: File): Promise<DocumentRecord> {
-  const formData = new FormData();
-  formData.append("file", file);
-  const response = await fetch(`${API_BASE}/documents`, {
-    method: "POST",
-    body: formData,
-  });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return (await response.json()) as DocumentRecord;
+  return (await uploadDocumentFile(file)) as DocumentRecord;
 }
 
 function buildProviderPayload(input: ProviderCatalogEntry): ProviderSettings {

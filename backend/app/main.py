@@ -6,15 +6,19 @@ from pathlib import Path
 
 from extraction_core.observability import configure_logger, log_event
 from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import router
 from app.bootstrap.seed import seed_sample_template
+from app.core.auth import resolve_auth_context
 from app.core.config import settings
+from app.core.rbac import ROLE_PERMISSIONS, Role
+from app.core.route_permissions import resolve_api_permission
 from app.db.database import Base, SessionLocal, engine
 
 Base.metadata.create_all(bind=engine)
@@ -40,6 +44,61 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_PUBLIC_PATH_SUFFIXES = {"/health", "/healthz", "/readyz"}
+
+
+def _is_public_path(path: str) -> bool:
+    if path in _PUBLIC_PATH_SUFFIXES:
+        return True
+    api_health = f"{settings.api_prefix.rstrip('/')}/health"
+    return path == api_health
+
+
+@app.middleware("http")
+async def authentication_and_rbac_middleware(request: Request, call_next):
+    if _is_public_path(request.url.path):
+        request.state.auth_actor = "local-user"
+        request.state.auth_role = Role.ADMIN.value
+        return await call_next(request)
+
+    if not settings.require_authentication:
+        request.state.auth_actor = "local-user"
+        request.state.auth_role = Role.ADMIN.value
+        return await call_next(request)
+
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")  # allow-secret-scan
+    credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token) if scheme and token else None
+    try:
+        auth = resolve_auth_context(request, credentials)
+    except HTTPException as exc:
+        request_id = getattr(request.state, "request_id", None)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers={"X-Request-ID": request_id} if request_id else None,
+        )
+
+    permission = resolve_api_permission(
+        request.method,
+        request.url.path,
+        api_prefix=settings.api_prefix,
+    )
+    if permission is not None:
+        role = Role(auth.role)
+        allowed = ROLE_PERMISSIONS[role]
+        if permission not in allowed:
+            request_id = getattr(request.state, "request_id", None)
+            return JSONResponse(
+                status_code=403,
+                content={"detail": f"Role '{role.value}' cannot perform this action."},
+                headers={"X-Request-ID": request_id} if request_id else None,
+            )
+
+    request.state.auth_actor = auth.actor
+    request.state.auth_role = auth.role
+    return await call_next(request)
 
 
 @app.middleware("http")

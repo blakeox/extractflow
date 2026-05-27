@@ -11,7 +11,7 @@ from extraction_core.job_progress import JOB_STAGE_QUEUED
 from extraction_core.langextract import uses_langextract_provider
 from extraction_core.models import ExtractionTemplate, LLMProviderSettings, ReviewEditPayload
 from extraction_core.template_diff import TemplateVersionDiff, diff_template_definitions
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -52,6 +52,7 @@ from app.schemas.api import (
     TemplateVersionResponse,
 )
 from app.services.audit_service import list_audit_events_page, record_audit_event
+from app.services.external_processing_policy import enforce_spreadsheet_external_processing_policy
 from app.services.job_service import build_job_response, cancel_job, retry_failed_job
 from app.services.langextract_feedback import (
     list_langextract_feedback_suggestions,
@@ -80,6 +81,10 @@ from app.services.storage import (
 from app.services.template_service import create_template, create_template_version
 
 router = APIRouter()
+
+
+def _request_actor(request: Request) -> str:
+    return getattr(request.state, "auth_actor", "local-user")
 
 
 @router.get("/health")
@@ -234,6 +239,7 @@ def set_langextract_feedback_suggestion_dismissal(
 
 @router.post("/documents", response_model=DocumentResponse)
 def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
@@ -257,7 +263,7 @@ def upload_document(
     record_audit_event(
         db,
         tenant_id=tenant_id,
-        actor="local-user",
+        actor=_request_actor(request),
         action="document.uploaded",
         object_type="document",
         object_id=document.id,
@@ -321,6 +327,7 @@ def get_document_parsed_text(
 
 @router.post("/jobs", response_model=JobResponse)
 def create_job(
+    request: Request,
     payload: JobCreateRequest,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
@@ -336,6 +343,7 @@ def create_job(
     template_definition = ExtractionTemplate.model_validate(template_version.definition)
     effective_provider = payload.provider_override or template_definition.llm_provider_settings
     validate_job_provider(template_definition, effective_provider)
+    enforce_spreadsheet_external_processing_policy(document, effective_provider)
     job = ExtractionJob(
         tenant_id=tenant_id,
         document_id=payload.document_id,
@@ -351,7 +359,7 @@ def create_job(
     record_audit_event(
         db,
         tenant_id=tenant_id,
-        actor="local-user",
+        actor=_request_actor(request),
         action="job.queued",
         object_type="job",
         object_id=job.id,
@@ -377,7 +385,12 @@ def list_jobs(db: Session = Depends(get_db), tenant_id: str = Depends(get_curren
 
 
 @router.post("/jobs/{job_id}/retry", response_model=JobResponse)
-def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+def retry_job(
+    request: Request,
+    job_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
     job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id, ExtractionJob.tenant_id == tenant_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -404,7 +417,7 @@ def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depen
     record_audit_event(
         db,
         tenant_id=tenant_id,
-        actor="local-user",
+        actor=_request_actor(request),
         action="job.retried",
         object_type="job",
         object_id=job.id,
@@ -416,7 +429,12 @@ def retry_job(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depen
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
-def cancel_job_route(job_id: int, db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
+def cancel_job_route(
+    request: Request,
+    job_id: int,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+):
     job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id, ExtractionJob.tenant_id == tenant_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -429,7 +447,7 @@ def cancel_job_route(job_id: int, db: Session = Depends(get_db), tenant_id: str 
     record_audit_event(
         db,
         tenant_id=tenant_id,
-        actor="local-user",
+        actor=_request_actor(request),
         action="job.cancelled",
         object_type="job",
         object_id=job.id,

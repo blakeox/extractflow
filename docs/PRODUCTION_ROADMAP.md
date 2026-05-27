@@ -69,27 +69,30 @@ Run like a service: observe, backup, release safely.
 
 **Gate:** 72-hour soak; quarterly restore drill passes.
 
-**Status:** P2 ops docs, metrics API, and Alembic baseline landed on `dev` ([#74](https://github.com/blakeox/extractflow/issues/74)–[#76](https://github.com/blakeox/extractflow/issues/76), [#77](https://github.com/blakeox/extractflow/issues/77), [#79](https://github.com/blakeox/extractflow/issues/79) when closed).
+**Status:** P2 ops docs, metrics API, Alembic baseline, Postgres compose/CI, and multi-worker claiming landed on `master` ([#121](https://github.com/blakeox/extractflow/pull/121); issues [#74](https://github.com/blakeox/extractflow/issues/74)–[#81](https://github.com/blakeox/extractflow/issues/81), [#88](https://github.com/blakeox/extractflow/issues/88)).
 
 ### P3 — Team self-host (company production)
 
 What most companies need from the open-source edition.
 
 - PostgreSQL as recommended production database — [POSTGRES_PRODUCTION.md](POSTGRES_PRODUCTION.md), `docker-compose.postgres.yml`, CI `python-postgres` job ([#80](https://github.com/blakeox/extractflow/issues/80))
-- Job queue: `FOR UPDATE SKIP LOCKED` or Redis/SQS
-- Multiple workers, no double-processing
-- Authentication (OIDC/SAML recommended)
-- RBAC: admin, operator, reviewer, viewer
-- Org-scoped templates, providers, retention
-- Tenant isolation integration tests
-- Spreadsheet + external LLM: redaction or hard block
-- Frontend modularization (API client, split workspace pages)
+- Job queue: `FOR UPDATE SKIP LOCKED` or Redis/SQS ([#81](https://github.com/blakeox/extractflow/issues/81))
+- Multiple workers, no double-processing ([#81](https://github.com/blakeox/extractflow/issues/81))
+- Authentication — bearer tokens via `AUTH_BEARER_TOKENS_JSON` when `REQUIRE_AUTHENTICATION=true` ([#82](https://github.com/blakeox/extractflow/issues/82))
+- RBAC: admin, operator, reviewer, viewer ([#83](https://github.com/blakeox/extractflow/issues/83))
+- Org-scoped templates, providers, settings via `tenant_id` ([#84](https://github.com/blakeox/extractflow/issues/84))
+- Tenant isolation integration tests ([#85](https://github.com/blakeox/extractflow/issues/85))
+- Spreadsheet + external LLM redaction policy (fail closed) ([#86](https://github.com/blakeox/extractflow/issues/86))
+- Frontend API client module — `frontend/src/lib/api.ts` ([#87](https://github.com/blakeox/extractflow/issues/87))
+- Company deployment guide — [COMPANY_DEPLOYMENT_GUIDE.md](COMPANY_DEPLOYMENT_GUIDE.md) ([#88](https://github.com/blakeox/extractflow/issues/88))
 
 **Gate:** 30-day pilot; internal 99% job completion SLA (excluding provider outages).
 
+**Status:** P3 team self-host items [#82](https://github.com/blakeox/extractflow/issues/82)–[#88](https://github.com/blakeox/extractflow/issues/88) closed on `dev`. OIDC/SAML reverse-proxy integration remains an operator concern documented in [COMPANY_DEPLOYMENT_GUIDE.md](COMPANY_DEPLOYMENT_GUIDE.md).
+
 ### P4 — Hosted SaaS (optional)
 
-Only if the project pursues a managed product: multi-tenant hardening, object storage, metering, admin console.
+Only if the project pursues a managed product: multi-tenant hardening, object storage, metering, admin console. See [P4_HOSTED_SAAS.md](P4_HOSTED_SAAS.md) — issues [#89](https://github.com/blakeox/extractflow/issues/89)–[#91](https://github.com/blakeox/extractflow/issues/91) remain open until SaaS is pursued.
 
 ## Minimum company production checklist
 
@@ -97,8 +100,8 @@ Only if the project pursues a managed product: multi-tenant hardening, object st
 - [ ] Golden-set eval green on release tag
 - [x] Review supports all field types in shipped schemas (P1)
 - [x] Audit API + UI backed by database events (P1)
-- [ ] Postgres + 2+ workers + cancel/retry documented — cancel/retry shipped on SQLite; Postgres/multi-worker is P3
-- [ ] Auth + RBAC + tenant isolation tested
+- [ ] Postgres + 2+ workers + cancel/retry documented — Postgres/multi-worker on `master`; see [POSTGRES_PRODUCTION.md](POSTGRES_PRODUCTION.md)
+- [x] Auth + RBAC + tenant isolation tested — bearer auth, RBAC middleware, `tests/backend/test_tenant_isolation.py`
 - [ ] Backups + restore tested
 - [ ] Metrics/alerts for failures and queue depth
 - [x] Runbooks: weak PDF ([PARSER_FAILURE_RUNBOOK.md](PARSER_FAILURE_RUNBOOK.md)); provider/disk/upgrade rollback still P2
@@ -140,11 +143,12 @@ Or create a project manually at [github.com/blakeox?tab=projects](https://github
 
 ## Good first issues (starter tasks)
 
-Completed: P0 [#57](https://github.com/blakeox/extractflow/issues/57)–[#65](https://github.com/blakeox/extractflow/issues/65), P1 [#66](https://github.com/blakeox/extractflow/issues/66)–[#73](https://github.com/blakeox/extractflow/issues/73) (see milestone [P1: Operator trust](https://github.com/blakeox/extractflow/milestone/2)).
+Completed: P0 [#57](https://github.com/blakeox/extractflow/issues/57)–[#65](https://github.com/blakeox/extractflow/issues/65), P1 [#66](https://github.com/blakeox/extractflow/issues/66)–[#73](https://github.com/blakeox/extractflow/issues/73), P2 [#74](https://github.com/blakeox/extractflow/issues/74)–[#81](https://github.com/blakeox/extractflow/issues/81), P3 [#82](https://github.com/blakeox/extractflow/issues/82)–[#88](https://github.com/blakeox/extractflow/issues/88).
 
-| Issue                                                   | Title                                                                                      |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [#77](https://github.com/blakeox/extractflow/issues/77) | Formal database migrations (Alembic) (P2) — baseline on `dev`                              |
-| [#88](https://github.com/blakeox/extractflow/issues/88) | Company deployment guide (P3) — [COMPANY_DEPLOYMENT_GUIDE.md](COMPANY_DEPLOYMENT_GUIDE.md) |
+| Issue                                                   | Title                                                                                                     |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [#89](https://github.com/blakeox/extractflow/issues/89) | Multi-tenant isolation audit checklist (P4 prep) — [TENANT_ISOLATION_AUDIT.md](TENANT_ISOLATION_AUDIT.md) |
+| [#90](https://github.com/blakeox/extractflow/issues/90) | Object storage (P4, optional) — [P4_HOSTED_SAAS.md](P4_HOSTED_SAAS.md)                                    |
+| [#91](https://github.com/blakeox/extractflow/issues/91) | Usage metering + admin console (P4, optional)                                                             |
 
 Contributions: pick an unassigned issue in the earliest open milestone you can help close; comment before large PRs per [CONTRIBUTING.md](../CONTRIBUTING.md).
