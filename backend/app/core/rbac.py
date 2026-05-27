@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from fastapi import Depends, HTTPException
-
-from app.core.auth import AuthContext, resolve_auth_context
-
 
 class Role(StrEnum):
     ADMIN = "admin"
@@ -30,21 +26,3 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.OPERATOR: frozenset({Permission.READ, Permission.RUN_JOBS}),
     Role.ADMIN: frozenset(Permission),
 }
-
-
-def _parse_role(value: str) -> Role:
-    try:
-        return Role(value.lower())
-    except ValueError as exc:
-        raise HTTPException(status_code=403, detail=f"Unknown role: {value}") from exc
-
-
-def require_permission(permission: Permission):
-    def dependency(auth: AuthContext = Depends(resolve_auth_context)) -> AuthContext:
-        role = _parse_role(auth.role)
-        allowed = ROLE_PERMISSIONS[role]
-        if permission not in allowed:
-            raise HTTPException(status_code=403, detail=f"Role '{role.value}' cannot perform this action.")
-        return auth
-
-    return dependency

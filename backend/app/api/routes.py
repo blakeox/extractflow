@@ -413,6 +413,7 @@ def retry_job(
         else template_definition.llm_provider_settings
     )
     validate_job_provider(template_definition, effective_provider)
+    enforce_spreadsheet_external_processing_policy(document, effective_provider)
     retry_failed_job(job, document)
     record_audit_event(
         db,
