@@ -10,6 +10,6 @@ langextract==1.3.0
 docling==2.93.0
 onnxruntime==1.26.0
 presidio-analyzer==2.2.357
-jsonschema==4.25.1
+jsonschema==4.26.0
 python-dateutil==2.9.0.post0
 rapidfuzz==3.14.1
