@@ -9,7 +9,7 @@ pypdfium2==5.8.0
 langextract==1.5.0
 docling==2.93.0
 onnxruntime==1.26.0
-presidio-analyzer==2.2.357
+presidio-analyzer==2.2.359
 jsonschema==4.26.0
 python-dateutil==2.9.0.post0
 rapidfuzz==3.14.5
