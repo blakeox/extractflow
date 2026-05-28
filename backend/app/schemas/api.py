@@ -257,3 +257,23 @@ class OpsMetricsResponse(BaseModel):
     worker_state: str | None = None
     worker_timestamp: str | None = None
     worker_active_job_id: int | None = None
+
+
+class TenantUsageSummaryResponse(BaseModel):
+    tenant_id: str
+    suspended: bool = False
+    suspension_reason: str | None = None
+    documents: int = 0
+    jobs_completed: int = 0
+    results: int = 0
+    exports: int = 0
+    latest_activity_at: datetime | None = None
+
+
+class TenantUsageListResponse(BaseModel):
+    tenants: list[TenantUsageSummaryResponse] = Field(default_factory=list)
+
+
+class TenantSuspensionRequest(BaseModel):
+    suspended: bool
+    reason: str | None = None

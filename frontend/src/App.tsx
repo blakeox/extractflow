@@ -78,12 +78,18 @@ import {
   type DraftLangExtractExample,
 } from "./langextract";
 
-type PageId = "extractions" | "templates" | "settings" | "audit" | "help";
+type PageId =
+  | "extractions"
+  | "templates"
+  | "settings"
+  | "audit"
+  | "admin"
+  | "help";
 
 type NavItem = {
   id: PageId;
   label: string;
-  icon: "extractions" | "templates" | "settings" | "audit" | "help";
+  icon: "extractions" | "templates" | "settings" | "audit" | "admin" | "help";
 };
 
 type TemplateSummary = {
@@ -388,6 +394,17 @@ type AuditEventRecord = {
   created_at: string;
 };
 
+type TenantUsageSummary = {
+  tenant_id: string;
+  suspended: boolean;
+  suspension_reason: string | null;
+  documents: number;
+  jobs_completed: number;
+  results: number;
+  exports: number;
+  latest_activity_at: string | null;
+};
+
 type ExportPolicy = {
   require_review_cleared: boolean;
 };
@@ -436,6 +453,7 @@ const primaryNavigation: NavItem[] = [
 
 const secondaryNavigation: NavItem[] = [
   { id: "audit", label: "Audit", icon: "audit" },
+  { id: "admin", label: "Admin", icon: "admin" },
   { id: "settings", label: "Settings", icon: "settings" },
   { id: "help", label: "Help", icon: "help" },
 ];
@@ -445,6 +463,7 @@ const pageLabels: Record<PageId, string> = {
   templates: "Schemas",
   settings: "Settings",
   audit: "Audit",
+  admin: "Admin",
   help: "Help",
 };
 
@@ -646,6 +665,16 @@ function NavGlyph({ icon }: { icon: NavItem["icon"] }) {
         <svg viewBox="0 0 20 20" aria-hidden="true">
           <path {...common} d="M6 4.5h8M6 8.5h8M6 12.5h5" />
           <rect {...common} x="4" y="3" width="12" height="14" rx="2" />
+        </svg>
+      );
+    case "admin":
+      return (
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle {...common} cx="10" cy="6.2" r="2.6" />
+          <path
+            {...common}
+            d="M4.5 16c.6-2.6 2.8-4.2 5.5-4.2s4.9 1.6 5.5 4.2"
+          />
         </svg>
       );
     case "help":
@@ -1147,6 +1176,8 @@ function TopBar({ activePage }: { activePage: PageId }) {
       "Choose the provider and runtime defaults without polluting the extraction path.",
     audit:
       "Check history when you need it, not when you are trying to extract.",
+    admin:
+      "Track per-tenant usage, suspend tenants when needed, and keep hosted operations contained.",
     help: "Use setup and workflow guidance only when the next step is unclear.",
   };
 
@@ -4836,6 +4867,143 @@ function AuditPage({ onOpenJob }: { onOpenJob: (jobId: number) => void }) {
   );
 }
 
+function AdminPage() {
+  const [tenants, setTenants] = useState<TenantUsageSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyTenant, setBusyTenant] = useState<string | null>(null);
+
+  const loadUsage = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = await readJson<{ tenants: TenantUsageSummary[] }>(
+        "/admin/tenants/usage",
+      );
+      setTenants(payload.tenants);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Could not load tenant usage.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUsage();
+  }, [loadUsage]);
+
+  async function setTenantSuspended(tenantId: string, suspended: boolean) {
+    setBusyTenant(tenantId);
+    setError(null);
+    try {
+      await readJson<TenantUsageSummary>(`/admin/tenants/${tenantId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          suspended,
+          reason: suspended ? "manual suspend from admin console" : null,
+        }),
+      });
+      await loadUsage();
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Could not update tenant status.",
+      );
+    } finally {
+      setBusyTenant(null);
+    }
+  }
+
+  return (
+    <PageStack>
+      <PageIntro>
+        <PageHeader
+          eyebrow="Admin"
+          title="Monitor tenant usage and pause tenant access when needed."
+        />
+      </PageIntro>
+      <TitledSurface
+        as="section"
+        title="Tenant usage"
+        subtitle="Per-tenant document, job, result, and export counts."
+      >
+        {loading ? (
+          <SupportingText as="p" size="sm">
+            Loading tenant usage…
+          </SupportingText>
+        ) : null}
+        {error ? (
+          <SupportingText as="p" size="sm" className="text-[#b42318]">
+            {error}
+          </SupportingText>
+        ) : null}
+        {!loading && !error && tenants.length === 0 ? (
+          <SupportingText as="p" size="sm">
+            No tenant usage data yet.
+          </SupportingText>
+        ) : null}
+        {tenants.length > 0 ? (
+          <div className="overflow-auto rounded-[var(--ds-radius-lg)] border border-subtle bg-panel shadow-sm">
+            <table className="min-w-[860px] w-full border-collapse">
+              <thead>
+                <tr>
+                  <TableHeaderCell>Tenant</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell>Documents</TableHeaderCell>
+                  <TableHeaderCell>Completed jobs</TableHeaderCell>
+                  <TableHeaderCell>Results</TableHeaderCell>
+                  <TableHeaderCell>Exports</TableHeaderCell>
+                  <TableHeaderCell>Last activity</TableHeaderCell>
+                  <TableHeaderCell>Action</TableHeaderCell>
+                </tr>
+              </thead>
+              <tbody>
+                {tenants.map((tenant) => (
+                  <tr key={tenant.tenant_id}>
+                    <TableDataCell>{tenant.tenant_id}</TableDataCell>
+                    <TableDataCell>
+                      {tenant.suspended ? "Suspended" : "Active"}
+                    </TableDataCell>
+                    <TableDataCell>{tenant.documents}</TableDataCell>
+                    <TableDataCell>{tenant.jobs_completed}</TableDataCell>
+                    <TableDataCell>{tenant.results}</TableDataCell>
+                    <TableDataCell>{tenant.exports}</TableDataCell>
+                    <TableDataCell>
+                      {tenant.latest_activity_at
+                        ? formatAuditTimestamp(tenant.latest_activity_at)
+                        : "—"}
+                    </TableDataCell>
+                    <TableDataCell>
+                      <Button
+                        variant={tenant.suspended ? "secondary" : "tertiary"}
+                        onClick={() =>
+                          setTenantSuspended(
+                            tenant.tenant_id,
+                            !tenant.suspended,
+                          )
+                        }
+                        disabled={busyTenant === tenant.tenant_id}
+                      >
+                        {tenant.suspended ? "Unsuspend" : "Suspend"}
+                      </Button>
+                    </TableDataCell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </TitledSurface>
+    </PageStack>
+  );
+}
+
 function HelpPage({
   onOpenExtractions,
   onOpenSchemas,
@@ -6640,6 +6808,7 @@ export function App() {
               }}
             />
           ) : null}
+          {activePage === "admin" ? <AdminPage /> : null}
           {activePage === "help" ? (
             <HelpPage
               onOpenExtractions={() => setActivePage("extractions")}

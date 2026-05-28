@@ -9,7 +9,7 @@ These capabilities are **not required** for company production on a single org i
 | Issue                                                   | Capability                     | Notes                                                                                                               |
 | ------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | [#90](https://github.com/blakeox/extractflow/issues/90) | Object storage (S3-compatible) | `STORAGE_BACKEND=s3` for uploads/exports — see [OBJECT_STORAGE.md](OBJECT_STORAGE.md); parsed artifacts still local |
-| [#91](https://github.com/blakeox/extractflow/issues/91) | Usage metering + admin console | Per-tenant quotas, billing hooks, suspend tenant                                                                    |
+| [#91](https://github.com/blakeox/extractflow/issues/91) | Usage metering + admin console | Admin API + UI for per-tenant usage and suspension shipped; quotas/billing integration can be layered on top        |
 
 ## Prerequisites already on `dev`
 
@@ -21,5 +21,5 @@ These capabilities are **not required** for company production on a single org i
 
 1. ~~Storage abstraction over uploads/exports~~ (parsed artifacts still on disk)
 2. Isolation audit sign-off + external pen-test
-3. Metering hooks on job completion and export
-4. Admin console for tenant lifecycle
+3. ~~Metering hooks on job completion and export~~
+4. ~~Admin console for tenant lifecycle~~

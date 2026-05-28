@@ -5,7 +5,8 @@ import json
 import pytest
 from app.core.config import settings
 from app.db.database import SessionLocal
-from app.models import Document, Template, TemplateVersion
+from app.models import Document, Setting, Template, TemplateVersion
+from extraction_core.runtime import DeploymentMode
 from fastapi.testclient import TestClient
 
 from tests.support.sample_data import build_template_definition
@@ -67,6 +68,46 @@ def test_admin_can_read_templates_when_auth_required(authed_client: TestClient) 
         headers={"Authorization": "Bearer admin-token"},
     )
     assert response.status_code == 200
+
+
+def test_admin_can_read_tenant_usage_console(authed_client: TestClient) -> None:
+    response = authed_client.get(
+        "/api/admin/tenants/usage",
+        headers={"Authorization": "Bearer admin-token"},
+    )
+    assert response.status_code == 200
+
+
+def test_viewer_cannot_read_tenant_usage_console(authed_client: TestClient) -> None:
+    response = authed_client.get(
+        "/api/admin/tenants/usage",
+        headers={"Authorization": "Bearer viewer-token"},
+    )
+    assert response.status_code == 403
+
+
+def test_suspended_tenant_is_blocked_for_non_admin_routes(
+    authed_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "deployment_mode", DeploymentMode.SAAS_MULTI_TENANT)
+    monkeypatch.setattr(settings, "trust_tenant_header", True)
+
+    with SessionLocal() as db:
+        db.add(
+            Setting(
+                key="tenant:acme:admin.controls",
+                value={"suspended": True, "reason": "billing"},
+            )
+        )
+        db.commit()
+
+    response = authed_client.get(
+        "/api/templates",
+        headers={"Authorization": "Bearer admin-token", "X-Tenant-ID": "acme"},
+    )
+    assert response.status_code == 403
+    assert "suspended" in response.json()["detail"]
 
 
 def test_spreadsheet_external_job_blocked_at_api(
