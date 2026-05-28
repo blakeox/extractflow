@@ -13,6 +13,8 @@ def resolve_api_permission(method: str, path: str, *, api_prefix: str) -> Permis
         return None
     if relative == "/dev/status":
         return Permission.DEV_STATUS
+    if relative.startswith("/admin/"):
+        return Permission.MANAGE_SETTINGS
     if method == "GET" and relative.endswith("/download") and relative.startswith("/exports/"):
         return Permission.EXPORT
     if method == "POST" and "/review" in relative:

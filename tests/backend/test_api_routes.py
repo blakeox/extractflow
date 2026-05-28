@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import httpx
+from app.api import routes as api_routes
 from app.core.tenant import build_tenant_setting_key, get_current_tenant_id
 from app.db.database import SessionLocal
 from app.main import app
@@ -498,6 +499,64 @@ def test_ops_metrics_returns_queue_and_status_counts(client) -> None:
     assert payload["jobs_by_status"]["running"] == 1
     assert payload["worker_state"] == "running"
     assert payload["worker_active_job_id"] == running_job_id
+
+
+def test_admin_tenant_usage_and_suspend_flow(client) -> None:
+    with SessionLocal() as db:
+        template = Template(
+            tenant_id="acme",
+            name="Acme Template",
+            description="Acme extraction template",
+            document_type="invoice",
+        )
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(
+            tenant_id="acme",
+            template_id=template.id,
+            version="1.0.0",
+            definition=build_template_definition(),
+        )
+        db.add(version)
+        db.flush()
+        document = Document(
+            tenant_id="acme",
+            original_filename="acme-invoice.txt",
+            content_type="text/plain",
+            stored_path="uploads/acme-invoice.txt",
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(
+            tenant_id="acme",
+            document_id=document.id,
+            template_version_id=version.id,
+            status="completed",
+        )
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(tenant_id="acme", job_id=job.id, result_json={}, review_status="pending")
+        db.add(result)
+        db.flush()
+        db.add(ExportRecord(tenant_id="acme", result_id=result.id, export_format="json", file_path="result-1.json"))
+        db.commit()
+
+    response = client.get("/api/admin/tenants/usage")
+    assert response.status_code == 200
+    tenants = response.json()["tenants"]
+    acme = next(row for row in tenants if row["tenant_id"] == "acme")
+    assert acme["documents"] == 1
+    assert acme["jobs_completed"] == 1
+    assert acme["exports"] == 1
+
+    suspend_response = client.put(
+        "/api/admin/tenants/acme/status",
+        json={"suspended": True, "reason": "billing arrears"},
+    )
+    assert suspend_response.status_code == 200
+    assert suspend_response.json()["suspended"] is True
+    assert suspend_response.json()["suspension_reason"] == "billing arrears"
 
 
 def test_job_creation_persists_provider_override(client) -> None:
@@ -1768,6 +1827,56 @@ def test_export_download_route_rejects_paths_outside_exports_dir(client, tmp_pat
 
     assert response.status_code == 400
     assert "Invalid storage reference" in response.json()["detail"]
+
+
+def test_export_download_route_uses_original_reference_filename(client, monkeypatch, tmp_path) -> None:
+    reference = "result-42-20260101T120000.json"
+    cached_path = tmp_path / "extractflow__exports__result-42-20260101T120000.json"
+    cached_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(api_routes, "resolve_export_download_path", lambda _: cached_path)
+
+    with SessionLocal() as db:
+        template = Template(name="Export Filename Test", description="", document_type="invoice")
+        db.add(template)
+        db.flush()
+        version = TemplateVersion(
+            template_id=template.id,
+            version="1.0.0",
+            definition=build_template_definition(),
+        )
+        db.add(version)
+        db.flush()
+        document = Document(
+            original_filename="invoice.txt",
+            content_type="text/plain",
+            stored_path="uploads/invoice.txt",
+            status="completed",
+        )
+        db.add(document)
+        db.flush()
+        job = ExtractionJob(
+            document_id=document.id,
+            template_version_id=version.id,
+            status="completed",
+        )
+        db.add(job)
+        db.flush()
+        result = ExtractionResult(
+            job_id=job.id,
+            result_json={"extracted_fields": [], "calculated_fields": []},
+        )
+        db.add(result)
+        db.flush()
+        record = ExportRecord(result_id=result.id, export_format="json", file_path=reference)
+        db.add(record)
+        db.commit()
+        export_id = record.id
+
+    response = client.get(f"/api/exports/{export_id}/download")
+
+    assert response.status_code == 200
+    assert reference in response.headers["content-disposition"]
+    assert cached_path.name not in response.headers["content-disposition"]
 
 
 def test_provider_settings_round_trip(client) -> None:

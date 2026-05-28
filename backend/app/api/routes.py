@@ -50,6 +50,9 @@ from app.schemas.api import (
     TemplateVersionCreateRequest,
     TemplateVersionDiffRequest,
     TemplateVersionResponse,
+    TenantSuspensionRequest,
+    TenantUsageListResponse,
+    TenantUsageSummaryResponse,
 )
 from app.services.audit_service import list_audit_events_page, record_audit_event
 from app.services.external_processing_policy import enforce_spreadsheet_external_processing_policy
@@ -75,10 +78,12 @@ from app.services.result_service import apply_review_edits, export_result
 from app.services.settings_service import get_tenant_bool_setting
 from app.services.storage import (
     build_upload_target,
+    finalize_staged_upload,
     read_managed_document_text,
     resolve_export_download_path,
 )
 from app.services.template_service import create_template, create_template_version
+from app.services.tenant_admin_service import list_tenant_usage, set_tenant_suspension
 
 router = APIRouter()
 
@@ -105,6 +110,34 @@ def dev_status(db: Session = Depends(get_db), tenant_id: str = Depends(get_curre
 @router.get("/ops/metrics", response_model=OpsMetricsResponse)
 def ops_metrics(db: Session = Depends(get_db), tenant_id: str = Depends(get_current_tenant_id)):
     return OpsMetricsResponse.model_validate(build_ops_metrics(db, tenant_id=tenant_id))
+
+
+@router.get("/admin/tenants/usage", response_model=TenantUsageListResponse)
+def list_tenant_usage_endpoint(db: Session = Depends(get_db)):
+    tenants = [TenantUsageSummaryResponse.model_validate(item) for item in list_tenant_usage(db)]
+    return TenantUsageListResponse(tenants=tenants)
+
+
+@router.put("/admin/tenants/{target_tenant_id}/status", response_model=TenantUsageSummaryResponse)
+def set_tenant_status_endpoint(
+    target_tenant_id: str,
+    payload: TenantSuspensionRequest,
+    db: Session = Depends(get_db),
+):
+    controls = set_tenant_suspension(
+        db,
+        target_tenant_id,
+        suspended=payload.suspended,
+        reason=payload.reason,
+    )
+    for row in list_tenant_usage(db):
+        if row["tenant_id"] == target_tenant_id:
+            return TenantUsageSummaryResponse.model_validate(row)
+    return TenantUsageSummaryResponse(
+        tenant_id=target_tenant_id,
+        suspended=bool(controls.get("suspended", False)),
+        suspension_reason=controls.get("reason"),
+    )
 
 
 @router.get("/templates", response_model=list[TemplateResponse])
@@ -251,6 +284,7 @@ def upload_document(
     reference, target = build_upload_target(original_filename)
     with target.open("wb") as handle:
         shutil.copyfileobj(file.file, handle)
+    finalize_staged_upload(reference, target)
     document = Document(
         tenant_id=tenant_id,
         original_filename=original_filename,
@@ -532,7 +566,8 @@ def download_export(export_id: int, db: Session = Depends(get_db), tenant_id: st
         download_path = resolve_export_download_path(record.file_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return FileResponse(download_path, filename=download_path.name)
+    download_filename = Path(record.file_path).name or download_path.name
+    return FileResponse(download_path, filename=download_filename)
 
 
 @router.get("/exports", response_model=list[ExportResponse])

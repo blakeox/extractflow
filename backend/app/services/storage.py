@@ -11,6 +11,7 @@ from extraction_core.storage_refs import build_storage_reference, resolve_storag
 from openpyxl import Workbook
 
 from app.core.config import settings
+from app.services.blob_store_service import get_blob_store
 
 ExportFormat = Literal["json", "csv", "excel"]
 ALLOWED_EXPORT_FORMATS: frozenset[ExportFormat] = frozenset({"json", "csv", "excel"})
@@ -28,13 +29,29 @@ def parse_export_format(export_format: str) -> ExportFormat:
     return normalized
 
 
+def _uses_remote_blob_store() -> bool:
+    return settings.storage_backend.strip().lower() == "s3"
+
+
 def build_upload_target(original_filename: str) -> tuple[str, Path]:
     data_root = Path(settings.data_dir)
     uploads_root = Path(settings.uploads_dir).expanduser().resolve()
     upload_prefix = uploads_root.relative_to(data_root.expanduser().resolve())
     safe_name = Path(original_filename).name
     reference = str(upload_prefix / f"{uuid4().hex}-{safe_name}")
+    if _uses_remote_blob_store():
+        staging_root = data_root / ".cache" / "upload-staging"
+        staging_root.mkdir(parents=True, exist_ok=True)
+        return reference, staging_root / f"{uuid4().hex}-{safe_name}"
     return reference, resolve_storage_path(reference, root=data_root)
+
+
+def finalize_staged_upload(reference: str, staged_path: Path) -> None:
+    if not _uses_remote_blob_store():
+        return
+    payload = staged_path.read_bytes()
+    get_blob_store().write_bytes(reference, payload, root=Path(settings.data_dir))
+    staged_path.unlink(missing_ok=True)
 
 
 def build_export_reference(result_id: int, export_format: ExportFormat, timestamp: str) -> str:
@@ -59,7 +76,13 @@ def write_result_export_file(
     export_format: ExportFormat,
     summary: ExtractionValidationSummary,
 ) -> str:
-    path = resolve_export_download_path(reference)
+    exports_root = Path(settings.exports_dir)
+    if _uses_remote_blob_store():
+        staging_root = Path(settings.data_dir) / ".cache" / "export-staging"
+        staging_root.mkdir(parents=True, exist_ok=True)
+        path = staging_root / Path(reference).name
+    else:
+        path = resolve_export_download_path(reference)
 
     if export_format == "json":
         path.write_text(json.dumps(summary.model_dump(mode="json"), indent=2), encoding="utf-8")
@@ -121,6 +144,11 @@ def write_result_export_file(
             )
         workbook.save(path)
 
+    if _uses_remote_blob_store():
+        payload = path.read_bytes()
+        get_blob_store().write_bytes(reference, payload, root=exports_root)
+        path.unlink(missing_ok=True)
+
     return reference
 
 
@@ -134,7 +162,7 @@ def resolve_document_storage_path(file_path: str) -> Path:
 
 def resolve_managed_path(candidate: str | Path, *, root: Path) -> Path:
     reference = candidate.as_posix() if isinstance(candidate, Path) else candidate
-    return resolve_storage_path(reference, root=root)
+    return get_blob_store().materialize(reference, root=root)
 
 
 def build_document_storage_reference(file_path: str | Path) -> str:
@@ -142,11 +170,13 @@ def build_document_storage_reference(file_path: str | Path) -> str:
 
 
 def read_managed_document_text(reference: str) -> str | None:
+    data_root = Path(settings.data_dir)
+    store = get_blob_store()
     try:
-        path = resolve_document_storage_path(reference)
+        if not store.exists(reference, root=data_root):
+            return None
+        path = store.materialize(reference, root=data_root)
     except ValueError:
-        return None
-    if not path.exists():
         return None
     try:
         content = path.read_text(encoding="utf-8")

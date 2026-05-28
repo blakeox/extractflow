@@ -19,7 +19,9 @@ from app.core.auth import resolve_auth_context
 from app.core.config import settings
 from app.core.rbac import ROLE_PERMISSIONS, Role
 from app.core.route_permissions import resolve_api_permission
+from app.core.tenant import current_tenant_id_dependency
 from app.db.database import Base, SessionLocal, engine
+from app.services.tenant_admin_service import is_tenant_suspended
 
 Base.metadata.create_all(bind=engine)
 ensure_extraction_job_runtime_columns(engine)
@@ -53,6 +55,10 @@ def _is_public_path(path: str) -> bool:
         return True
     api_health = f"{settings.api_prefix.rstrip('/')}/health"
     return path == api_health
+
+
+def _is_admin_route(path: str) -> bool:
+    return path.startswith(f"{settings.api_prefix.rstrip('/')}/admin/")
 
 
 @app.middleware("http")
@@ -95,6 +101,24 @@ async def authentication_and_rbac_middleware(request: Request, call_next):
                 content={"detail": f"Role '{role.value}' cannot perform this action."},
                 headers={"X-Request-ID": request_id} if request_id else None,
             )
+    if not _is_admin_route(request.url.path):
+        try:
+            tenant_id = current_tenant_id_dependency(request.headers.get("X-Tenant-ID"))
+        except HTTPException as exc:
+            request_id = getattr(request.state, "request_id", None)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers={"X-Request-ID": request_id} if request_id else None,
+            )
+        with SessionLocal() as db:
+            if is_tenant_suspended(db, tenant_id):
+                request_id = getattr(request.state, "request_id", None)
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": f"Tenant '{tenant_id}' is suspended."},
+                    headers={"X-Request-ID": request_id} if request_id else None,
+                )
 
     request.state.auth_actor = auth.actor
     request.state.auth_role = auth.role

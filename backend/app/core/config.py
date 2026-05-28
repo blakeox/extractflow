@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     default_azure_openai_api_version: str = "2024-10-21"
     default_azure_openai_deployment: str = "gpt-4.1-mini"
     custom_provider_probe_max_age_hours: int = Field(default=24, ge=1, le=168)
+    storage_backend: str = "local"
+    s3_bucket: str | None = None
+    s3_prefix: str = "extractflow"
+    s3_endpoint_url: str | None = None
+    s3_region: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -135,6 +140,12 @@ class Settings(BaseSettings):
             )
         if self.require_authentication and not self.auth_bearer_tokens_json:
             raise ValueError("AUTH_BEARER_TOKENS_JSON is required when REQUIRE_AUTHENTICATION=true.")
+        backend = self.storage_backend.strip().lower()
+        if backend not in {"local", "s3"}:
+            raise ValueError("STORAGE_BACKEND must be 'local' or 's3'.")
+        self.storage_backend = backend
+        if backend == "s3" and not self.s3_bucket:
+            raise ValueError("S3_BUCKET is required when STORAGE_BACKEND=s3.")
         return self
 
     def runtime_directories(self) -> dict[str, Path]:

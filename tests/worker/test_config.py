@@ -80,3 +80,9 @@ def test_worker_saas_settings_require_authentication(tmp_path) -> None:
 def test_worker_settings_reject_invalid_current_tenant_id(tmp_path) -> None:
     with pytest.raises(ValidationError, match="CURRENT_TENANT_ID"):
         WorkerSettings(**build_worker_settings(tmp_path, current_tenant_id="bad tenant"))
+
+
+def test_worker_settings_normalize_storage_backend_value(tmp_path) -> None:
+    settings = WorkerSettings(**build_worker_settings(tmp_path, storage_backend=" S3 ", s3_bucket="artifacts"))
+
+    assert settings.storage_backend == "s3"

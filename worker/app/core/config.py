@@ -27,6 +27,11 @@ class WorkerSettings(BaseSettings):
     docling_prewarm: bool = True
     docling_pdf_ocr_retry: bool = True
     docling_image_ocr: bool = True
+    storage_backend: str = "local"
+    s3_bucket: str | None = None
+    s3_prefix: str = "extractflow"
+    s3_endpoint_url: str | None = None
+    s3_region: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -51,6 +56,12 @@ class WorkerSettings(BaseSettings):
             raise ValueError("WORKER_STATUS_PATH must stay inside DATA_DIR.")
         if self.deployment_mode == DeploymentMode.SAAS_MULTI_TENANT and not self.require_authentication:
             raise ValueError("REQUIRE_AUTHENTICATION must be true for saas_multi_tenant deployments.")
+        backend = self.storage_backend.strip().lower()
+        if backend not in {"local", "s3"}:
+            raise ValueError("STORAGE_BACKEND must be 'local' or 's3'.")
+        self.storage_backend = backend
+        if backend == "s3" and not self.s3_bucket:
+            raise ValueError("S3_BUCKET is required when STORAGE_BACKEND=s3.")
         return self
 
     def ensure_paths(self) -> None:
