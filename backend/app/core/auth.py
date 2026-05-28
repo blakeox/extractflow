@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -65,6 +64,3 @@ def resolve_auth_context(
     request.state.auth_actor = auth.actor
     request.state.auth_role = auth.role
     return auth
-
-
-Authenticated = Annotated[AuthContext, Depends(resolve_auth_context)]

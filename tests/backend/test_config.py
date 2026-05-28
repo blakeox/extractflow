@@ -100,3 +100,13 @@ def test_settings_require_auth_for_trusted_tenant_header(tmp_path) -> None:
 def test_settings_require_bearer_tokens_when_authentication_enabled(tmp_path) -> None:
     with pytest.raises(ValidationError, match="AUTH_BEARER_TOKENS_JSON is required"):
         Settings(**build_backend_settings(tmp_path, require_authentication=True))
+
+
+def test_settings_reject_auth_tokens_missing_actor(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="AUTH_BEARER_TOKENS_JSON actor must be a non-empty string"):
+        Settings(
+            **build_backend_settings(
+                tmp_path,
+                auth_bearer_tokens_json='{"token":{"role":"admin"}}',
+            )
+        )
