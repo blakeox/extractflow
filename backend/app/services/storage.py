@@ -169,8 +169,24 @@ def build_document_storage_reference(file_path: str | Path) -> str:
     return build_storage_reference(file_path, root=Path(settings.data_dir))
 
 
+def _read_text_file(path: Path) -> str | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return content if content.strip() else None
+
+
 def read_managed_document_text(reference: str) -> str | None:
     data_root = Path(settings.data_dir)
+    try:
+        local_path = resolve_storage_path(reference, root=data_root)
+    except ValueError:
+        return None
+    if local_path.exists():
+        local_content = _read_text_file(local_path)
+        if local_content is not None:
+            return local_content
     store = get_blob_store()
     try:
         if not store.exists(reference, root=data_root):
@@ -178,8 +194,4 @@ def read_managed_document_text(reference: str) -> str | None:
         path = store.materialize(reference, root=data_root)
     except ValueError:
         return None
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    return content if content.strip() else None
+    return _read_text_file(path)

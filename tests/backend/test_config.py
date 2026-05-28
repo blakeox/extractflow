@@ -121,3 +121,8 @@ def test_settings_accept_s3_backend_with_bucket(tmp_path) -> None:
     settings = Settings(**build_backend_settings(tmp_path, storage_backend="s3", s3_bucket="artifacts"))
     assert settings.storage_backend == "s3"
     assert settings.s3_bucket == "artifacts"
+
+
+def test_settings_normalize_storage_backend_casing(tmp_path) -> None:
+    settings = Settings(**build_backend_settings(tmp_path, storage_backend=" S3 ", s3_bucket="artifacts"))
+    assert settings.storage_backend == "s3"
