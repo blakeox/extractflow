@@ -87,12 +87,19 @@ Workers now use PostgreSQL queue claims with `FOR UPDATE SKIP LOCKED`, which all
 
 ## 6) Auth and access model
 
-Current project status:
+When `REQUIRE_AUTHENTICATION=true`, configure bearer tokens:
 
-- authentication + RBAC are tracked as roadmap items ([#82](https://github.com/blakeox/extractflow/issues/82), [#83](https://github.com/blakeox/extractflow/issues/83))
-- for company deployments, place ExtractFlow behind your existing identity-aware gateway or SSO proxy until native auth is complete
+```bash
+AUTH_BEARER_TOKENS_JSON='{"ops-token":{"actor":"ops-user","role":"operator"},"admin-token":{"actor":"admin","role":"admin"}}'
+```
 
-Minimum recommendation now:
+Roles: `admin`, `operator`, `reviewer`, `viewer`. Unauthenticated API calls receive `401`; forbidden actions receive `403`.
+
+For OIDC/SAML, terminate auth at your reverse proxy and forward `Authorization: Bearer …` to the API (issue tokens out-of-band or via your IdP bridge).
+
+Multi-tenant SaaS mode (`DEPLOYMENT_MODE=saas_multi_tenant`) additionally requires trusted `X-Tenant-ID` headers — see [TENANT_ISOLATION_AUDIT.md](TENANT_ISOLATION_AUDIT.md).
+
+Minimum recommendation:
 
 - restrict network access to trusted internal users
 - require TLS and authenticated ingress at proxy/LB layer

@@ -92,5 +92,11 @@ def test_settings_require_auth_for_trusted_tenant_header(tmp_path) -> None:
                 deployment_mode="hosted_single_tenant",
                 require_authentication=True,
                 trust_tenant_header=True,
+                auth_bearer_tokens_json='{"token":{"actor":"ops","role":"admin"}}',
             )
         )
+
+
+def test_settings_require_bearer_tokens_when_authentication_enabled(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="AUTH_BEARER_TOKENS_JSON is required"):
+        Settings(**build_backend_settings(tmp_path, require_authentication=True))
