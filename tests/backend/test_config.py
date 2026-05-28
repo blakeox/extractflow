@@ -110,3 +110,14 @@ def test_settings_reject_auth_tokens_missing_actor(tmp_path) -> None:
                 auth_bearer_tokens_json='{"token":{"role":"admin"}}',
             )
         )
+
+
+def test_settings_require_s3_bucket_for_s3_backend(tmp_path) -> None:
+    with pytest.raises(ValidationError, match="S3_BUCKET is required"):
+        Settings(**build_backend_settings(tmp_path, storage_backend="s3"))
+
+
+def test_settings_accept_s3_backend_with_bucket(tmp_path) -> None:
+    settings = Settings(**build_backend_settings(tmp_path, storage_backend="s3", s3_bucket="artifacts"))
+    assert settings.storage_backend == "s3"
+    assert settings.s3_bucket == "artifacts"

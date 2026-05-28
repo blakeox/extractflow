@@ -12,12 +12,12 @@ from extraction_core.job_progress import JOB_STAGE_COMPLETED, JOB_STAGE_FAILED, 
 from extraction_core.observability import configure_logger, log_event
 from extraction_core.runtime import is_postgres_url
 from extraction_core.runtime_schema import ensure_extraction_job_runtime_columns
-from extraction_core.storage_refs import resolve_storage_path
 from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.core.database import SessionLocal, engine
 from app.models import AuditEvent, Document, ExtractionJob, ExtractionResult, TemplateVersion
+from app.services.blob_store_service import get_blob_store
 from app.services.document_text import parse_and_persist_document_text
 from app.services.executor import execute_extraction
 from app.services.job_progress import build_progress_reporter, update_job_progress
@@ -124,7 +124,10 @@ def process_once() -> None:
                     "attempt_count": job.attempt_count,
                 },
             )
-            document_path = resolve_storage_path(document.stored_path, root=settings.data_dir)
+            document_path = get_blob_store().materialize(
+                document.stored_path,
+                root=Path(settings.data_dir),
+            )
             parsed_text_path, parsed_text = parse_and_persist_document_text(
                 document.id,
                 str(document_path),

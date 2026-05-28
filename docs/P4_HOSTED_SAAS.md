@@ -6,10 +6,10 @@ ExtractFlow’s primary target is **team self-host**. P4 tracks a optional manag
 
 These capabilities are **not required** for company production on a single org install. Implement only if pursuing hosted SaaS:
 
-| Issue                                                   | Capability                     | Notes                                                                                          |
-| ------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------- |
-| [#90](https://github.com/blakeox/extractflow/issues/90) | Object storage (S3-compatible) | Local volume storage remains default; add a blob adapter when scaling beyond single-node disks |
-| [#91](https://github.com/blakeox/extractflow/issues/91) | Usage metering + admin console | Per-tenant quotas, billing hooks, suspend tenant                                               |
+| Issue                                                   | Capability                     | Notes                                                                                                               |
+| ------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| [#90](https://github.com/blakeox/extractflow/issues/90) | Object storage (S3-compatible) | `STORAGE_BACKEND=s3` for uploads/exports — see [OBJECT_STORAGE.md](OBJECT_STORAGE.md); parsed artifacts still local |
+| [#91](https://github.com/blakeox/extractflow/issues/91) | Usage metering + admin console | Per-tenant quotas, billing hooks, suspend tenant                                                                    |
 
 ## Prerequisites already on `dev`
 
@@ -19,7 +19,7 @@ These capabilities are **not required** for company production on a single org i
 
 ## Suggested implementation order (when pursued)
 
-1. Storage abstraction over uploads/exports/parsed artifacts
+1. ~~Storage abstraction over uploads/exports~~ (parsed artifacts still on disk)
 2. Isolation audit sign-off + external pen-test
 3. Metering hooks on job completion and export
 4. Admin console for tenant lifecycle

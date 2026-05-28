@@ -75,6 +75,7 @@ from app.services.result_service import apply_review_edits, export_result
 from app.services.settings_service import get_tenant_bool_setting
 from app.services.storage import (
     build_upload_target,
+    finalize_staged_upload,
     read_managed_document_text,
     resolve_export_download_path,
 )
@@ -251,6 +252,7 @@ def upload_document(
     reference, target = build_upload_target(original_filename)
     with target.open("wb") as handle:
         shutil.copyfileobj(file.file, handle)
+    finalize_staged_upload(reference, target)
     document = Document(
         tenant_id=tenant_id,
         original_filename=original_filename,
