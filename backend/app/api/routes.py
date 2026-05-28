@@ -566,7 +566,8 @@ def download_export(export_id: int, db: Session = Depends(get_db), tenant_id: st
         download_path = resolve_export_download_path(record.file_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return FileResponse(download_path, filename=download_path.name)
+    download_filename = Path(record.file_path).name or download_path.name
+    return FileResponse(download_path, filename=download_filename)
 
 
 @router.get("/exports", response_model=list[ExportResponse])

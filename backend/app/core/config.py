@@ -143,6 +143,7 @@ class Settings(BaseSettings):
         backend = self.storage_backend.strip().lower()
         if backend not in {"local", "s3"}:
             raise ValueError("STORAGE_BACKEND must be 'local' or 's3'.")
+        self.storage_backend = backend
         if backend == "s3" and not self.s3_bucket:
             raise ValueError("S3_BUCKET is required when STORAGE_BACKEND=s3.")
         return self
