@@ -9,4 +9,4 @@ httpx==0.28.1
 psycopg[binary]==3.3.4
 jsonschema==4.26.0
 python-dateutil==2.9.0.post0
-boto3==1.42.28
+boto3==1.43.26
