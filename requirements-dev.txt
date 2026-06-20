@@ -1,6 +1,6 @@
 -r backend/requirements.txt
 -r worker/requirements.txt
-ruff==0.15.14
+ruff==0.15.18
 pytest==9.0.3
 pytest-cov==6.0.0
 pyright==1.1.409
