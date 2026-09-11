@@ -5,9 +5,9 @@ httpx==0.28.1
 pandas==3.0.3
 openpyxl==3.1.5
 pillow==12.3.0
-pypdfium2==5.8.0
+pypdfium2==5.13.0
 langextract==1.5.0
-docling==2.97.0
+docling==2.126.0
 onnxruntime==1.26.0
 presidio-analyzer==2.2.359
 jsonschema==4.26.0
