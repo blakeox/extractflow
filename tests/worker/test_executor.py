@@ -902,7 +902,8 @@ def test_parse_image_with_real_docling_ocr_dependency(monkeypatch, tmp_path) -> 
     image_path = tmp_path / "invoice.png"
     image = Image.new("RGB", (1200, 400), "white")
     draw = ImageDraw.Draw(image)
-    draw.text((40, 60), "Invoice\nVendor Name Acme Corp\nTotal 1200", fill="black")
+    for index, line in enumerate(["Invoice", "Vendor Name Acme Corp", "Total 1200"]):
+        draw.text((40, 60 + index * 80), line, fill="black")
     image.save(image_path)
 
     monkeypatch.setattr(parser_service.settings, "docling_enabled", True)
