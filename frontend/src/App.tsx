@@ -79,12 +79,7 @@ import {
 } from "./langextract";
 
 type PageId =
-  | "extractions"
-  | "templates"
-  | "settings"
-  | "audit"
-  | "admin"
-  | "help";
+  "extractions" | "templates" | "settings" | "audit" | "admin" | "help";
 
 type NavItem = {
   id: PageId;
