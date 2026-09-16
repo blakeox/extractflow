@@ -2,7 +2,7 @@ sqlalchemy==2.0.52
 pydantic==2.13.4
 pydantic-settings==2.14.2
 httpx==0.28.1
-pandas==3.0.3
+pandas==3.0.5
 openpyxl==3.1.5
 pillow==12.3.0
 pypdfium2==5.13.0
