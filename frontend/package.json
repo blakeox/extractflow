@@ -18,7 +18,7 @@
     "test:e2e": "env -u FORCE_COLOR -u NO_COLOR -u NODE_DISABLE_COLORS playwright test"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/api": "^2.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "react": "^19.2.6",
