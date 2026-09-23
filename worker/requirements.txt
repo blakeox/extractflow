@@ -6,7 +6,7 @@ pandas==3.0.5
 openpyxl==3.1.5
 pillow==12.3.0
 pypdfium2==5.13.0
-langextract==1.6.0
+langextract==1.7.0
 docling==2.126.0
 onnxruntime==1.30.0
 presidio-analyzer==2.2.364
