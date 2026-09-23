@@ -12,5 +12,5 @@ onnxruntime==1.30.0
 presidio-analyzer==2.2.364
 jsonschema==4.26.0
 python-dateutil==2.9.0.post0
-rapidfuzz==3.14.5
+rapidfuzz==3.14.6
 boto3==1.43.93
