@@ -43,6 +43,6 @@
     "@tauri-apps/cli": "^2.12.0",
     "eslint-config-prettier": "^10.1.8",
     "lefthook": "^2.1.14",
-    "prettier": "^3.9.6"
+    "prettier": "^3.9.9"
   }
 }
