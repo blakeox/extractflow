@@ -5,7 +5,7 @@ httpx==0.28.1
 pandas==3.0.6
 openpyxl==3.1.5
 pillow==12.3.0
-pypdfium2==5.13.0
+pypdfium2==5.14.0
 langextract==1.7.0
 docling==2.130.0
 onnxruntime==1.30.0
